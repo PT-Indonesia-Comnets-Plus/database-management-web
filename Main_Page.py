@@ -5,14 +5,31 @@ import base64
 from dotenv import load_dotenv
 from utils.firebase_config import fs
 from utils.account import login, logout, send_verification_email
-from utils.cookies import save_user_to_cookie, clear_user_cookie, load_cookie_to_session
+from utils.cookies import save_user_to_cookie, load_cookie_to_session
 from firebase_admin import auth
 import os
 
 # Set page configuration
 logo_path = os.path.join("image", "icon.png")
 logo = Image.open(logo_path)
-st.set_page_config(page_title="Welcome to Iconnet Dashboard", page_icon=logo)
+try:
+    st.set_page_config(
+        page_title="Welcome to Iconnet Dashboard", page_icon=logo)
+except st.errors.StreamlitSetPageConfigMustBeFirstCommandError:
+    pass
+
+# Load data from cookies
+username, useremail, role, signout = load_cookie_to_session()
+if 'username' not in st.session_state:
+    st.session_state.username = username
+if 'useremail' not in st.session_state:
+    st.session_state.useremail = useremail
+if 'role' not in st.session_state:
+    st.session_state.role = role
+if 'signout' not in st.session_state:
+    st.session_state.signout = signout
+
+load_dotenv()
 
 # Load sidebar logo
 sidebar_logo_path = "image/logo_iconplus.png"
@@ -23,8 +40,6 @@ st.sidebar.image(sidebar_logo, caption="")
 if os.path.exists('style.css'):
     with open('style.css') as f:
         st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
-
-load_dotenv()
 
 
 def image_to_base64(image: Image.Image) -> str:
@@ -51,10 +66,7 @@ if os.path.exists(logo_home_path):
 st.markdown("<h1 style='text-align: center;'>Welcome!</h1>",
             unsafe_allow_html=True)
 
-# Load data from cookies
-username, useremail, role, signout = load_cookie_to_session()
-
-if signout:
+if st.session_state.signout:
     choice = st.selectbox("Login/Signup", ["Login", "Sign up"])
 
     if choice == "Login":
@@ -62,28 +74,8 @@ if signout:
         password = st.text_input(
             "Password", type="password", key="login_password")
 
-        if st.button("Login"):
-            try:
-                user = auth.get_user_by_email(email)
-                if not user.email_verified:
-                    st.error("Email not verified. Please check your inbox.")
-                else:
-                    login(email, password)
-                    user_data = fs.collection("users").document(
-                        user.uid).get().to_dict()
-                    if user_data["status"] != "Verified":
-                        st.error("Your account is not verified by admin yet.")
-                    else:
-                        username = user_data["name"]
-                        useremail = email
-                        role = user_data["role"]
-                        signout = False
-
-                        # Save to cookies
-                        save_user_to_cookie(username, useremail, role)
-                        st.success("Login successful!")
-            except Exception as e:
-                st.error(f"Error logging in: {e}")
+        st.button("Login", on_click=login(
+            email, password))
     else:
         username = st.text_input("Username")
         email = st.text_input("Email Address", key="signup_email")
@@ -114,9 +106,19 @@ else:
         f"<h2 style='text-align: left;'>Welcome back, {st.session_state.username}!</h2>", unsafe_allow_html=True)
     st.text(f"Email: {st.session_state.useremail}")
     st.text(f"Role: {st.session_state.role}")
-    if st.session_state.role == "Penjual":
-        st.text(f"Store Name: {st.session_state.store_name}")
-    if st.button("Sign Out"):
-        st.session_state.signout = True
-        clear_user_cookie()
-        st.success("Signed out successfully!")
+    st.button('Sign Out', on_click=logout)
+
+# Custom CSS to change the color of specific input fields
+st.markdown(
+    """
+    <style>
+    input[data-testid="stTextInput"][aria-label="Email"] {
+        color: white;
+    }
+    input[data-testid="stTextInput"][aria-label="Password"] {
+        color: white;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)

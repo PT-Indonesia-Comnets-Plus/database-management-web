@@ -7,15 +7,16 @@ DB_USER = "postgres"
 DB_PASSWORD = "admin"
 
 
+@st.cache_resource
 def connect_db():
     try:
         conn = psycopg2.connect(
             host=DB_HOST,
-            dbname=DB_NAME,
+            database=DB_NAME,
             user=DB_USER,
             password=DB_PASSWORD
         )
         return conn
     except Exception as e:
-        st.error(f"Database Error: {e}")
+        st.error(f"Database connection error: {e}")
         return None

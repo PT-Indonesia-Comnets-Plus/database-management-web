@@ -6,6 +6,7 @@ from email.mime.multipart import MIMEMultipart
 from firebase_admin import auth, firestore
 from datetime import datetime
 from utils.firebase_config import fs
+from utils.cookies import clear_user_cookie
 
 # configuration Firebase
 FIREBASE_API_KEY = st.secrets["firebase"]["firebase_api"]
@@ -21,7 +22,7 @@ def save_login_logout(username, event_type):
     now = datetime.now()
     date = now.strftime("%d-%m-%Y")
     time = now.strftime("%H:%M:%S")
-    doc_ref = fs.collection("Absensi Karyawan").document(username)
+    doc_ref = fs.collection("employee attendance").document(username)
 
     try:
         if event_type == "login":

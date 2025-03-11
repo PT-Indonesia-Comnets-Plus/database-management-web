@@ -10,7 +10,11 @@ username, useremail, role, signout = load_cookie_to_session()
 # Set page configuration
 logo_path = os.path.join("image", "icon.png")
 logo = Image.open(logo_path)
-st.set_page_config(page_title="Courier", page_icon=logo)
+try:
+    st.set_page_config(page_title="Admin Page", page_icon=logo)
+except st.errors.StreamlitSetPageConfigMustBeFirstCommandError:
+    pass
+
 
 if role == "Employe" and not signout:
     st.title('Courier Page')
