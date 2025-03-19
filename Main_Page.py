@@ -28,10 +28,9 @@ if 'useremail' not in st.session_state:
     st.session_state.useremail = ""
 if 'role' not in st.session_state:
     st.session_state.role = ""
-if 'db' not in st.session_state:  # Cek apakah db sudah ada di session_state
+if 'db' not in st.session_state:
     st.session_state.db = get_firebase_app()
 
-# Load cookies to session state
 try:
     load_cookie_to_session(st.session_state)
 except RuntimeError:
