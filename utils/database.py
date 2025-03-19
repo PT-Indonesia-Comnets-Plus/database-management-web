@@ -1,20 +1,23 @@
 import psycopg2
+import asyncpg
+import asyncio
 import streamlit as st
 
-DB_HOST = "localhost"
-DB_NAME = "postgres"
-DB_USER = "postgres"
-DB_PASSWORD = "admin"
+DB_HOST = st.secrets["database"]["DB_HOST"]
+DB_NAME = st.secrets["database"]["DB_NAME"]
+DB_USER = st.secrets["database"]["DB_USER"]
+DB_PASSWORD = st.secrets["database"]["DB_PASSWORD"]
+DB_PORT = st.secrets["database"]["DB_PORT"]
 
 
-@st.cache_resource
-def connect_db():
+async def connect_db():
     try:
-        conn = psycopg2.connect(
-            host=DB_HOST,
-            database=DB_NAME,
+        conn = await asyncpg.connect(
             user=DB_USER,
-            password=DB_PASSWORD
+            password=DB_PASSWORD,
+            host=DB_HOST,
+            port=DB_PORT,
+            database=DB_NAME
         )
         return conn
     except Exception as e:

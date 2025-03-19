@@ -6,7 +6,7 @@ from email.mime.multipart import MIMEMultipart
 from firebase_admin import auth, firestore
 from datetime import datetime
 from utils.firebase_config import fs
-from utils.cookies import clear_user_cookie
+from utils.cookies import clear_user_cookie, save_user_to_cookie
 
 # configuration Firebase
 FIREBASE_API_KEY = st.secrets["firebase"]["firebase_api"]
@@ -87,6 +87,8 @@ def login(email, password):
                 st.session_state.role = user_data['role']
                 st.session_state.signout = False
                 save_login_logout(user.uid, "login")  # Simpan data login
+                save_user_to_cookie(user.uid, user.email,
+                                    user_data['role'])  # Simpan cookies
                 st.success(f"Login successful as {user_data['role']}!")
             else:
                 st.warning("User data not found.")
@@ -96,8 +98,33 @@ def login(email, password):
         st.warning("Invalid email or password")
 
 
+def signup(username, email, password, role):
+    try:
+        db = st.session_state.db  # Akses Firestore dari session_state
+        # Membuat pengguna baru menggunakan Firebase Authentication
+        user = auth.create_user(email=email, password=password, uid=username)
+
+        # Menyimpan data tambahan ke Firestore
+        user_ref = db.collection("Absensi Karyawan").document(username)
+        user_ref.set({
+            "nama": username,
+            "email": email,
+            "role": role,
+            # Status email akan diatur menjadi belum terverifikasi
+            "status": "Belum terverifikasi"
+        })
+
+        send_verification_email(email)
+        st.success("Account created successfully! Please verify your email.")
+        st.markdown("Please Login using your email and password")
+        st.balloons()
+    except Exception as e:
+        st.error(f"Error creating account: {e}")
+
+
 def logout():
     save_login_logout(st.session_state.username, "logout")
+    clear_user_cookie()  # Hapus cookies
     st.session_state.signout = True
     st.session_state.username = ''
     st.session_state.useremail = ''
@@ -189,11 +216,11 @@ def send_verification_email(email):
         msg.attach(MIMEText(body, 'html'))
 
         # Send the email
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.starttls()
-        server.login(SMTP_USERNAME, SMTP_PASSWORD)
-        text = msg.as_string()
-        server.sendmail(SMTP_USERNAME, email, text)
-        server.quit()
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+            server.set_debuglevel(1)  # Enable debug output
+            server.starttls()
+            server.login(SMTP_USERNAME, SMTP_PASSWORD)
+            server.sendmail(SMTP_USERNAME, email, msg.as_string())
+            st.success("Verification link sent to admin.")
     except Exception as e:
-        print(f"Error sending verification email: {e}")
+        st.error(f"Error sending verification email: {e}")

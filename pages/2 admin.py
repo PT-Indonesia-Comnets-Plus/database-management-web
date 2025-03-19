@@ -3,11 +3,24 @@ from firebase_admin import auth
 from utils.firebase_config import fs
 from utils.cookies import load_cookie_to_session
 import pandas as pd
+from PIL import Image
+import os
 
 # Load data from cookies
-username, useremail, role, signout = load_cookie_to_session()
 try:
-    st.set_page_config(page_title="Admin Page", page_icon="👨‍💼")
+    load_cookie_to_session(st.session_state)
+except RuntimeError:
+    st.stop()
+
+# Set page configuration
+logo_path = os.path.join("image", "icon.png")
+logo = Image.open(logo_path)
+
+# Resize the logo to a smaller size
+logo_resized = logo.resize((32, 32))  # Resize to 32x32 pixels
+
+try:
+    st.set_page_config(page_title="Admin Page", page_icon=logo_resized)
 except st.errors.StreamlitSetPageConfigMustBeFirstCommandError:
     pass
 
@@ -45,7 +58,12 @@ def verify_user(uid):
         f"User with email {user.email} has been verified and updated in Firestore.")
 
 
-if role == "Admin" and not signout:
+if (
+    "role" in st.session_state and
+    st.session_state.role == "Admin" and
+    "signout" in st.session_state and
+    not st.session_state.signout
+):
     st.title("Admin User Verification")
 
     # Menampilkan pengguna yang belum terverifikasi

@@ -5,18 +5,30 @@ from utils.cookies import load_cookie_to_session
 import os
 
 # Load data from cookies
-username, useremail, role, signout = load_cookie_to_session()
+try:
+    load_cookie_to_session(st.session_state)
+except RuntimeError:
+    st.stop()
 
 # Set page configuration
 logo_path = os.path.join("image", "icon.png")
 logo = Image.open(logo_path)
+
+# Resize the logo to a smaller size
+logo_resized = logo.resize((32, 32))  # Resize to 32x32 pixels
+
 try:
-    st.set_page_config(page_title="Admin Page", page_icon=logo)
+    st.set_page_config(page_title="Kurir Page", page_icon=logo_resized)
 except st.errors.StreamlitSetPageConfigMustBeFirstCommandError:
     pass
 
 
-if role == "Employe" and not signout:
+if (
+    "role" in st.session_state and
+    st.session_state.role == "Employe" and
+    "signout" in st.session_state and
+    not st.session_state.signout
+):
     st.title('Courier Page')
     st.text(f'Hello, {st.session_state.username}!')
 
