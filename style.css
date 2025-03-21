@@ -34,3 +34,145 @@ div[data-baseweb="input"] > div {
   color: white;
   font-size: 24px;
 }
+
+/* Gaya khusus untuk file uploader */
+[data-testid="stFileUploaderDropzoneInstructions"] {
+  border: 2px dashed white !important;
+  background-color: #686664 !important;
+  color: white !important;
+  border-radius: 10px !important;
+  padding: 10px;
+}
+
+/* Gaya teks dalam file uploader */
+[data-testid="stFileUploaderDropzoneInstructions"] div {
+  font-size: 16px !important; /* Ukuran font */
+  font-weight: bold !important; /* Tebal */
+  color: yellow !important; /* Warna teks kuning */
+}
+
+/* Efek hover */
+[data-testid="stFileUploaderDropzone"] {
+  background-color: #2a3335 !important; /* Latar belakang lebih gelap saat hover */
+  border-color: #00ff00 !important; /* Border hijau saat hover */
+}
+
+/* Gaya untuk input teks */
+input[type="text"] {
+  color: black !important;
+  background-color: white !important;
+  border: 2px solid #ffffff !important;
+  border-radius: 5px;
+  padding: 5px;
+}
+[data-testid="metric-container"] {
+  box-shadow: 0 0 4px #686664;
+  padding: 10px;
+}
+
+.plot-container > div {
+  box-shadow: 0 0 2px #070505;
+  padding: 5px;
+  border-color: #000000;
+}
+
+div[data-testid="stExpander"] div[role="button"] p {
+  font-size: 1.2rem;
+  color: rgb(0, 0, 0);
+  border-color: #000000;
+  color-scheme: #000000;
+}
+
+.sidebar-content {
+  color: white;
+}
+
+[data-testid="stSidebar"] {
+  color: white;
+}
+
+div[data-baseweb="input"] > div {
+  background-color: #ffffff;
+  color: black;
+  border-radius: 8px;
+}
+
+[data-testid="stSidebar"] {
+  color: white;
+  font-size: 24px;
+}
+
+/* Gaya khusus untuk file uploader */
+[data-testid="stFileUploaderDropzoneInstructions"] {
+  border: 2px dashed white !important;
+  background-color: #686664 !important;
+  color: white !important;
+  border-radius: 10px !important;
+  padding: 10px;
+}
+
+/* Gaya teks dalam file uploader */
+[data-testid="stFileUploaderDropzoneInstructions"] div {
+  font-size: 16px !important; /* Ukuran font */
+  font-weight: bold !important; /* Tebal */
+  color: yellow !important; /* Warna teks kuning */
+}
+
+/* Efek hover */
+[data-testid="stFileUploaderDropzone"] {
+  background-color: #2a3335 !important; /* Latar belakang lebih gelap saat hover */
+  border-color: #00ff00 !important; /* Border hijau saat hover */
+}
+
+/* Gaya untuk input teks */
+input[type="text"] {
+  color: black !important;
+  background-color: white !important;
+  border: 2px solid #ffffff !important;
+  border-radius: 5px;
+  padding: 5px;
+}
+input[type="text-area"] {
+  color: black !important;
+  background-color: white !important;
+  border: 2px solid #ffffff !important;
+  border-radius: 5px;
+  padding: 5px;
+}
+
+/* Gaya khusus untuk number input */
+input[type="number"] {
+  color: black !important;
+  background-color: white !important;
+  border: 2px solid #42c2ff !important;
+  border-radius: 7px;
+  padding: 5px;
+}
+
+/* Opsional: Hover efek untuk number input */
+input[type="number"]:hover {
+  background-color: #42c2ff !important;
+}
+
+/* Gaya untuk text area */
+textarea {
+  color: black !important;
+  background-color: #7dcdf1 !important;
+  border: 2px solid #ffffff !important;
+  border-radius: 10px;
+  padding: 5px;
+}
+
+/* Gaya khusus untuk number input */
+input[type="number"] {
+  color: black !important;
+  background-color: white !important;
+  border: 2px solid #42c2ff !important;
+  border-radius: 7px;
+  padding: 5px;
+}
+
+/* Opsional: Hover efek untuk number input */
+input[type="number"]:hover {
+  background-color: #42c2ff !important;
+}

@@ -17,14 +17,13 @@ logo_path = os.path.join("image", "icon.png")
 logo = Image.open(logo_path)
 
 # Resize the logo to a smaller size
-logo_resized = logo.resize((32, 32))  # Resize to 32x32 pixels
+logo_resized = logo.resize((32, 32))
 
 try:
     st.set_page_config(page_title="Admin Page", page_icon=logo_resized)
 except st.errors.StreamlitSetPageConfigMustBeFirstCommandError:
     pass
 
-# Sekarang objek Firestore tersedia di st.session_state.db
 db = fs
 
 

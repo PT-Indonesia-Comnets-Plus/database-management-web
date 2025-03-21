@@ -84,7 +84,6 @@ openpyxl==3.1.2
 folium==0.14.0
 streamlit-folium==0.15.0
 dotenv
-psycosg2
 asyncpg==0.30.0
 folium==0.14.0
 streamlit-folium==0.15.0
