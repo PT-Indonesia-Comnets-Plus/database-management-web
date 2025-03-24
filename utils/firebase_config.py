@@ -23,6 +23,3 @@ def get_firebase_app():
 
     # Mengembalikan objek Firestore
     return db
-
-
-fs = get_firebase_app()

@@ -7,7 +7,7 @@ import pandas as pd
 import asyncio
 from streamlit_option_menu import option_menu
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
-from sub_pages import dashboard, search, update_data, chatbot
+from sub_pages import dashboard, search, update_data, chatbot, update
 
 # Load data from cookies
 try:
@@ -34,8 +34,8 @@ except st.errors.StreamlitSetPageConfigMustBeFirstCommandError:
 with st.sidebar:
     app = option_menu(
         menu_title="Select Menu",
-        options=["Dashboard", "Search", "Update Data", "Chatbot"],
-        icons=["grid", "search", "table", "chat"],
+        options=["Dashboard", "Search", "Update Data", "Chatbot", "Test"],
+        icons=["grid", "search", "table", "chat", "code"],
         menu_icon="menu-button-wide",
         default_index=0,
         orientation="vertical",
@@ -50,9 +50,11 @@ with st.sidebar:
 
 if app == 'Dashboard':
     dashboard.app()
-if app == 'Pencarian':
+if app == 'Search':
     search.app()
 if app == 'Update Data':
     update_data.app()
+if app == 'Test':
+    update.app()
 if app == 'Chatbot':
     chatbot.app()

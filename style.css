@@ -35,26 +35,29 @@ div[data-baseweb="input"] > div {
   font-size: 24px;
 }
 
-/* Gaya khusus untuk file uploader */
 [data-testid="stFileUploaderDropzoneInstructions"] {
-  border: 2px dashed white !important;
-  background-color: #686664 !important;
+  background-color: whitesmoke !important;
   color: white !important;
-  border-radius: 10px !important;
+  border-radius: 15px !important;
   padding: 10px;
-}
-
-/* Gaya teks dalam file uploader */
-[data-testid="stFileUploaderDropzoneInstructions"] div {
-  font-size: 16px !important; /* Ukuran font */
-  font-weight: bold !important; /* Tebal */
-  color: yellow !important; /* Warna teks kuning */
 }
 
 /* Efek hover */
 [data-testid="stFileUploaderDropzone"] {
-  background-color: #2a3335 !important; /* Latar belakang lebih gelap saat hover */
-  border-color: #00ff00 !important; /* Border hijau saat hover */
+  background-color: #42c2ff !important;
+}
+
+/* Gaya teks dalam file uploader */
+[data-testid="stBaseButton-secondary"] div {
+  font-size: 16px !important; /* Ukuran font */
+  font-weight: bold !important; /* Tebal */
+  color: black !important;
+}
+
+[data-testid="stFileUploaderDropzoneInstructions"] div {
+  font-size: 16px !important; /* Ukuran font */
+  font-weight: bold !important; /* Tebal */
+  color: black !important;
 }
 
 /* Gaya untuk input teks */
@@ -65,6 +68,7 @@ input[type="text"] {
   border-radius: 5px;
   padding: 5px;
 }
+
 [data-testid="metric-container"] {
   box-shadow: 0 0 4px #686664;
   padding: 10px;
@@ -100,28 +104,6 @@ div[data-baseweb="input"] > div {
 [data-testid="stSidebar"] {
   color: white;
   font-size: 24px;
-}
-
-/* Gaya khusus untuk file uploader */
-[data-testid="stFileUploaderDropzoneInstructions"] {
-  border: 2px dashed white !important;
-  background-color: #686664 !important;
-  color: white !important;
-  border-radius: 10px !important;
-  padding: 10px;
-}
-
-/* Gaya teks dalam file uploader */
-[data-testid="stFileUploaderDropzoneInstructions"] div {
-  font-size: 16px !important; /* Ukuran font */
-  font-weight: bold !important; /* Tebal */
-  color: yellow !important; /* Warna teks kuning */
-}
-
-/* Efek hover */
-[data-testid="stFileUploaderDropzone"] {
-  background-color: #2a3335 !important; /* Latar belakang lebih gelap saat hover */
-  border-color: #00ff00 !important; /* Border hijau saat hover */
 }
 
 /* Gaya untuk input teks */

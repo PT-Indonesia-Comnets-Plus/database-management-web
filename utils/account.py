@@ -4,8 +4,8 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from firebase_admin import auth, firestore
+from firebase_admin import exceptions
 from datetime import datetime
-from utils.firebase_config import fs
 from utils.cookies import clear_user_cookie, save_user_to_cookie
 
 # configuration Firebase
@@ -18,7 +18,7 @@ SMTP_USERNAME = st.secrets["smtp"]["username"]
 SMTP_PASSWORD = st.secrets["smtp"]["password"]
 
 
-def save_login_logout(username, event_type):
+def save_login_logout(fs, username, event_type):
     now = datetime.now()
     date = now.strftime("%d-%m-%Y")
     time = now.strftime("%H:%M:%S")
@@ -67,7 +67,16 @@ def verify_password(email, password):
         return None
 
 
-def login(email, password):
+def login(fs, email, password):
+    # Validasi input
+    if not email.strip():
+        st.warning("Email cannot be empty")
+        return
+    if not password.strip():
+        st.warning("Password cannot be empty")
+        return
+
+    # Verifikasi melalui Firebase REST API
     user_data = verify_password(email, password)
     if user_data:
         try:
@@ -75,55 +84,95 @@ def login(email, password):
             if not user.email_verified:
                 st.warning("Email not verified. Please check your inbox.")
                 return
-            user_doc = fs.collection('users').document(user.uid).get()
 
+            # Validasi pengguna di Firestore
+            user_doc = fs.collection('users').document(user.uid).get()
             if user_doc.exists:
                 user_data = user_doc.to_dict()
                 if user_data["status"] != "Verified":
                     st.warning("Your account is not verified by admin yet.")
                     return
+
+                # Simpan data ke session_state
                 st.session_state.username = user.uid
                 st.session_state.useremail = user.email
                 st.session_state.role = user_data['role']
                 st.session_state.signout = False
-                save_login_logout(user.uid, "login")  # Simpan data login
-                save_user_to_cookie(user.uid, user.email,
-                                    user_data['role'])  # Simpan cookies
+
+                # Catat waktu login
+                save_login_logout(fs, user.uid, "login")
+                save_user_to_cookie(user.uid, user.email, user_data['role'])
+
+                # Pesan sukses
                 st.success(f"Login successful as {user_data['role']}!")
             else:
                 st.warning("User data not found.")
+        except exceptions.FirebaseError as e:
+            st.warning(f"A Firebase error occurred: {e}")
         except Exception as e:
-            st.warning(f"Login Failed: {e}")
+            st.error(f"An unexpected error occurred: {e}")
     else:
         st.warning("Invalid email or password")
 
 
-def signup(username, email, password, role):
-    try:
-        db = st.session_state.db  # Akses Firestore dari session_state
-        # Membuat pengguna baru menggunakan Firebase Authentication
-        user = auth.create_user(email=email, password=password, uid=username)
+def signup(fs, username, email, password, confirm_password, role):
+    if not username.strip():
+        st.warning("Username cannot be empty")
+        return
 
-        # Menyimpan data tambahan ke Firestore
-        user_ref = db.collection("Absensi Karyawan").document(username)
+    if not email.strip():
+        st.warning("Email cannot be empty")
+        return
+
+    if not password or not confirm_password:
+        st.warning("Password cannot be empty")
+        return
+
+    if password != confirm_password:
+        st.warning("Passwords do not match")
+        return
+
+    user_ref = fs.collection("users").document(username)
+
+    # Cek apakah username sudah digunakan
+    if user_ref.get().exists:
+        st.warning("Username already taken")
+        return
+
+    # Cek apakah email sudah digunakan
+    try:
+        auth.get_user_by_email(email)
+        st.warning("Email already taken")
+        return
+    except auth.UserNotFoundError:
+        pass
+
+    try:
+        auth.create_user(email=email, password=password, uid=username)
         user_ref.set({
-            "nama": username,
+            "username": username,
             "email": email,
             "role": role,
-            # Status email akan diatur menjadi belum terverifikasi
-            "status": "Belum terverifikasi"
+            "status": "Pending"
         })
 
+        # Kirim email verifikasi
         send_verification_email(email)
+
+        # Tampilkan pesan sukses
         st.success("Account created successfully! Please verify your email.")
-        st.markdown("Please Login using your email and password")
         st.balloons()
+
+    except auth.EmailAlreadyExistsError:
+        st.warning("Email already taken.")
+    except auth.UidAlreadyExistsError:
+        st.warning("Username already taken.")
     except Exception as e:
-        st.error(f"Error creating account: {e}")
+        st.error(f"An error occurred: {e}")
 
 
-def logout():
-    save_login_logout(st.session_state.username, "logout")
+def logout(fs):
+    save_login_logout(fs, st.session_state.username, "logout")
     clear_user_cookie()  # Hapus cookies
     st.session_state.signout = True
     st.session_state.username = ''

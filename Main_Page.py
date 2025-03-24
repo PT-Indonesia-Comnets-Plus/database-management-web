@@ -3,10 +3,8 @@ from PIL import Image
 from io import BytesIO
 import base64
 from dotenv import load_dotenv
-from utils.firebase_config import fs
-from utils.account import login, logout, send_verification_email
-from utils.cookies import save_user_to_cookie, load_cookie_to_session, clear_user_cookie
-from firebase_admin import auth
+from utils.account import login, logout, signup
+from utils.cookies import load_cookie_to_session
 import os
 from utils.firebase_config import get_firebase_app
 
@@ -20,21 +18,12 @@ except st.errors.StreamlitSetPageConfigMustBeFirstCommandError:
     pass
 
 # Initialize session state attributes
-if 'signout' not in st.session_state:
-    st.session_state.signout = True
-if 'username' not in st.session_state:
-    st.session_state.username = ""
-if 'useremail' not in st.session_state:
-    st.session_state.useremail = ""
-if 'role' not in st.session_state:
-    st.session_state.role = ""
-if 'db' not in st.session_state:
-    st.session_state.db = get_firebase_app()
-
-try:
+if "username" not in st.session_state:
     load_cookie_to_session(st.session_state)
-except RuntimeError:
-    st.stop()
+
+if "fs" not in st.session_state:
+    st.session_state.fs = get_firebase_app()
+fs = st.session_state.fs
 
 load_dotenv()
 
@@ -69,64 +58,34 @@ if os.path.exists(logo_home_path):
         unsafe_allow_html=True,
     )
 
-# Welcome text
 st.markdown("<h1 style='text-align: center;'>Welcome!</h1>",
             unsafe_allow_html=True)
 
 
-def handle_login():
-    email = st.session_state.login_email
-    password = st.session_state.login_password
-    login(email, password)
-
-
-def handle_signup():
-    username = st.session_state.signup_username
-    email = st.session_state.signup_email
-    password = st.session_state.signup_password
-    confirm_password = st.session_state.signup_confirm_password
-    role = "Employe"
-    if password != confirm_password:
-        st.error("Passwords do not match. Please try again.")
-    else:
-        try:
-            user = auth.create_user(
-                email=email, password=password, uid=username)
-            user_data = {"name": username, "email": email,
-                         "role": role, "status": "Pending"}
-
-            fs.collection("users").document(user.uid).set(user_data)
-            send_verification_email(email)
-            st.success(
-                "Account created successfully! Please verify your email.")
-            st.balloons()
-        except Exception as e:
-            st.error(f"Error creating account: {e}")
-
-
 if st.session_state.signout:
     choice = st.selectbox("Login/Signup", ["Login", "Sign up"])
-
     if choice == "Login":
         st.text_input("Email", key="login_email")
         st.text_input("Password", type="password", key="login_password")
-        st.button("Login", on_click=handle_login)
+        st.button("Login", on_click=lambda: login(
+            fs, st.session_state.login_email, st.session_state.login_password))
     else:
         st.text_input("Username", key="signup_username")
         st.text_input("Email Address", key="signup_email")
         st.text_input("Password", type="password", key="signup_password")
         st.text_input("Confirm Password", type="password",
                       key="signup_confirm_password")
-        st.button("Create my account", on_click=handle_signup)
+        if st.button("Sign Up"):
+            signup(fs, st.session_state.signup_username, st.session_state.signup_email,
+                   st.session_state.signup_password, st.session_state.signup_confirm_password, role="Employe")
 else:
     st.markdown(
         f"<h2 style='text-align: left;'>Welcome back, {st.session_state.username}!</h2>", unsafe_allow_html=True)
     st.text(f"Email: {st.session_state.useremail}")
     st.text(f"Role: {st.session_state.role}")
-    if st.button('Sign Out'):
-        logout()
+    st.button("Sign Out", on_click=lambda: logout(fs))
 
-# Custom CSS to change the color of specific input fields
+
 st.markdown(
     """
     <style>

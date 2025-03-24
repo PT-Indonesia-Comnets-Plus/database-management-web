@@ -1,11 +1,8 @@
-import asyncio
 import streamlit as st
 from utils.database import connect_db
 import pandas as pd
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 import os
-
-# Fungsi untuk membuat DataFrame yang dapat diedit
 
 
 def editable_dataframe(df):
@@ -13,7 +10,8 @@ def editable_dataframe(df):
     gb.configure_pagination(enabled=True)
     gb.configure_side_bar()
     gb.configure_default_column(editable=True)
-    gb.configure_columns(autoSizeColumns='all')
+    for col in df.columns:
+        gb.configure_column(col, auto_size=True)
 
     grid_options = gb.build()
 
@@ -30,24 +28,52 @@ def editable_dataframe(df):
 # Fungsi untuk memasukkan data pasien ke database
 
 
-async def insert_data(conn, data):
+def insert_data(db, data):
     try:
+        cursor = db.cursor()
+
         query = """
-        INSERT INTO patients (PA, Tanggal_RFS, Mitra, Kategori, Area_KP, Kota_Kab, Lokasi_OLT, Hostname_OLT, Latitude_OLT, Longtitude_OLT, Brand_OLT, Type_OLT, Kapasitas_OLT, Kapasitas_port_OLT, OLT_Port, Interface_OLT, FDT_New_Existing, FDT_ID, Jumlah_Splitter_FDT, Kapasitas_Splitter_FDT, Latitude_FDT, Longtitude_FDT, Port_FDT, Status_OSP_AMARTA_FDT, Cluster, Latitude_Cluster, Longtitude_Cluster, FATID, Jumlah Splitter FAT, Kapasitas Splitter FAT, Latitude FAT, Longtitude FAT, Status OSP AMARTA FAT, Kecamatan, Kelurahan, Sumber_Datek, HC_OLD, HC_iCRM, TOTAL_HC, CLEANSING_HP, OLT, UPDATE_ASET, FAT_KONDISI, FILTER_FAT_CAP, FAT_ID_X, FAT_FILTER_PEMAKAIAN, KETERANGAN_FULL, AMARTA_UPDATE, LINK_DOKUMEN_FEEDER, KETERANGAN_DOKUMEN, LINK_DATA_ASET, KETERANGAN_DATA_ASET, LINK_MAPS, UP3, ULP)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55)
+        INSERT INTO data_aset ("PA", "Tanggal RFS", "Mitra", "Kategori", "Area KP", "Kota Kab",
+            "Lokasi OLT", "Hostname OLT", "Latitude OLT", "Longtitude OLT", "Brand OLT", "Type OLT",
+            "Kapasitas OLT", "Kapasitas port OLT", "OLT Port", "Interface OLT", "FDT New/Existing", "FDTID",
+            "Jumlah Splitter FDT", "Kapasitas Splitter FDT", "Latitude FDT", "Longtitude FDT", "Port FDT",
+            "Status OSP AMARTA FDT", "Cluster", "Latitude Cluster", "Longtitude Cluster", "FATID",
+            "Jumlah Splitter FAT", "Kapasitas Splitter FAT", "Latitude FAT", "Longtitude FAT",
+            "Status OSP AMARTA FAT", "Kecamatan", "Kelurahan", "Sumber Datek", "HC OLD", "HC iCRM+",
+            "TOTAL HC", "CLEANSING HP", "OLT", "UPDATE ASET", "FAT KONDISI", "FILTER FAT CAP",
+            "FAT ID X", "FAT FILTER PEMAKAIAN", "KETERANGAN FULL", "AMARTA UPDATE",
+            "LINK DOKUMEN FEEDER", "KETERANGAN DOKUMEN", "LINK DATA ASET", "KETERANGAN DATA ASET",
+            "LINK MAPS", "UP3", "ULP")
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
-        await conn.execute(query, *data)
-        st.success("Data record inserted successfully.")
+
+        cursor.execute(query, tuple(data))  # Menggunakan Tuple
+        db.commit()
+        cursor.close()
+        st.success("Data inserted successfully!")
+
     except Exception as e:
-        st.error(f"Error inserting patient record: {e}")
+        db.rollback()  # Rollback transaksi jika terjadi kesalahan
+        st.error(f"Error inserting data: {e}")
+
+
+def insert_dataframe(conn, df):
+    try:
+        for _, row in df.iterrows():
+            data = row.tolist()
+            insert_data(conn, data)
+    except Exception as e:
+        st.error(f"Error inserting data records: {e}")
 
 # Fungsi untuk mengambil semua data pasien dari database
 
 
-async def fetch_all_patients(conn):
+def fetch_all_patients(conn):
     try:
         query = "SELECT * FROM datekasetall"
-        rows = await conn.fetch(query)
+        cursor = conn.cursor()
+        cursor.execute(query)
+        rows = cursor.fetchall()
         return rows
     except Exception as e:
         st.error(f"Error fetching patient records: {e}")
@@ -85,6 +111,8 @@ def process_uploaded_file(uploaded_file):
         df[['Latitude FAT', 'Longtitude FAT']
            ] = df['Koordinat FAT'].str.split(',', expand=True)
         df.drop(columns=(['Koordinat FAT']), inplace=True)
+
+    df['Tanggal RFS'].fillna(pd.Timestamp.now().normalize(), inplace=True)
 
     df.fillna({
         "Jumlah Splitter FDT": 0,
@@ -163,7 +191,7 @@ def process_uploaded_file(uploaded_file):
 
 def app():
     if 'db' not in st.session_state:
-        st.session_state.db = asyncio.run(connect_db())
+        st.session_state.db = connect_db()
 
     db = st.session_state.db
 
@@ -195,8 +223,7 @@ def app():
                 data.append(st.text_input("Brand OLT"))
                 data.append(st.text_input("Type OLT"))
                 data.append(st.number_input("Kapasitas OLT", min_value=0))
-                data.append(st.number_input(
-                    "Kapasitas port OLT", min_value=0))
+                data.append(st.number_input("Kapasitas port OLT", min_value=0))
                 data.append(st.text_input("OLT Port"))
                 data.append(st.text_input("Interface OLT"))
 
@@ -252,28 +279,44 @@ def app():
                 data.append(st.text_input("UP3"))
                 data.append(st.text_input("ULP"))
 
-            submitted = st.form_submit_button("Save Data")
+            submitted = st.form_submit_button("Upload Data")
             if submitted:
-                asyncio.run(insert_data(db, data))
+                cursor = db.cursor()
+                select_query = """
+                SELECT * FROM data_aset WHERE "FATID"=%s
+                """
+                cursor.execute(select_query, (data[28],))
+                existing_patient = cursor.fetchone()
+                if existing_patient:
+                    st.warning(
+                        "A patient with the same contact number already exist")
+                else:
+                    insert_data(db, data)
 
     elif input_method == "Upload File":
-
         with st.form("entry_form", clear_on_submit=True):
             uploaded_file = st.file_uploader("Choose a file")
 
-            submitted = st.form_submit_button("Save Data")
-            if submitted and uploaded_file is not None:
+            if uploaded_file is not None:
                 df = process_uploaded_file(uploaded_file)
                 if df is not None:
                     st.session_state.df_data = df.copy()
 
-        if "df_data" in st.session_state:
-            st.write("### **Editable DataFrame**")
-            edited_df = editable_dataframe(st.session_state.df_data)
-            if st.button("Save Changes"):
-                st.session_state.df_data = edited_df
-                st.success("Changes Saved!")
-            st.write("### **Updated DataFrame**")
-            st.dataframe(edited_df)
-            if st.button("Upload Data"):
-                st.success("Upload Success!")
+            if "df_data" in st.session_state:
+                st.write("### **Editable DataFrame**")
+                # Bisa diedit dalam form
+                edited_df = st.data_editor(
+                    st.session_state.df_data, num_rows="dynamic")
+
+            if st.form_submit_button("Upload Data"):
+                if "df_data" in st.session_state:
+                    st.success("Upload Success!")
+                else:
+                    st.warning("No data to upload")
+
+        if st.button("Insert Data"):
+            if "df_data" in st.session_state:
+                insert_dataframe(db, st.session_state.df_data)
+                st.session_state.pop("df_data")
+            else:
+                st.warning("No data to insert")

@@ -1,5 +1,4 @@
 import streamlit as st
-import asyncio
 from utils.database import connect_db
 
 
@@ -12,7 +11,7 @@ def app():
 
     # Connect to the database if not already connected
     if st.session_state.db is None:
-        st.session_state.db = asyncio.run(connect_db())
+        st.session_state.db = connect_db()
 
     db = st.session_state.db
 

@@ -1,45 +1,44 @@
 import streamlit as st
-import asyncio
-from utils.database import connect_db
 import pandas as pd
+from utils.database import connect_db
 
 
-async def load_data():
-    conn = await connect_db()
+def load_data():
+    """Load data aset dari database."""
+    conn = connect_db()
     if conn:
         try:
-            rows = await conn.fetch("SELECT * FROM data_aset LIMIT 10")
-            colnames = [key for key in rows[0].keys()] if rows else []
-            df = pd.DataFrame(rows, columns=colnames)
-            return df
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM data_aset LIMIT 10")
+                rows = cur.fetchall()
+                colnames = [desc[0]
+                            for desc in cur.description]
+                df = pd.DataFrame(rows, columns=colnames)
+                return df
         except Exception as e:
             st.error(f"Query Error: {e}")
             return None
         finally:
-            await conn.close()
+            conn.close()  # Pastikan koneksi selalu ditutup
     else:
         st.warning("Koneksi Database Gagal!")
         return None
 
 
 def app():
+    st.title("Management System Iconnet")
 
-    st.title("Management System Iconnet:")
-
-    # Initialize session state for db
-    if 'db' not in st.session_state:
-        st.session_state.db = None
-
-    # Connect to the database if not already connected
-    if st.session_state.db is None:
-        st.session_state.db = asyncio.run(connect_db())
-
-    db = st.session_state.db
-
-    # Load data and store in session state if not already loaded
-    if 'df' not in st.session_state:
-        st.session_state.df = asyncio.run(load_data())
+    # Load data hanya sekali dan simpan di session state
+    if "df" not in st.session_state:
+        st.session_state.df = load_data()
 
     df = st.session_state.df
-    st.subheader("Welcome to Iconnet Management System")
-    st.dataframe(df)
+    if df is not None:
+        st.subheader("Welcome to Iconnet Management System")
+        st.dataframe(df)
+    else:
+        st.warning("Tidak ada data yang bisa ditampilkan.")
+
+
+if __name__ == "__main__":
+    app()
