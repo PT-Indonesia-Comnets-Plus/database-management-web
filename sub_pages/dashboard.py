@@ -3,9 +3,9 @@ import pandas as pd
 from utils.database import connect_db
 
 
-def load_data():
+def load_data(db):
     """Load data aset dari database."""
-    conn = connect_db()
+    conn = db
     if conn:
         try:
             with conn.cursor() as cur:
@@ -19,7 +19,7 @@ def load_data():
             st.error(f"Query Error: {e}")
             return None
         finally:
-            conn.close()  # Pastikan koneksi selalu ditutup
+            conn.close()
     else:
         st.warning("Koneksi Database Gagal!")
         return None
@@ -27,10 +27,12 @@ def load_data():
 
 def app():
     st.title("Management System Iconnet")
-
+    if "db" not in st.session_state:
+        st.session_state.db = connect_db()
+    db = st.session_state.db
     # Load data hanya sekali dan simpan di session state
     if "df" not in st.session_state:
-        st.session_state.df = load_data()
+        st.session_state.df = load_data(db)
 
     df = st.session_state.df
     if df is not None:

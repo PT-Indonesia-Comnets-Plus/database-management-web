@@ -65,20 +65,6 @@ def insert_dataframe(conn, df):
     except Exception as e:
         st.error(f"Error inserting data records: {e}")
 
-# Fungsi untuk mengambil semua data pasien dari database
-
-
-def fetch_all_patients(conn):
-    try:
-        query = "SELECT * FROM datekasetall"
-        cursor = conn.cursor()
-        cursor.execute(query)
-        rows = cursor.fetchall()
-        return rows
-    except Exception as e:
-        st.error(f"Error fetching patient records: {e}")
-        return []
-
 # Fungsi untuk memproses file yang diunggah
 
 
@@ -190,21 +176,22 @@ def process_uploaded_file(uploaded_file):
 
 
 def app():
-    if 'db' not in st.session_state:
+    st.title("Update Data Aset")
+    if "db" not in st.session_state:
         st.session_state.db = connect_db()
-
     db = st.session_state.db
 
-    st.subheader("Enter details data:")
-
-    if os.path.exists('style.css'):
-        with open('style.css') as f:
+    if os.path.exists("style.css"):
+        with open("style.css") as f:
             st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
-    input_methods = ["Manual Input", "Upload File"]
-    input_method = st.selectbox("Select Input:", input_methods)
-    if input_method == "Manual Input":
-        with st.form("entry_form", clear_on_submit=True):
+    # Tabs untuk navigasi
+    tab_manual, tab_upload = st.tabs(["Manual Input", "Upload File"])
+
+    # Tab Manual Input
+    with tab_manual:
+        st.subheader("Manual Data Input")
+        with st.form("manual_input_form", clear_on_submit=True):
             data = []
 
             with st.expander("General Information"):
@@ -282,19 +269,19 @@ def app():
             submitted = st.form_submit_button("Upload Data")
             if submitted:
                 cursor = db.cursor()
-                select_query = """
-                SELECT * FROM data_aset WHERE "FATID"=%s
-                """
+                select_query = """SELECT * FROM data_aset WHERE "FATID"=%s"""
                 cursor.execute(select_query, (data[28],))
                 existing_patient = cursor.fetchone()
                 if existing_patient:
-                    st.warning(
-                        "A patient with the same contact number already exist")
+                    st.warning("A patient with the same FATID already exists.")
                 else:
                     insert_data(db, data)
+                    st.success("Data uploaded successfully!")
 
-    elif input_method == "Upload File":
-        with st.form("entry_form", clear_on_submit=True):
+    # Tab Upload File
+    with tab_upload:
+        st.subheader("Upload File")
+        with st.form("upload_file_form", clear_on_submit=True):  # Berikan key unik untuk form ini
             uploaded_file = st.file_uploader("Choose a file")
 
             if uploaded_file is not None:
@@ -318,5 +305,6 @@ def app():
             if "df_data" in st.session_state:
                 insert_dataframe(db, st.session_state.df_data)
                 st.session_state.pop("df_data")
+                st.success("Data inserted successfully!")
             else:
                 st.warning("No data to insert")

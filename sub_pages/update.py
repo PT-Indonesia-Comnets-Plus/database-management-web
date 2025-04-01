@@ -1,497 +1,447 @@
 import streamlit as st
-import mysql.connector
 import pandas as pd
+from utils.database import connect_db
+from datetime import date
+from copy import deepcopy
 
 
 def app():
-    config = {
-        'user': 'root',
-        'password': 'IMkhan@123@#',
-        'host': 'localhost',
-        'port': 3306,  # Update the port number to 3305 because in installation i gave port 3305
-        'database': 'userdb'
-    }
-
-    def create_connection():
-        """Create a connection to the MySQL database."""
-        db = mysql.connector.connect(**config)
-        return db
-
-    def create_database(db):
-        """Create the 'userdb' database if it doesn't exist."""
-        cursor = db.cursor()
-        cursor.execute("CREATE DATABASE IF NOT EXISTS userdb")
-        cursor.close()
-
-    def create_patients_table(db):
-        """Create the patients table in the database."""
-        cursor = db.cursor()
-
-        create_patients_table_query = """
-        CREATE TABLE IF NOT EXISTS patients (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            name VARCHAR(255) NOT NULL,
-            age INT,
-            contact_number VARCHAR,
-            address VARCHAR(255),
-            date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMPCHAR(20),
-            email VARCHAR(255),
-        )
-        """
-
-        cursor.execute(create_patients_table_query)
-        db.commit()
-        st.write("Patients table created successfully.")
-
-    def modify_patients_table(db):
-        cursor = db.cursor()
-
-        alter_table_query = """
-        ALTER TABLE patients
-        ADD COLUMN doctor_name VARCHAR(255),
-        ADD COLUMN disease VARCHAR(255),
-        ADD COLUMN fee INTEGER(5),
-        ADD COLUMN tests VARCHAR(255),
-        ADD COLUMN cnic VARCHAR(20)
-        """
-
-        cursor.execute(alter_table_query)
-        db.commit()
-        st.write("Patients table modified successfully.")
-
-    def create_appointments_table(db):
-        """Create the appointments table in the database."""
-        cursor = db.cursor()
-
-        create_appointments_table_query = """
-        CREATE TABLE IF NOT EXISTS appointments (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            patient_id INT,
-            appointment_date DATE,
-            appointment_time TIME,
-            doctor_name VARCHAR(255),
-            notes TEXT,
-            FOREIGN KEY (patient_id) REFERENCES patients(id)
-        )
-        """
-
-        cursor.execute(create_appointments_table_query)
-        db.commit()
-        st.write("Appointments table created successfully.")
-
-    def insert_patient_record(db, name, age, contact_number, email, address):
-        """Insert a new patient record into the 'patients' table."""
-        cursor = db.cursor()
-
-        # Select the database
-        cursor.execute("USE userdb")
-
-        insert_patient_query = """
-        INSERT INTO patients (name, age, contact_number, email, address)
-        VALUES (%s, %s, %s, %s, %s)
-        """
-
-        patient_data = (name, age, contact_number, email, address)
-
-        cursor.execute(insert_patient_query, patient_data)
-        db.commit()
-        st.write("Patient record inserted successfully.")
-
-    def fetch_all_patients(db):
-        """Fetch all records from the 'patients' table."""
-        cursor = db.cursor()
-
-        # Select the database
-        cursor.execute("USE userdb")
-
-        # Fetch all patients
-        select_patients_query = "SELECT * FROM patients"
-        cursor.execute(select_patients_query)
-        patients = cursor.fetchall()
-
-        return patients
-
-    def fetch_patient_by_id(db, patient_id):
-        """Fetch a patient's record from the 'patients' table based on ID."""
-        cursor = db.cursor()
-
-        # Select the database
-        cursor.execute("USE userdb")
-
-        # Fetch the patient by ID
-        select_patient_query = "SELECT * FROM patients WHERE id = %s"
-        cursor.execute(select_patient_query, (patient_id,))
-        patient = cursor.fetchone()
-
-        return patient
-
-    def fetch_patient_by_contact(db, contact_number):
-        """Fetch a patient's record from the 'patients' table based on contact number."""
-        cursor = db.cursor()
-
-        # Select the database
-        cursor.execute("USE userdb")
-
-        # Fetch the patient by contact number
-        select_patient_query = "SELECT * FROM patients WHERE contact_number = %s"
-        cursor.execute(select_patient_query, (contact_number,))
-        patient = cursor.fetchone()
-
-        return patient
-
-    def fetch_patient_by_cnis(db, cnis):
-        """Fetch a patient's record from the 'patients' table based on CNIS."""
-        cursor = db.cursor()
-
-        # Select the database
-        cursor.execute("USE userdb")
-
-        # Fetch the patient by CNIS
-        select_patient_query = "SELECT * FROM patients WHERE cnis = %s"
-        cursor.execute(select_patient_query, (cnis,))
-        patient = cursor.fetchone()
-
-        return patient
-
-    def delete_patient_record(db, delete_option, delete_value):
-        """Delete a patient record from the 'patients' table based on ID, name, or contact number."""
-        cursor = db.cursor()
-
-        # Select the database
-        cursor.execute("USE userdb")
-
-        # Delete the patient record
-        if delete_option == "ID":
-            delete_patient_query = "DELETE FROM patients WHERE id = %s"
-        elif delete_option == "Name":
-            delete_patient_query = "DELETE FROM patients WHERE name = %s"
-        elif delete_option == "Contact Number":
-            delete_patient_query = "DELETE FROM patients WHERE contact_number = %s"
-
-        cursor.execute(delete_patient_query, (delete_value,))
-        db.commit()
-        st.write("Patient record deleted successfully.")
-
-    def insert_appointment_record(db, patient_id, appointment_date, appointment_time, doctor_name, notes):
-        """Insert a new appointment record into the 'appointments' table."""
-        cursor = db.cursor()
-
-        # Select the database
-        cursor.execute("USE userdb")
-        appointment_time = appointment_time.strftime("%H:%M:%S")
-        appointment_date = appointment_date.strftime("%Y-%m-%d")
-        insert_appointment_query = """
-        INSERT INTO appointments (patient_id, appointment_date, appointment_time, doctor_name, notes)
-        VALUES (%s, %s, %s, %s, %s)
-        """
-
-        appointment_data = (patient_id, appointment_date,
-                            appointment_time, doctor_name, notes)
-
-        cursor.execute(insert_appointment_query, appointment_data)
-        db.commit()
-        print("Appointment record inserted successfully.")
-
-    def fetch_all_appointments(db):
-        """Fetch all records from the 'appointments' table."""
-        cursor = db.cursor()
-
-        # Select the database
-        cursor.execute("USE userdb")
-
-        # Fetch all appointments
-        select_appointments_query = """
-        SELECT id, patient_id, DATE_FORMAT(appointment_date, '%Y-%m-%d') AS appointment_date, 
-            appointment_time, doctor_name, notes
-        FROM appointments
-        """
-        cursor.execute(select_appointments_query)
-        appointments = cursor.fetchall()
-
-        return appointments
-
-    def show_all_appointments(db):
-        cursor = db.cursor()
-
-        # Select the database
-        cursor.execute("USE userdb")
-        select_query = """
-        SELECT id, patient_id, appointment_date, CAST(appointment_time AS CHAR), doctor_name, notes FROM appointments
-        """
-        cursor.execute(select_query)
-        records = cursor.fetchall()
-
-        if records:
-            st.subheader("All Appointment Records")
-            df = pd.DataFrame(records, columns=[
-                              'ID', 'Patient ID', 'Appointment Date', 'Appointment Time', 'Doctor Name', 'Notes'])
-            st.dataframe(df)
-        else:
-            st.write("No appointments found")
-
-    def edit_appointment_record(db, appointment_id, new_appointment_date, new_appointment_time, new_doctor_name, new_notes):
-        """Edit an appointment record in the 'appointments' table."""
-        cursor = db.cursor()
-
-        # Select the database
-        cursor.execute("USE userdb")
-
-        # Update the appointment record
-        update_appointment_query = """
-        UPDATE appointments
-        SET appointment_date = %s, appointment_time = CAST(%s AS TIME), doctor_name = %s, notes = %s
-        WHERE id = %s
-        """
-        appointment_data = (new_appointment_date, new_appointment_time,
-                            new_doctor_name, new_notes, appointment_id)
-
-        cursor.execute(update_appointment_query, appointment_data)
-        db.commit()
-
-    def fetch_appointment_by_id(db, appointment_id):
-        """Fetch an appointment's record from the 'appointments' table based on ID."""
-        cursor = db.cursor()
-
-        # Select the database
-        cursor.execute("USE userdb")
-
-        # Fetch the appointment by ID
-        select_appointment_query = """
-        SELECT id, patient_id, appointment_date, CAST(appointment_time AS CHAR), doctor_name, notes
-        FROM appointments
-        WHERE id = %s
-        """
-        cursor.execute(select_appointment_query, (appointment_id,))
-        appointment = cursor.fetchone()
-
-        return appointment
-
-    def fetch_appointment_by_patient_id(db, patient_id):
-
-        query = """
-        SELECT id, patient_id, appointment_date, CAST(appointment_time AS CHAR), doctor_name, notes
-        FROM appointments
-        WHERE patient_id = %s
-        """
-        cursor = db.cursor()
-        cursor.execute("USE userdb")
-        cursor.execute(query, (patient_id,))
-        appointment = cursor.fetchone()
-        # cursor.close()
-        return appointment
-
-    def fetch_appointment_by_doctor_name(db, doctor_name):
-        query = """
-        SELECT id, patient_id, appointment_date, CAST(appointment_time AS CHAR), doctor_name, notes
-        FROM appointments
-        WHERE doctor_name = %s
-        """
-        cursor = db.cursor()
-        cursor.execute("USE userdb")
-        cursor.execute(query, (doctor_name,))
-        appointment = cursor.fetchone()
-        # cursor.close()
-        return appointment
-
-    def search_appointment(db):
-        search_option = st.selectbox("Select search option", [
-                                     "ID", "Patient ID", "Doctor Name"], key="search_option")
-        search_value = st.text_input("Enter search value", key="search_value")
-
-        if st.button("Search"):
-            if search_option == "ID":
-                appointment = fetch_appointment_by_id(db, search_value)
-            elif search_option == "Patient ID":
-                appointment = fetch_appointment_by_patient_id(db, search_value)
-            elif search_option == "Doctor Name":
-                appointment = fetch_appointment_by_doctor_name(
-                    db, search_value)
-
-            if appointment:
-                st.subheader("Appointment Details")
-                df = pd.DataFrame([appointment], columns=[
-                                  'ID', 'Patient ID', 'Appointment Date', 'Appointment Time', 'Doctor Name', 'Notes'])
-                st.dataframe(df)
-                st.session_state.edit_appointment = appointment
-            else:
-                st.write("Appointment not found")
-        if 'edit_appointment' in st.session_state:
-            edit_appointment(db)
-
-    def edit_appointment(db):
-        # if 'edit_appointment' in st.session_state:
-        appointment = st.session_state.edit_appointment
-        st.subheader("Edit Appointment Details")
-        new_appointment_date = st.date_input(
-            "Appointment Date", value=appointment[2])
-        new_appointment_time = st.text_input(
-            "Appointment Time", value=appointment[3])
-        new_doctor_name = st.text_input("Doctor Name", value=appointment[4])
-        new_notes = st.text_input("Notes", value=appointment[5])
-
-        if st.button("Update Appointment"):
-            edit_appointment_record(
-                db, appointment[0], new_appointment_date, new_appointment_time, new_doctor_name, new_notes)
-            st.write("Appointment record updated successfully.")
-            del st.session_state.edit_appointment
-
-    def update_patient_record(db):
-        """Update a patient's record in the 'patients' table."""
-
-        search_option = st.selectbox("Select search option", [
-                                     "ID", "Contact Number", "CNIS"], key="search_option")
-        search_value = st.text_input("Enter search value", key="search_value")
-
-        if st.button("Search :magic_wand:"):
-            if search_option == "ID":
-                patient = fetch_patient_by_id(db, search_value)
-            elif search_option == "Contact Number":
-                patient = fetch_patient_by_contact(db, search_value)
-            elif search_option == "CNIS":
-                patient = fetch_patient_by_cnis(db, search_value)
-
-            if patient:
-                st.subheader("Patient Details")
-                df = pd.DataFrame([patient], columns=[
-                                  'ID', 'Name', 'Age', 'Contact Number', 'Email', 'Address', 'Date Added'])
-                st.dataframe(df)
-                st.session_state.edit_patient = patient
-            else:
-                st.write("Patient not found")
-
-        if 'edit_patient' in st.session_state:
-            edit_patient(db)
-
-    def edit_patient(db):
-        """Edit a patient's record in the 'patients' table."""
-
-        st.subheader("Edit Patient Details")
-        new_name = st.text_input(
-            "Enter new name", value=st.session_state.edit_patient[1])
-        new_age = st.number_input(
-            "Enter new age", value=st.session_state.edit_patient[2])
-        new_contact = st.text_input(
-            "Enter new contact number", value=st.session_state.edit_patient[3])
-        new_email = st.text_input(
-            "Enter new email", value=st.session_state.edit_patient[4])
-        new_address = st.text_input(
-            "Enter new address", value=st.session_state.edit_patient[5])
-
-        if st.button("Update :roller_coaster:"):
-            patient_id = st.session_state.edit_patient[0]
-            update_patient_info(db, patient_id, new_name,
-                                new_age, new_contact, new_email, new_address)
-
-    def update_patient_info(db, patient_id, new_name, new_age, new_contact, new_email, new_address):
-        """Update a patient's record in the 'patients' table."""
-        cursor = db.cursor()
-
-        # Select the database
-        cursor.execute("USE userdb")
-
-        # Update the patient record
-        update_patient_query = """
-        UPDATE patients
-        SET name = %s, age = %s, contact_number = %s, email = %s, address = %s
-        WHERE id = %s
-        """
-        patient_data = (new_name, new_age, new_contact,
-                        new_email, new_address, patient_id)
-
-        cursor.execute(update_patient_query, patient_data)
-        db.commit()
-        st.write("Patient record updated successfully.")
-
-    def main():
-        # Title and sidebar
-        st.title("Patient Management System :hospital:")
-        db = create_connection()
-
-        # create_database(db)
-
-        # config['database'] = 'userdb'  # Update the database name
-        # db = create_connection()
-
-        # create_patients_table(db)
-        # create_appointments_table(db)
-        # modify_patients_table(db)
-
-        menu = ["Home", "Add patient Record", "Show patiet Records", "Search and Edit Patient", "Deetel Patients Record",
-                "Add patients Appointments", "Show All Appointments", "Search and Edit Patients Appointments"]
-        options = st.sidebar.radio("Select an Option :dart:", menu)
-        if options == "Home":
-            st.subheader("Welcome to Hospital Mnagement System")
-            st.write("Navigate from sidebar to access database")
-            # st.image('hospital.jpg', width=600)
-
-        elif options == "Add patient Record":
-            st.subheader(
-                "Enter patient details :woman_in_motorized_wheelchair:")
-            name = st.text_input("Enter name of patient", key="name")
-            age = st.number_input("Enter age of patient", key="age", value=1)
-            contact = st.text_input("Enter contact of patient", key="contact")
-            email = st.text_input("Enter Email of patient", key="email")
-            address = st.text_input("Enter Address of patient", key="address")
-        if st.button("add patient record"):
+    def fetch_data(db, column_name, value):
+        """Fetch records from the 'data_aset' table based on column_name."""
+        try:
             cursor = db.cursor()
-            select_query = """
-            SELECT * FROM patients WHERE contact_number=%s
-            """
-            cursor.execute(select_query, (contact,))
-            existing_patient = cursor.fetchone()
-            if existing_patient:
-                st.warning(
-                    "A patient with the same contact number already exist")
-            else:
-                insert_patient_record(db, name, age, contact, email, address)
+            query = f'SELECT * FROM data_aset WHERE "{column_name}" = %s'
+            cursor.execute(query, (value,))
+            records = cursor.fetchall()
+            columns = [desc[0] for desc in cursor.description]
+            return records, columns
+        except Exception as e:
+            st.error(f"An error occurred while fetching data: {e}")
+            return None, None
 
-        elif options == "Show patiet Records":
-            patients = fetch_all_patients(db)
-            if patients:
-                st.subheader("All patients Records :magic_wand:")
-                df = pd.DataFrame(patients, columns=[
-                                  'ID', 'Name', 'Age', 'Contact Number', 'Email', 'Address', 'Date Added'])
-                st.dataframe(df)
-            else:
-                st.write("No patients found")
-        elif options == "Search and Edit Patient":
-            update_patient_record(db)
+    def delete_data_record(db, delete_option, delete_value):
+        """Delete a record from the 'data_aset' table."""
+        # Fetch data to confirm existence
+        records, columns = fetch_data(db, delete_option, delete_value)
+        if records:
+            st.session_state.delete_results = {
+                "records": records,
+                "columns": columns
+            }
+        else:
+            st.warning("No records found")
+            if "delete_results" in st.session_state:
+                del st.session_state.delete_results
+            return
 
-        elif options == "Deetel Patients Record":
-            st.subheader("Search a patient to delate :skull_and_crossbones:")
-            delete_option = st.selectbox("Select delete option", [
-                                         "ID", "Name", "Contact Number"], key="delete_option")
+        # Display results for confirmation
+        if "delete_results" in st.session_state:
+            st.subheader("Delete Results")
+            df = pd.DataFrame(
+                st.session_state.delete_results["records"],
+                columns=st.session_state.delete_results["columns"]
+            )
+            st.dataframe(df)
+
+        # Allow user to select a record to delete
+        records = st.session_state.delete_results["records"]
+        columns = st.session_state.delete_results["columns"]
+
+        st.subheader("Select a Record to Delete")
+        selected_delete_idx = st.selectbox(
+            "Select record",
+            range(len(records)),
+            format_func=lambda x: f"Record {x+1} - {records[x][columns.index('FATID')]}",
+            key="record_selector"
+        )
+
+        if st.button("Confirm Selection", key="confirm_selection"):
+            selected_record = records[selected_delete_idx]
+            try:
+                cursor = db.cursor()
+                # Use the selected record's value for deletion
+                delete_query = f'DELETE FROM data_aset WHERE "{delete_option}" = %s'
+                cursor.execute(
+                    delete_query, (selected_record[columns.index(delete_option)],))
+                db.commit()
+                st.success("✅ Record deleted successfully.")
+                # Clear session state after deletion
+                del st.session_state.delete_results
+            except Exception as e:
+                db.rollback()  # Rollback in case of error
+                st.error(f"❌ An error occurred while deleting data: {e}")
+
+    def update_data_record(db):
+        """Search and display multiple records from the 'data_aset' table."""
+        st.subheader("Search Records")
+
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            search_option = st.selectbox(
+                "Search by",
+                ["FATID", "FDTID", "OLT"],
+                key="search_option"
+            )
+        with col2:
+            search_value = st.text_input(
+                "Search value",
+                key="search_value",
+                on_change=None
+            )
+
+        if st.button("Search 🔍", key="search_button"):
+            # Clear previous state related to editing
+            st.session_state.pop("selected_record", None)
+            st.session_state.pop("original_record", None)
+            st.session_state.pop("columns", None)
+            st.session_state.pop("show_confirmation", None)
+
+            if not search_value:
+                st.warning("Please enter a search value")
+                return
+            else:
+                records, columns = fetch_data(db, search_option, search_value)
+                if records:
+                    st.session_state.search_results = {
+                        "records": records,
+                        "columns": columns
+                    }
+                else:
+                    st.warning("No records found")
+                    st.session_state.pop("search_results", None)
+
+        # Always display the DataFrame if search_results exist
+        if "search_results" in st.session_state:
+            st.subheader("Search Results")
+            df = pd.DataFrame(
+                st.session_state.search_results["records"],
+                columns=st.session_state.search_results["columns"]
+            )
+            st.dataframe(df)
+
+    def show_record_selection(db):
+        """Show record selection interface after search."""
+        if "search_results" not in st.session_state:
+            return
+
+        records = st.session_state.search_results["records"]
+        columns = st.session_state.search_results["columns"]
+
+        # Allow user to select a record
+        st.subheader("Select a Record to Edit")
+        selected_idx = st.selectbox(
+            "Select record",
+            range(len(records)),
+            format_func=lambda x: f"Record {x+1} - {records[x][columns.index('FATID')]}",
+            key="record_selector"
+        )
+
+        if st.button("Confirm Selection", key="confirm_selection"):
+            # Ambil FATID atau identifier unik dari record yang dipilih
+            selected_fatid = records[selected_idx][columns.index("FATID")]
+
+            # Fetch data ulang dari database
+            new_record, new_columns = fetch_data(db, "FATID", selected_fatid)
+
+            if new_record:
+                # Update session state dengan data baru
+                st.session_state.selected_record = list(
+                    new_record[0])  # Data record asli
+                st.session_state.original_record = deepcopy(
+                    new_record[0])  # Data asli untuk referensi
+                st.session_state.columns = new_columns
+
+                # Reset semua input form agar sesuai dengan data baru yang di-fetch
+                for col in new_columns:
+                    key_name = f"input_{col}"
+                    if key_name in st.session_state:
+                        # Clear existing form state
+                        st.session_state.pop(key_name)
+
+                st.success(
+                    "Record reloaded from the database and ready for editing!")
+            else:
+                st.warning("Failed to reload record from the database.")
+
+    def edit_data(db):
+        """Edit the selected record in the 'data_aset' table."""
+        if 'selected_record' not in st.session_state:
+            st.warning("No record selected for editing.")
+            return
+
+        st.subheader("Edit Record Details")
+        record = st.session_state.selected_record  # Data yang telah di-fetch ulang
+        columns = st.session_state.columns  # Kolom dari database
+        original_record = st.session_state.original_record  # Data asli dari database
+        new_values = {}
+
+        # Gunakan form untuk input dengan data dari original_record
+        with st.form(key="edit_form", clear_on_submit=False):
+            # General Information Section
+            with st.expander("General Information"):
+                new_values["PA"] = st.text_input(
+                    "PA",
+                    # Gunakan data asli dari record yang di-fetch ulang
+                    value=record[columns.index("PA")] or "",
+                    key="input_PA"
+                )
+                # Gunakan nilai yang di-fetch ulang
+                tanggal_rfs = record[columns.index("Tanggal RFS")]
+                new_values["Tanggal RFS"] = st.date_input(
+                    "Tanggal RFS",
+                    value=tanggal_rfs or date.today(),
+                    key="input_Tanggal_RFS"
+                )
+                new_values["Mitra"] = st.text_input(
+                    "Mitra",
+                    # Gunakan data dari record terbaru
+                    value=record[columns.index("Mitra")] or "",
+                    key="input_Mitra"
+                )
+                new_values["Kategori"] = st.text_input(
+                    "Kategori",
+                    # Data terbaru dari database
+                    value=record[columns.index("Kategori")] or "",
+                    key="input_Kategori"
+                )
+                new_values["Area KP"] = st.text_input(
+                    "Area KP",
+                    # Data terbaru dari record
+                    value=record[columns.index("Area KP")] or "",
+                    key="input_Area_KP"
+                )
+                new_values["Kota Kab"] = st.text_input(
+                    "Kota Kab",
+                    # Data terbaru dari database
+                    value=record[columns.index("Kota Kab")] or "",
+                    key="input_Kota_Kab"
+                )
+
+            # OLT Information Section
+            with st.expander("OLT Information"):
+                new_values["Lokasi OLT"] = st.text_input(
+                    "Lokasi OLT", value=record[columns.index("Lokasi OLT")] or "")
+                new_values["Hostname OLT"] = st.text_input(
+                    "Hostname OLT", value=record[columns.index("Hostname OLT")] or "")
+                new_values["Latitude OLT"] = st.text_input(
+                    "Latitude OLT", value=record[columns.index("Latitude OLT")] or "")
+                new_values["Longtitude OLT"] = st.text_input(
+                    "Longtitude OLT", value=record[columns.index("Longtitude OLT")] or "")
+                new_values["Brand OLT"] = st.text_input(
+                    "Brand OLT", value=record[columns.index("Brand OLT")] or "")
+                new_values["Type OLT"] = st.text_input(
+                    "Type OLT", value=record[columns.index("Type OLT")] or "")
+                new_values["Kapasitas OLT"] = st.number_input(
+                    "Kapasitas OLT", min_value=0, value=record[columns.index("Kapasitas OLT")] or 0)
+                new_values["Kapasitas port OLT"] = st.number_input(
+                    "Kapasitas port OLT", min_value=0, value=record[columns.index("Kapasitas port OLT")] or 0)
+                new_values["OLT Port"] = st.number_input(
+                    "OLT Port", min_value=0, value=record[columns.index("OLT Port")] or 0)
+                new_values["Interface OLT"] = st.text_input(
+                    "Interface OLT", value=record[columns.index("Interface OLT")] or "")
+
+            # FDT Information Section
+            with st.expander("FDT Information"):
+                fdt_new_existing = record[columns.index(
+                    "FDT New/Existing")] or "New"
+                if fdt_new_existing not in ["New", "Existing"]:
+                    fdt_new_existing = "New"
+                new_values["FDT New/Existing"] = st.selectbox("FDT New/Existing", [
+                    "New", "Existing"], index=["New", "Existing"].index(fdt_new_existing))
+                new_values["FDTID"] = st.text_input(
+                    "FDT ID", value=record[columns.index("FDTID")] or "")
+                new_values["Jumlah Splitter FDT"] = st.number_input(
+                    "Jumlah Splitter FDT", min_value=0, value=record[columns.index("Jumlah Splitter FDT")] or 0)
+                new_values["Kapasitas Splitter FDT"] = st.number_input(
+                    "Kapasitas Splitter FDT", min_value=0, value=record[columns.index("Kapasitas Splitter FDT")] or 0)
+                new_values["Latitude FDT"] = st.text_input(
+                    "Latitude FDT", value=record[columns.index("Latitude FDT")] or "")
+                new_values["Longtitude FDT"] = st.text_input(
+                    "Longtitude FDT", value=record[columns.index("Longtitude FDT")] or "")
+                new_values["Port FDT"] = st.number_input(
+                    "Port FDT", min_value=0, value=record[columns.index("Port FDT")] or 0)
+                new_values["Status OSP AMARTA FDT"] = st.text_input(
+                    "Status OSP AMARTA FDT", value=record[columns.index("Status OSP AMARTA FDT")] or "")
+
+            # Cluster Information Section
+            with st.expander("Cluster Information"):
+                new_values["Cluster"] = st.text_input(
+                    "Cluster", value=record[columns.index("Cluster")] or "")
+                new_values["Latitude Cluster"] = st.text_input(
+                    "Latitude Cluster", value=record[columns.index("Latitude Cluster")] or "")
+                new_values["Longtitude Cluster"] = st.text_input(
+                    "Longtitude Cluster", value=record[columns.index("Longtitude Cluster")] or "")
+
+            # FAT Information Section
+            with st.expander("FAT Information"):
+                new_values["FATID"] = st.text_input(
+                    "FATID", value=record[columns.index("FATID")] or "")
+                new_values["Jumlah Splitter FAT"] = st.number_input(
+                    "Jumlah Splitter FAT", min_value=0, value=record[columns.index("Jumlah Splitter FAT")] or 0)
+                new_values["Kapasitas Splitter FAT"] = st.number_input(
+                    "Kapasitas Splitter FAT", min_value=0, value=record[columns.index("Kapasitas Splitter FAT")] or 0)
+                new_values["Latitude FAT"] = st.text_input(
+                    "Latitude FAT", value=record[columns.index("Latitude FAT")] or "")
+                new_values["Longtitude FAT"] = st.text_input(
+                    "Longtitude FAT", value=record[columns.index("Longtitude FAT")] or "")
+                new_values["Status OSP AMARTA FAT"] = st.text_input(
+                    "Status OSP AMARTA FAT", value=record[columns.index("Status OSP AMARTA FAT")] or "")
+
+            # Additional Information Section
+            with st.expander("Additional Information"):
+                new_values["Kecamatan"] = st.text_input(
+                    "Kecamatan", value=record[columns.index("Kecamatan")] or "")
+                new_values["Kelurahan"] = st.text_input(
+                    "Kelurahan", value=record[columns.index("Kelurahan")] or "")
+                new_values["Sumber Datek"] = st.text_input(
+                    "Sumber Datek", value=record[columns.index("Sumber Datek")] or "")
+                new_values["HC OLD"] = st.number_input(
+                    "HC OLD", min_value=0, value=record[columns.index("HC OLD")] or 0)
+                new_values["HC iCRM+"] = st.number_input(
+                    "HC iCRM+", min_value=0, value=record[columns.index("HC iCRM+")] or 0)
+                new_values["TOTAL HC"] = st.number_input(
+                    "TOTAL HC", min_value=0, value=record[columns.index("TOTAL HC")] or 0)
+                new_values["CLEANSING HP"] = st.text_input(
+                    "CLEANSING HP", value=record[columns.index("CLEANSING HP")] or "")
+                new_values["OLT"] = st.text_input(
+                    "OLT", value=record[columns.index("OLT")] or "")
+                new_values["UPDATE ASET"] = st.text_input(
+                    "UPDATE ASET", value=record[columns.index("UPDATE ASET")] or "")
+                new_values["FAT KONDISI"] = st.text_input(
+                    "FAT KONDISI", value=record[columns.index("FAT KONDISI")] or "")
+                new_values["FILTER FAT CAP"] = st.text_input(
+                    "FILTER FAT CAP", value=record[columns.index("FILTER FAT CAP")] or "")
+                new_values["FAT ID X"] = st.text_input(
+                    "FAT ID X", value=record[columns.index("FAT ID X")] or "")
+                new_values["FAT FILTER PEMAKAIAN"] = st.text_input(
+                    "FAT FILTER PEMAKAIAN", value=record[columns.index("FAT FILTER PEMAKAIAN")] or "")
+                new_values["KETERANGAN FULL"] = st.text_input(
+                    "KETERANGAN FULL", value=record[columns.index("KETERANGAN FULL")] or "")
+                new_values["AMARTA UPDATE"] = st.text_input(
+                    "AMARTA UPDATE", value=record[columns.index("AMARTA UPDATE")] or "")
+                new_values["LINK DOKUMEN FEEDER"] = st.text_input(
+                    "LINK DOKUMEN FEEDER", value=record[columns.index("LINK DOKUMEN FEEDER")] or "")
+                new_values["KETERANGAN DOKUMEN"] = st.text_input(
+                    "KETERANGAN DOKUMEN", value=record[columns.index("KETERANGAN DOKUMEN")] or "")
+                new_values["LINK DATA ASET"] = st.text_input(
+                    "LINK DATA ASET", value=record[columns.index("LINK DATA ASET")] or "")
+                new_values["KETERANGAN DATA ASET"] = st.text_input(
+                    "KETERANGAN DATA ASET", value=record[columns.index("KETERANGAN DATA ASET")] or "")
+                new_values["LINK MAPS"] = st.text_input(
+                    "LINK MAPS", value=record[columns.index("LINK MAPS")] or "")
+                new_values["UP3"] = st.text_input(
+                    "UP3", value=record[columns.index("UP3")] or "")
+                new_values["ULP"] = st.text_input(
+                    "ULP", value=record[columns.index("ULP")] or "")
+
+            submitted = st.form_submit_button("Update Record", type="primary")
+
+            if submitted:
+                # Pindahkan konfirmasi ke luar form
+                st.session_state.show_confirmation = True
+
+        # Bagian konfirmasi di luar form
+        if st.session_state.get('show_confirmation', False):
+            st.warning("Are you sure you want to update this record?")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Yes, Update", type="primary"):
+                    try:
+                        cursor = db.cursor()
+                        set_clause = ", ".join(
+                            [f'"{col}" = %s' for col in new_values.keys()]
+                        )
+
+                        where_conditions = []
+                        where_values = []
+                        key_columns = ["FATID", "FDTID", "OLT",
+                                       "Tanggal RFS", "Hostname OLT"]
+
+                        for col in key_columns:
+                            if col in columns:
+                                original_value = original_record[columns.index(
+                                    col)]
+                                if original_value is not None:
+                                    where_conditions.append(f'"{col}" = %s')
+                                    where_values.append(original_value)
+
+                        if not where_conditions:
+                            st.error("No valid conditions for update")
+                            return
+
+                        where_clause = " AND ".join(where_conditions)
+                        values = list(new_values.values()) + where_values
+
+                        update_query = f"""
+                        UPDATE data_aset
+                        SET {set_clause}
+                        WHERE {where_clause}
+                        """
+
+                        cursor.execute(update_query, values)
+                        db.commit()
+
+                        if cursor.rowcount == 1:
+                            st.success("✅ Record updated successfully!")
+                            del st.session_state.selected_record
+                            del st.session_state.original_record
+                            return
+                        else:
+                            st.warning(
+                                f"⚠️ Unexpected result: {cursor.rowcount} records updated")
+                    except Exception as e:
+                        st.error(f"An error occurred while updating data: {e}")
+            with col2:
+                if st.button("Cancel"):
+                    del st.session_state.show_confirmation
+                    st.rerun()
+
+    # Main App Layout
+    st.title("Iconnet Management System 🏥")
+
+    # Initialize database connection
+    if "db" not in st.session_state or st.session_state.db.closed:
+        st.session_state.db = connect_db()
+    db = st.session_state.db
+
+    # Create tabs
+    tab_home, tab_edit_record, tab_delete_record = st.tabs([
+        "Home 🏠",
+        "Search and Edit ✏️",
+        "Delete Data Record ❌"
+    ])
+
+    with tab_home:
+        st.subheader("Welcome to Iconnet Management System")
+        st.write("Use the tabs above to manage records.")
+
+    with tab_edit_record:
+        update_data_record(db)
+        show_record_selection(db)
+        if 'selected_record' in st.session_state:
+            edit_data(db)
+
+    with tab_delete_record:
+        st.subheader("Delete a Data Record")
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            delete_option = st.selectbox(
+                "Search by",
+                ["FATID", "FDTID", "OLT"],
+                key="delete_option"
+            )
+        with col2:
             delete_value = st.text_input(
-                "Enter delete value", key="delete_value")
+                "Value to delete",
+                key="delete_value",
+                on_change=None
+            )
+        if st.button("search data", key="search_button_delete"):
+            if delete_value:
+                delete_data_record(db, delete_option, delete_value)
+            else:
+                st.warning("Please enter a value to delete")
 
-            if st.button("Delete"):
-                delete_patient_record(db, delete_option, delete_value)
-
-        elif options == "Add patients Appointments":
-            patient_id = st.number_input(
-                "Enter patient ID:", key="appointment_patient_id")
-            appointment_date = st.date_input(
-                "Enter appointment date:", key="appointment_date")
-            appointment_time = st.time_input(
-                "Enter appointment time:", key="appointment_time")
-            doctor_name = st.text_input(
-                "Enter doctor's name:", key="appointment_doctor_name")
-            notes = st.text_area("Enter appointment notes:",
-                                 key="appointment_notes")
-
-            if st.button("Add Appointment"):
-                insert_appointment_record(
-                    db, patient_id, appointment_date, appointment_time, doctor_name, notes)
-                st.write("Appointment record added successfully.")
-
-        elif options == "Show All Appointments":
-            show_all_appointments(db)
-
-        elif options == "Search and Edit Patients Appointments":
-
-            search_appointment(db)
-
+    # Close database connection
+    if db and not db.closed:
         db.close()
-
-    if __name__ == "__main__":
-        main()

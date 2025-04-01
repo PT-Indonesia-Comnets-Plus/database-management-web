@@ -20,36 +20,44 @@ SMTP_PASSWORD = st.secrets["smtp"]["password"]
 
 def save_login_logout(fs, username, event_type):
     now = datetime.now()
-    date = now.strftime("%d-%m-%Y")
-    time = now.strftime("%H:%M:%S")
+    date = now.strftime("%d-%m-%Y")  # Format tanggal (dd-MM-yyyy)
+    time = now.strftime("%H:%M:%S")  # Format waktu (hh:mm:ss)
+
+    # Akses dokumen terkait user di Firestore
     doc_ref = fs.collection("employee attendance").document(username)
 
     try:
+        # Update data sesuai jenis event (login/logout)
         if event_type == "login":
             doc_ref.update({
-                "Login_Date": firestore.ArrayUnion([date]),
-                "Login_Time": firestore.ArrayUnion([time])
+                # Simpan login time berdasarkan tanggal
+                f"activity.{date}.Login_Time": firestore.ArrayUnion([time])
             })
         elif event_type == "logout":
             doc_ref.update({
-                "Logout_Date": firestore.ArrayUnion([date]),
-                "Logout_Time": firestore.ArrayUnion([time])
+                # Simpan logout time berdasarkan tanggal
+                f"activity.{date}.Logout_Time": firestore.ArrayUnion([time])
             })
     except Exception as e:
+        # Jika dokumen belum ada, buat dokumen baru dengan struktur data awal
         if event_type == "login":
             doc_ref.set({
-                "Login_Date": [date],
-                "Login_Time": [time],
-                "Logout_Date": [],
-                "Logout_Time": []
-            })
+                "activity": {
+                    date: {
+                        "Login_Time": [time],
+                        "Logout_Time": []
+                    }
+                }
+            }, merge=True)  # Gunakan merge=True untuk memastikan data lain tidak terhapus
         elif event_type == "logout":
             doc_ref.set({
-                "Login_Date": [],
-                "Login_Time": [],
-                "Logout_Date": [date],
-                "Logout_Time": [time]
-            })
+                "activity": {
+                    date: {
+                        "Login_Time": [],
+                        "Logout_Time": [time]
+                    }
+                }
+            }, merge=True)  # Gunakan merge=True untuk memastikan data lain tidak terhapus
 
 
 def verify_password(email, password):
@@ -243,7 +251,7 @@ def send_verification_email(email):
         <body>
             <div class="email-container">
                 <div class="email-header">
-                    <img src="https://raw.githubusercontent.com/rizkyyanuark/RPL-HarmonCorp/main/prototyping/image/logo.jpg" alt="Harmon Corp Logo">
+                    <img src="https://raw.githubusercontent.com/rizkyyanuark/intern-iconnet/blob/main/image/logo_Iconnet.png" alt="Harmon Corp Logo">
                 </div>
                 <div class="email-body">
                     <p>Hi {user.display_name or user.email},</p>

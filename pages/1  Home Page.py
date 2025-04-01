@@ -1,12 +1,10 @@
 import streamlit as st
 from PIL import Image, ImageOps
 from utils.database import connect_db
+from utils.firebase_config import get_firebase_app
 from utils.cookies import load_cookie_to_session
 import os
-import pandas as pd
-import asyncio
 from streamlit_option_menu import option_menu
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 from sub_pages import dashboard, search, update_data, chatbot, update
 
 # Load data from cookies
@@ -30,6 +28,19 @@ try:
                        page_icon=logo_with_padding)
 except st.errors.StreamlitSetPageConfigMustBeFirstCommandError:
     pass
+
+# Initialize session state attributes
+if "username" not in st.session_state:
+    load_cookie_to_session(st.session_state)
+
+if "db_connection" not in st.session_state:
+    # Store the database connection in session_state
+    st.session_state.db_connection = connect_db()
+    st.session_state.connection_active = True
+
+if "fs" not in st.session_state:
+    st.session_state.fs = get_firebase_app()
+fs = st.session_state.fs
 
 with st.sidebar:
     app = option_menu(
