@@ -8,10 +8,13 @@ from utils.database import connect_db
 import warnings
 from typing import List
 import os
+import time
 
 warnings.filterwarnings('ignore')
 
 # Class untuk mendapatkan dokumen yang relevan dari PostgreSQL
+
+api_key = os.getenv("GOOGLE_API_KEY", st.secrets["google"]["api_key"])
 
 
 class PostgresRetriever(BaseRetriever):
@@ -73,6 +76,7 @@ def create_qa_chain() -> RetrievalQA:
         llm = ChatGoogleGenerativeAI(
             model="gemini-2.0-flash",
             temperature=1,
+            api_key=api_key,
             convert_system_message_to_human=True,
             system_message="Jawab berdasarkan dokumen yang tersedia.",
             model_kwargs={"max_output_tokens": 8192,
@@ -95,34 +99,70 @@ def create_qa_chain() -> RetrievalQA:
         return None
 
 
+def display_previous_messages():
+    for message in st.session_state.messages:
+        if message["role"] == "user":
+            st.chat_message("user").markdown(
+                f"**{message['content']}**", unsafe_allow_html=True)
+        elif message["role"] == "assistant":
+            st.chat_message("assistant").markdown(
+                message["content"], unsafe_allow_html=True)
+
+
+# Fungsi untuk menampilkan animasi bertahap
+def display_message_with_typing_animation(placeholder, message, typing_speed=0.1):
+    displayed_message = ""
+    for char in message:
+        displayed_message += char
+        time.sleep(0.02)  # Memberikan jeda waktu 20ms untuk setiap karakter
+        placeholder.markdown(displayed_message)
+
+
 def app():
-    st.title("Chatbot Berbasis Dokumen")
-    if os.path.exists("style.css"):
-        with open("style.css") as f:
+    st.title("🤖 **Chatbot Berbasis Dokumen**")
+
+    if os.path.exists("static\css\style.css"):
+        with open("static\css\style.css") as f:
             st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+
+    # Placeholder untuk chatbot
     qa_chain = create_qa_chain()
     if not qa_chain:
+        st.error("Gagal membuat QA chain.")
         return
+
     # Menyimpan pesan dalam session_state
-    if 'message' not in st.session_state:
-        st.session_state.message = []
+    if 'messages' not in st.session_state:
+        st.session_state.messages = []
 
     # Menampilkan pesan sebelumnya
-    for message in st.session_state.message:
-        st.chat_message(message["role"]).markdown(message["content"])
+    display_previous_messages()
 
     # Input dari user
-    prompt = st.chat_input("Masukkan pertanyaan:")
+    prompt = st.chat_input("Masukkan pertanyaan Anda di sini...")
     if prompt:
-        st.chat_message("user").markdown(prompt)
-        st.session_state.message.append({"role": "user", "content": prompt})
+        # Tampilkan pesan user di UI
+        st.chat_message("user").markdown(
+            f"**{prompt}**", unsafe_allow_html=True)
+        st.session_state.messages.append({"role": "user", "content": prompt})
 
-        response = qa_chain.invoke({"query": prompt})
-        assistant_message = response["result"]
+        # Animasi "thinking" sebelum respons assistant
+        with st.chat_message("assistant"):
+            thinking_placeholder = st.empty()
+            for dot_count in range(3):
+                thinking_placeholder.markdown(f"🤔 Thinking{'.' * dot_count}")
+                time.sleep(1)
 
-        # Menampilkan jawaban dari chatbot
-        st.chat_message("assistant").markdown(assistant_message)
-        st.session_state.message.append(
+            # Mendapatkan respons dari model
+            response = qa_chain.invoke({"query": prompt})
+            assistant_message = response["result"]
+
+            # Tampilkan animasi bertahap untuk respons assistant
+            display_message_with_typing_animation(
+                thinking_placeholder, assistant_message)
+
+        # Simpan respons assistant
+        st.session_state.messages.append(
             {"role": "assistant", "content": assistant_message})
 
 

@@ -1,5 +1,5 @@
 import firebase_admin
-from firebase_admin import credentials, firestore
+from firebase_admin import credentials, firestore, auth
 import streamlit as st
 import json
 from dotenv import load_dotenv
@@ -18,8 +18,6 @@ def get_firebase_app():
 
         firebase_admin.initialize_app(creds)
 
-    # Mengakses Firestore
+    # Mengakses Firestore dan Auth
     fs = firestore.client()
-
-    # Mengembalikan objek Firestore
-    return fs
+    return fs, auth

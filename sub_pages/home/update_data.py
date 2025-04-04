@@ -181,8 +181,8 @@ def app():
         st.session_state.db = connect_db()
     db = st.session_state.db
 
-    if os.path.exists("style.css"):
-        with open("style.css") as f:
+    if os.path.exists("static\css\style.css"):
+        with open("static\css\style.css") as f:
             st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
     # Tabs untuk navigasi

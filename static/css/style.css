@@ -1,48 +1,29 @@
-[data-testid="metric-container"] {
-  box-shadow: 0 0 4px #686664;
-  padding: 10px;
-}
-
-.plot-container > div {
-  box-shadow: 0 0 2px #070505;
-  padding: 5px;
-  border-color: #000000;
-}
-
-div[data-testid="stExpander"] div[role="button"] p {
-  font-size: 1.2rem;
-  color: rgb(0, 0, 0);
-  border-color: #000000;
-  color-scheme: #000000;
-}
-
-.sidebar-content {
-  color: white;
-}
-
-[data-testid="stSidebar"] {
-  color: white;
-}
-
-div[data-baseweb="input"] > div {
-  background-color: #ffffff;
-  color: black;
-  border-radius: 8px;
-}
-
-[data-testid="stSidebar"] {
-  color: white;
-  font-size: 24px;
-}
-
+/* Gaya untuk file uploader */
 [data-testid="stFileUploaderDropzoneInstructions"] {
-  background-color: whitesmoke !important;
+  background-color: #f5f5f5 !important;
   color: white !important;
   border-radius: 15px !important;
   padding: 10px;
 }
+/* Efek hover */
+[data-testid="stFileUploaderDropzone"] {
+  background-color: #42c2ff !important;
+}
 
-/* Warna latar belakang khusus untuk avatar user */
+/* Gaya teks dalam file uploader */
+[data-testid="stBaseButton-secondary"] div {
+  font-size: 16px !important; /* Ukuran font */
+  font-weight: bold !important; /* Tebal */
+  color: black !important;
+}
+
+[data-testid="stFileUploaderDropzoneInstructions"] div {
+  font-size: 16px !important; /* Ukuran font */
+  font-weight: bold !important; /* Tebal */
+  color: black !important;
+}
+
+/* Warna latar belakang untuk bg bubble */
 /* Pesan dari User */
 [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) {
   background-color: #d1e8ff !important; /* Latar belakang biru muda */
@@ -64,7 +45,6 @@ div[data-baseweb="input"] > div {
 }
 
 /* AVATAR STYLING */
-
 /* Avatar untuk User */
 [data-testid="stChatMessageAvatarUser"] {
   background-color: #42c2ff !important; /* Warna biru terang untuk avatar user */
@@ -77,70 +57,6 @@ div[data-baseweb="input"] > div {
   background-color: #42c2ff !important; /* Warna biru terang untuk avatar assistant */
   border-radius: 50%; /* Membuat avatar bulat */
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); /* Efek bayangan untuk avatar */
-}
-
-/* Efek hover */
-[data-testid="stFileUploaderDropzone"] {
-  background-color: #42c2ff !important;
-}
-
-/* Gaya teks dalam file uploader */
-[data-testid="stBaseButton-secondary"] div {
-  font-size: 16px !important; /* Ukuran font */
-  font-weight: bold !important; /* Tebal */
-  color: black !important;
-}
-
-[data-testid="stFileUploaderDropzoneInstructions"] div {
-  font-size: 16px !important; /* Ukuran font */
-  font-weight: bold !important; /* Tebal */
-  color: black !important;
-}
-
-/* Gaya untuk input teks */
-input[type="text"] {
-  color: black !important;
-  background-color: white !important;
-  border: 2px solid #ffffff !important;
-  border-radius: 5px;
-  padding: 5px;
-}
-
-[data-testid="metric-container"] {
-  box-shadow: 0 0 4px #686664;
-  padding: 10px;
-}
-
-.plot-container > div {
-  box-shadow: 0 0 2px #070505;
-  padding: 5px;
-  border-color: #000000;
-}
-
-div[data-testid="stExpander"] div[role="button"] p {
-  font-size: 1.2rem;
-  color: rgb(0, 0, 0);
-  border-color: #000000;
-  color-scheme: #000000;
-}
-
-.sidebar-content {
-  color: white;
-}
-
-[data-testid="stSidebar"] {
-  color: white;
-}
-
-div[data-baseweb="input"] > div {
-  background-color: #ffffff;
-  color: black;
-  border-radius: 8px;
-}
-
-[data-testid="stSidebar"] {
-  color: white;
-  font-size: 24px;
 }
 
 /* Gaya untuk input teks */
@@ -168,18 +84,54 @@ input[type="number"] {
   padding: 5px;
 }
 
-/* Opsional: Hover efek untuk number input */
+/* Hover efek untuk number input */
 input[type="number"]:hover {
   background-color: #42c2ff !important;
 }
 
+[data-testid="stChatInputSubmitButton"] {
+  color: #252121 !important;
+  padding: 10px;
+}
+
 /* Gaya untuk text area */
 textarea {
-  color: black !important;
-  background-color: #7dcdf1 !important;
-  border: 2px solid #ffffff !important;
-  border-radius: 10px;
-  padding: 5px;
+  color: black !important; /* Warna teks */
+  background-color: #7dcdf1 !important; /* Latar belakang biru muda */
+  border: 2px solid #ffffff !important; /* Border putih */
+  border-radius: 10px; /* Membulatkan sudut */
+  padding: 10px; /* Ruang internal */
+  font-family: "Arial", sans-serif; /* Font yang bersih */
+  font-size: 14px; /* Ukuran font */
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* Efek bayangan */
+  transition: all 0.3s ease; /* Animasi untuk hover dan fokus */
+}
+
+/* Hover Effect */
+textarea:hover {
+  background-color: #82d7f3 !important; /* Warna sedikit lebih cerah saat hover */
+  border-color: #cfd8dc !important; /* Border abu-abu lembut saat hover */
+}
+
+/* Fokus Effect */
+textarea:focus {
+  background-color: #ffffff !important; /* Latar belakang putih saat fokus */
+  border-color: #7dcdf1 !important; /* Border biru muda saat fokus */
+  outline: none; /* Hilangkan garis luar default */
+}
+
+/* Styling untuk Indikator Placeholder */
+textarea::placeholder {
+  color: #004085; /* Hijau tua yang harmonis */
+  font-style: italic; /* Gaya miring untuk placeholder */
+}
+
+/* Responsif untuk perangkat mobile */
+@media (max-width: 768px) {
+  textarea {
+    font-size: 12px; /* Ukuran font lebih kecil untuk layar kecil */
+    padding: 8px; /* Kurangi ruang internal */
+  }
 }
 
 /* Gaya khusus untuk number input */
@@ -189,9 +141,4 @@ input[type="number"] {
   border: 2px solid #42c2ff !important;
   border-radius: 7px;
   padding: 5px;
-}
-
-/* Opsional: Hover efek untuk number input */
-input[type="number"]:hover {
-  background-color: #42c2ff !important;
 }
