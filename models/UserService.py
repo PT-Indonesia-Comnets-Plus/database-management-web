@@ -2,28 +2,14 @@ from datetime import datetime
 import streamlit as st
 from firebase_admin import exceptions
 from utils.cookies import save_user_to_cookie, clear_user_cookie
-from models.email_service import EmailService
-from utils.firebase_config import get_firebase_app
 import requests
-import re
 
 
-class User:
-    """
-    A class to handle user-related operations such as login, signup, and logout.
-    """
-
-    def __init__(self, fs, auth):
-        self.fs = fs
+class UserService:
+    def __init__(self, firestore, auth, firebase_api):
+        self.fs = firestore
         self.auth = auth
-
-        # Inisialisasi EmailService
-        self.email_service = EmailService(
-            smtp_server=st.secrets["smtp"]["server"],
-            smtp_port=st.secrets["smtp"]["port"],
-            smtp_username=st.secrets["smtp"]["username"],
-            smtp_password=st.secrets["smtp"]["password"]
-        )
+        self.firebase_api = firebase_api
 
     def login(self, email, password):
         # Validasi input
@@ -59,7 +45,7 @@ class User:
                     st.session_state.signout = False
 
                     # Catat waktu login
-                    save_login_logout(self.fs, user.uid, "login")
+                    self.save_login_logout(user.uid, "login")
                     save_user_to_cookie(
                         user.uid, user.email, user_data['role'])
 
@@ -135,13 +121,8 @@ class User:
         except Exception as e:
             st.error(f"An error occurred: {e}")
 
-        except exceptions.AlreadyExistsError:
-            st.warning("Email or username already taken.")
-        except Exception as e:
-            st.error(f"An error occurred: {e}")
-
     def logout(self):
-        save_login_logout(self.fs, st.session_state.username, "logout")
+        self.save_login_logout(st.session_state.username, "logout")
         clear_user_cookie()  # Hapus cookies
         st.session_state.signout = True
         st.session_state.username = ''
@@ -162,10 +143,28 @@ class User:
         else:
             return None
 
-    @staticmethod
-    def is_valid_email(email):
-        """
-        Validate an email address.
-        """
-        regex = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
-        return re.match(regex, email) is not None
+    def save_login_logout(self, username, event_type):
+        now = datetime.now()
+        date = now.strftime("%d-%m-%Y")
+        time = now.strftime("%H:%M:%S")
+
+        doc_ref = self.fs.collection("employee attendance").document(username)
+
+        try:
+            if event_type == "login":
+                doc_ref.update({
+                    f"activity.{date}.Login_Time": self.firebase_api.ArrayUnion([time])
+                })
+            elif event_type == "logout":
+                doc_ref.update({
+                    f"activity.{date}.Logout_Time": self.firebase_api.ArrayUnion([time])
+                })
+        except Exception:
+            doc_ref.set({
+                "activity": {
+                    date: {
+                        "Login_Time": [time] if event_type == "login" else [],
+                        "Logout_Time": [time] if event_type == "logout" else []
+                    }
+                }
+            }, merge=True)

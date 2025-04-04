@@ -20,4 +20,4 @@ def get_firebase_app():
 
     # Mengakses Firestore dan Auth
     fs = firestore.client()
-    return fs, auth
+    return fs, auth, firestore

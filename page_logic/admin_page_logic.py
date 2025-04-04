@@ -1,16 +1,16 @@
 import streamlit as st
-from models.user_service import UserService
-from models.attendance_service import AttendanceService
-import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from models.UserService import UserService
+from models.UserDataService import UserDataService
+from streamlit_option_menu import option_menu
 from utils import initialize_session_state
 from PIL import Image, ImageOps
+from sub_pages.admin import dashboard, rag, verify_users
 
 
 class AdminPage:
-    def __init__(self, firestore, auth):
-        self.user_service = UserService(firestore, auth)
-        self.attendance_service = AttendanceService(firestore)
+    def __init__(self, firestore, auth, firestore_config):
+        self.user_data_service = UserDataService(
+            firestore)
 
     def configure_page(self):
         """Konfigurasi halaman Streamlit."""
@@ -25,53 +25,53 @@ class AdminPage:
             pass
         st.logo("static/image/logo_iconplus.png", size="large")
 
+    def load_css(self, file_path):
+        """Muat file CSS ke dalam aplikasi Streamlit."""
+        try:
+            with open(file_path) as f:
+                st.markdown(f"<style>{f.read()}</style>",
+                            unsafe_allow_html=True)
+        except FileNotFoundError:
+            st.error("CSS file not found.")
+
+    def render_sidebar(self):
+        """Render menu navigasi di sidebar."""
+        with st.sidebar:
+            app = option_menu(
+                menu_title="Select Menu",
+                options=["Dashboard", "Verify Users",
+                         "RAG"],
+                icons=["grid", "search", "table"],
+                default_index=0,
+                orientation="vertical",
+                styles={
+                    "container": {"padding": "1px", "background-color": "#E3F2FD"},
+                    "menu-title": {"font-size": "24px", "font-weight": "bold", "color": "#546E7A"},
+                    "icon": {"color": "#546E7A", "font-size": "18px"},
+                    "nav-link": {"color": "#546E7A", "font-size": "18px", "text-align": "left", "margin": "5px"},
+                    "nav-link-selected": {"background-color": "#42c2ff", "color": "#FFFFFF", "font-weight": "bold"},
+                }
+            )
+        return app
+
+    def render_page(self, app):
+        """Render sub-halaman berdasarkan pilihan menu."""
+        if app == 'Dashboard':
+            dashboard.app(self.user_data_service)
+        elif app == 'Verify Users':
+            verify_users.app()
+        elif app == 'RAG':
+            rag.app()
+
     def render(self):
-        # Konfigurasi halaman
         self.configure_page()
-
-        # Inisialisasi session state
         initialize_session_state()
-
-        # Periksa apakah pengguna memiliki role "Admin"
+        self.load_css("static/css/style.css")
         if "role" not in st.session_state or st.session_state.role != "Admin":
             st.warning(
                 "You are not authorized to view this page. Only admins can access this page."
             )
             return  # Hentikan rendering konten admin, tetapi tetap tampilkan elemen umum
-
-        # Render konten admin jika pengguna adalah admin
-        st.title("Admin User Verification", anchor="page-title")
-
-        st.subheader("Users to be Verified:", anchor="subheader")
-        unverified_users_df = self.user_service.get_unverified_users()
-
-        if not unverified_users_df.empty:
-            st.dataframe(unverified_users_df, use_container_width=True)
-
-            selected_users = st.multiselect(
-                "Select users to verify:", unverified_users_df['email']
-            )
-
-            if st.button("Verify Selected Users"):
-                for email in selected_users:
-                    selected_user = unverified_users_df[
-                        unverified_users_df['email'] == email
-                    ]
-                    message = self.user_service.verify_user(
-                        selected_user['UID'].values[0])
-                    st.success(message)
         else:
-            st.warning("No users found who need verification.")
-
-        st.subheader("Employee Attendance:", anchor="subheader")
-        employee_attendance_df = self.attendance_service.get_employee_attendance()
-
-        if not employee_attendance_df.empty:
-            st.dataframe(employee_attendance_df, use_container_width=True)
-        else:
-            st.info("No attendance data available.")
-
-        st.subheader("Logins and Logouts for the Last 7 Days:",
-                     anchor="subheader")
-        daily_totals = self.attendance_service.calculate_daily_login_logout_totals()
-        self.plot_daily_login_logout_totals(daily_totals)
+            app = self.render_sidebar()
+            self.render_page(app)

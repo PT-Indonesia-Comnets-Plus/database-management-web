@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-from utils import initialize_session_state
 
 
 @st.cache_resource

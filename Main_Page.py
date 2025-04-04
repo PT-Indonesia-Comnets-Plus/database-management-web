@@ -3,7 +3,7 @@ from PIL import Image
 from io import BytesIO
 import base64
 from dotenv import load_dotenv
-from models.user import User
+from models.UserService import UserService
 from utils import initialize_session_state
 import os
 from PIL import ImageOps
@@ -21,9 +21,10 @@ except st.errors.StreamlitSetPageConfigMustBeFirstCommandError:
 initialize_session_state()
 fs = st.session_state.fs
 auth = st.session_state.auth
-
+fs_config = st.session_state.fs_config
 # Inisialisasi kelas User
-user_service = User(fs, auth)
+user_service = UserService(
+    fs, auth, fs_config)
 
 # Load file .env
 load_dotenv()

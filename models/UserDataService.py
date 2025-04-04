@@ -1,10 +1,29 @@
 from datetime import datetime, timedelta
 import pandas as pd
+import plotly.graph_objects as go
 
 
-class AttendanceService:
+class UserDataService:
     def __init__(self, firestore):
         self.fs = firestore
+
+    # Fungsi untuk mendapatkan pengguna yang belum terverifikasi
+    def get_users(self, status):
+        users_ref = self.fs.collection("users")
+
+        # Tambahkan filter untuk status dan role (employee)
+        query = users_ref.where("status", "==", status).where(
+            "role", "==", "Employee")
+        docs = query.stream()
+
+        users_list = []
+        for doc in docs:
+            user_data = doc.to_dict()
+            user_data["UID"] = doc.id
+            users_list.append(user_data)
+
+        # Kembalikan hasil sebagai DataFrame
+        return pd.DataFrame(users_list)
 
     def get_employee_attendance(self):
         attendance_ref = self.fs.collection("employee attendance")
@@ -65,3 +84,51 @@ class AttendanceService:
                         times.get("Logout_Time", []))
 
         return daily_totals
+
+    def plot_daily_login_logout_totals(self, daily_totals):
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=6)
+        all_dates = [
+            (start_date + timedelta(days=i)).strftime("%d-%m-%Y") for i in range(7)
+        ]
+        complete_totals = {date: {"logins": 0, "logouts": 0}
+                           for date in all_dates}
+        for date in daily_totals:
+            if date in complete_totals:
+                complete_totals[date]["logins"] = daily_totals[date]["logins"]
+                complete_totals[date]["logouts"] = daily_totals[date]["logouts"]
+        dates = sorted(complete_totals.keys())
+        login_counts = [complete_totals[date]["logins"] for date in dates]
+        logout_counts = [complete_totals[date]["logouts"] for date in dates]
+
+        # Buat stacked bar chart dengan warna yang disesuaikan
+        fig = go.Figure(data=[
+            go.Bar(
+                name="Login",
+                x=dates,
+                y=login_counts,
+                marker_color="#42c2ff",
+                hoverinfo="x+y",
+                text=login_counts,
+                textposition="inside"
+            ),
+            go.Bar(
+                name="Logout",
+                x=dates,
+                y=logout_counts,
+                marker_color="#3375b1",
+                hoverinfo="x+y",
+                text=logout_counts,
+                textposition="inside"
+            )
+        ])
+
+        # Tambahkan konfigurasi layout
+        fig.update_layout(
+            barmode="stack",
+            title="Daily Login/Logout Totals (Last 7 Days)",
+            xaxis_title="Date",
+            yaxis_title="Total Times",
+            legend_title="Action Type"
+        )
+        return fig

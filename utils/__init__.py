@@ -17,6 +17,6 @@ def initialize_session_state():
 
     if "fs" not in st.session_state or "auth" not in st.session_state:
         try:
-            st.session_state.fs, st.session_state.auth = get_firebase_app()
+            st.session_state.fs, st.session_state.auth, st.session_state.fs_config = get_firebase_app()
         except Exception as e:
             st.error(f"Failed to initialize Firestore: {e}")
