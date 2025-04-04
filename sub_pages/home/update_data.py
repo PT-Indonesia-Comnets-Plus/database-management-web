@@ -177,8 +177,6 @@ def process_uploaded_file(uploaded_file):
 
 def app():
     st.title("Update Data Aset")
-    if "db" not in st.session_state:
-        st.session_state.db = connect_db()
     db = st.session_state.db
 
     if os.path.exists("static\css\style.css"):

@@ -7,9 +7,8 @@ DB_USER = st.secrets["database"]["DB_USER"]
 DB_PASSWORD = st.secrets["database"]["DB_PASSWORD"]
 DB_PORT = st.secrets["database"]["DB_PORT"]
 
-st.cache_resource
 
-
+@st.cache_resource
 def connect_db():
     """Create a connection to the PostgreSQL database."""
     conn = psycopg2.connect(

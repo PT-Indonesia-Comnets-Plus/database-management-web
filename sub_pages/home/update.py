@@ -400,8 +400,6 @@ def app():
     st.title("Iconnet Management System 🏥")
 
     # Initialize database connection
-    if "db" not in st.session_state or st.session_state.db.closed:
-        st.session_state.db = connect_db()
     db = st.session_state.db
 
     # Create tabs

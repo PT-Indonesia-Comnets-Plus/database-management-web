@@ -2,7 +2,6 @@ from datetime import datetime
 import streamlit as st
 from firebase_admin import exceptions
 from utils.cookies import save_user_to_cookie, clear_user_cookie
-from utils.account import save_login_logout
 from models.email_service import EmailService
 from utils.firebase_config import get_firebase_app
 import requests

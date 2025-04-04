@@ -3,6 +3,8 @@ from models.user_service import UserService
 from models.attendance_service import AttendanceService
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
+from utils import initialize_session_state
+from PIL import Image, ImageOps
 
 
 class AdminPage:
@@ -10,47 +12,34 @@ class AdminPage:
         self.user_service = UserService(firestore, auth)
         self.attendance_service = AttendanceService(firestore)
 
-    def load_css(self, file_path):
-        """Muat file CSS ke dalam aplikasi Streamlit."""
-        with open(file_path) as f:
-            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
-
-    def plot_daily_login_logout_totals(self, daily_totals):
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=6)
-        all_dates = [
-            (start_date + timedelta(days=i)).strftime("%d-%m-%Y") for i in range(7)
-        ]
-        complete_totals = {date: {"logins": 0, "logouts": 0}
-                           for date in all_dates}
-        for date in daily_totals:
-            if date in complete_totals:
-                complete_totals[date]["logins"] = daily_totals[date]["logins"]
-                complete_totals[date]["logouts"] = daily_totals[date]["logouts"]
-        dates = sorted(complete_totals.keys())
-        login_counts = [complete_totals[date]["logins"] for date in dates]
-        logout_counts = [complete_totals[date]["logouts"] for date in dates]
-
-        fig = go.Figure(data=[
-            go.Bar(name="Login", x=dates, y=login_counts,
-                   marker_color="#42c2ff"),
-            go.Bar(name="Logout", x=dates,
-                   y=logout_counts, marker_color="#3375b1")
-        ])
-
-        fig.update_layout(
-            barmode="stack",
-            title="Daily Login/Logout Totals (Last 7 Days)",
-            xaxis_title="Date",
-            yaxis_title="Total Times",
-            legend_title="Action Type"
-        )
-        st.plotly_chart(fig, use_container_width=True)
+    def configure_page(self):
+        """Konfigurasi halaman Streamlit."""
+        try:
+            logo = Image.open("static/image/icon.png").resize((40, 50))
+            logo_with_padding = ImageOps.expand(
+                logo, border=8, fill=(255, 255, 255, 0)
+            )
+            st.set_page_config(page_title="Admin Page",
+                               page_icon=logo_with_padding)
+        except st.errors.StreamlitSetPageConfigMustBeFirstCommandError:
+            pass
+        st.logo("static/image/logo_iconplus.png", size="large")
 
     def render(self):
-        # Muat file CSS
-        self.load_css("static/css/style.css")
+        # Konfigurasi halaman
+        self.configure_page()
 
+        # Inisialisasi session state
+        initialize_session_state()
+
+        # Periksa apakah pengguna memiliki role "Admin"
+        if "role" not in st.session_state or st.session_state.role != "Admin":
+            st.warning(
+                "You are not authorized to view this page. Only admins can access this page."
+            )
+            return  # Hentikan rendering konten admin, tetapi tetap tampilkan elemen umum
+
+        # Render konten admin jika pengguna adalah admin
         st.title("Admin User Verification", anchor="page-title")
 
         st.subheader("Users to be Verified:", anchor="subheader")

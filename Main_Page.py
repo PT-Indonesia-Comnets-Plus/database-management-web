@@ -4,38 +4,21 @@ from io import BytesIO
 import base64
 from dotenv import load_dotenv
 from models.user import User
-from utils.cookies import load_cookie_to_session
+from utils import initialize_session_state
 import os
-from utils.firebase_config import get_firebase_app
+from PIL import ImageOps
 
-# Set logo di sidebar
 st.logo("static/image/logo_iconplus.png", size="large")
-st.markdown(
-    """
-    <style>
-    [data-testid="stSidebarLogo"] img {
-        transform: scale(1.5); /* Skala 1.5x dari ukuran asli */
-        transform-origin: top left; /* Titik asal transformasi */
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
-
-# Set konfigurasi halaman
-logo = Image.open('static/image/icon.png')
 try:
-    st.set_page_config(
-        page_title="Welcome to Iconnet Dashboard", page_icon=logo)
+    logo = Image.open("static/image/icon.png").resize((40, 50))
+    logo_with_padding = ImageOps.expand(
+        logo, border=8, fill=(255, 255, 255, 0)
+    )
+    st.set_page_config(page_title="Admin Page",
+                       page_icon=logo_with_padding)
 except st.errors.StreamlitSetPageConfigMustBeFirstCommandError:
     pass
-
-# Inisialisasi session state
-if "username" not in st.session_state:
-    load_cookie_to_session(st.session_state)
-
-if "fs" not in st.session_state:
-    st.session_state.fs, st.session_state.auth = get_firebase_app()
+initialize_session_state()
 fs = st.session_state.fs
 auth = st.session_state.auth
 
