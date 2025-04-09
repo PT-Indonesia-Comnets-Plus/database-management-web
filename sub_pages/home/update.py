@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-from utils.database import connect_db
 from datetime import date
 from copy import deepcopy
 
