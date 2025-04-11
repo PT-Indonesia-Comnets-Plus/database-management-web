@@ -90,3 +90,14 @@ streamlit-folium==0.15.0
 pillow==11.1.0
 psycosg2==2.9.1
 seaborn==0.13.2
+langchain==0.0.304
+langchain-google-genai==0.0.5
+langchain-core==0.0.304
+streamlit-option-menu==0.3.2
+streamlit-cookies-manager==0.1.2
+firebase-admin==6.1.0
+python-dotenv==1.0.0
+pandas==2.1.1
+plotly==5.17.0
+Pillow==10.0.1
+typing-extensions==4.8.0
