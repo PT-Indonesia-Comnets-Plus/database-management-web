@@ -3,13 +3,15 @@ import streamlit as st
 from firebase_admin import exceptions
 from utils.cookies import save_user_to_cookie, clear_user_cookie
 import requests
+from models.EmailService import EmailService
 
 
 class UserService:
-    def __init__(self, firestore, auth, firebase_api):
+    def __init__(self, firestore, auth, firebase_api, email_service):
         self.fs = firestore
         self.auth = auth
         self.firebase_api = firebase_api
+        self.email_service = email_service
 
     def login(self, email, password):
         # Validasi input

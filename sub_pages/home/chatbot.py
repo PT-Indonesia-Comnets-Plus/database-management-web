@@ -60,9 +60,6 @@ def search_similar_documents(query: str):
         print(f"❌ Error saat mencari dokumen: {e}")
         return []
 
-    finally:
-        cur.close()
-        conn.close()
 
 # Fungsi untuk membuat QA Chain
 

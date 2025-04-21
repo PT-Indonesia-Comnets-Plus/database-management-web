@@ -67,11 +67,19 @@ class AdminPage:
         self.configure_page()
         initialize_session_state()
         self.load_css("static/css/style.css")
+
+        # Periksa apakah pengguna sudah login
+        if "username" not in st.session_state or not st.session_state.username:
+            st.warning("You must log in first to access this page.")
+            return  # Hentikan rendering jika pengguna belum login
+
+        # Periksa apakah pengguna memiliki role "Admin"
         if "role" not in st.session_state or st.session_state.role != "Admin":
             st.warning(
                 "You are not authorized to view this page. Only admins can access this page."
             )
             return  # Hentikan rendering konten admin, tetapi tetap tampilkan elemen umum
-        else:
-            app = self.render_sidebar()
-            self.render_page(app)
+
+        # Jika pengguna sudah login dan memiliki role "Admin", render halaman
+        app = self.render_sidebar()
+        self.render_page(app)

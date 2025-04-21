@@ -11,7 +11,7 @@ def initialize_session_state():
 
     if "db_connection" not in st.session_state:
         try:
-            st.session_state.db = connect_db()
+            st.session_state.db, st.session_state.storage = connect_db()
         except Exception as e:
             st.error(f"Failed to connect to the database: {e}")
 

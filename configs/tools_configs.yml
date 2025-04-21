@@ -1,0 +1,29 @@
+primary_agent:
+  llm: gemini-2.0-flash
+  llm_temperature: 0.0
+
+pdf_rag:
+  unstructured_docs: "data/unstructured_docs/swiss_airline_policy"
+  vectordb: "data/airline_policy_vectordb"
+  collection_name: rag-chroma
+  llm: gemini-2.0-flash
+  llm_temperature: 0.9
+  embedding_model: models/embedding-001
+  chunk_size: 1000
+  chunk_overlap: 200
+  k: 2
+
+sqlagent_configs:
+  chinook_sqldb_dir: "data/Chinook.db"
+  llm: "gpt-3.5-turbo"
+  llm_temperature: 0.0
+
+langsmith:
+  tracing: "true"
+  project_name: "rag_sqlagent_project"
+
+tavily_search_api:
+  tavily_search_max_results: 2
+
+graph_configs:
+  thread_id: 1 # This can be adjusted to assign a unique value for each user session, so it's easier to access data later on.

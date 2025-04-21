@@ -1,5 +1,6 @@
-CREATE TABLE olts (
-    id SERIAL PRIMARY KEY,
+-- Tabel utama: fiber_network
+CREATE TABLE user_terminals (
+    fat_id VARCHAR(255) PRIMARY KEY, 
     hostname_olt VARCHAR(255),
     latitude_olt FLOAT,
     longitude_olt FLOAT,
@@ -9,11 +10,7 @@ CREATE TABLE olts (
     kapasitas_port_olt INTEGER,
     olt_port INTEGER,
     olt VARCHAR(255),
-    interface_olt VARCHAR(255)
-);
-
-CREATE TABLE fdts (
-    id SERIAL PRIMARY KEY,
+    interface_olt VARCHAR(255),
     fdt_id VARCHAR(255),
     status_osp_amarta_fdt VARCHAR(255),
     jumlah_splitter_fdt INTEGER,
@@ -22,37 +19,19 @@ CREATE TABLE fdts (
     port_fdt INTEGER,
     latitude_fdt FLOAT,
     longitude_fdt FLOAT,
-    olt_id INTEGER REFERENCES olts(id) ON DELETE CASCADE
-);
-
-CREATE TABLE fats (
-    id SERIAL PRIMARY KEY,
-    fatid VARCHAR(255),
     jumlah_splitter_fat INTEGER,
     kapasitas_splitter_fat INTEGER,
     latitude_fat FLOAT,
     longitude_fat FLOAT,
-    fdt_id INTEGER REFERENCES fdts(id) ON DELETE CASCADE,
     status_osp_amarta_fat VARCHAR(255),
     fat_kondisi VARCHAR(255),
     fat_filter_pemakaian VARCHAR(255),
     keterangan_full VARCHAR(255),
-    fatid_x VARCHAR(255),
+    fat_id_x VARCHAR(255),
     filter_fat_cap VARCHAR(255)
 );
 
-CREATE TABLE pelanggans (
-    id SERIAL PRIMARY KEY,
-    id_permohonan VARCHAR(255),
-    sid VARCHAR(255),
-    cust_name VARCHAR(255),
-    telpn VARCHAR(255),
-    latitude_pelanggan FLOAT,
-    longitude_pelanggan FLOAT,
-    fat_id INTEGER REFERENCES fats(id) ON DELETE CASCADE,
-    notes TEXT
-);
-
+-- Tabel clusters
 CREATE TABLE clusters (
     id SERIAL PRIMARY KEY,
     latitude_cluster FLOAT,
@@ -63,18 +42,20 @@ CREATE TABLE clusters (
     kelurahan VARCHAR(255),
     up3 VARCHAR(255),
     ulp VARCHAR(255),
-    fat_id INTEGER REFERENCES fats(id) ON DELETE CASCADE
+    fat_id VARCHAR(255) NOT NULL REFERENCES user_terminals(fat_id) ON DELETE CASCADE
 );
 
+-- Tabel home_connecteds
 CREATE TABLE home_connecteds (
     id SERIAL PRIMARY KEY,
     hc_old INTEGER,
     hc_icrm INTEGER,
     total_hc INTEGER,
     cleansing_hp VARCHAR(255),
-    fat_id INTEGER REFERENCES fats(id) ON DELETE CASCADE
+    fat_id VARCHAR(255) NOT NULL REFERENCES user_terminals(fat_id) ON DELETE CASCADE
 );
 
+-- Tabel dokumentasis
 CREATE TABLE dokumentasis (
     id SERIAL PRIMARY KEY,
     status_osp_amarta_fat VARCHAR(255),
@@ -85,9 +66,10 @@ CREATE TABLE dokumentasis (
     link_maps TEXT,
     update_aset VARCHAR(255),
     amarta_update VARCHAR(255),
-    fat_id INTEGER REFERENCES fats(id) ON DELETE CASCADE
+    fat_id VARCHAR(255) NOT NULL REFERENCES user_terminals(fat_id) ON DELETE CASCADE
 );
 
+-- Tabel additional_informations
 CREATE TABLE additional_informations (
     id SERIAL PRIMARY KEY,
     pa VARCHAR(255),
@@ -95,5 +77,17 @@ CREATE TABLE additional_informations (
     mitra VARCHAR(255),
     kategori VARCHAR(255),
     sumber_datek VARCHAR(255),
-    fat_id INTEGER REFERENCES fats(id) ON DELETE CASCADE
+    fat_id VARCHAR(255) NOT NULL REFERENCES user_terminals(fat_id) ON DELETE CASCADE
+);
+
+-- Tabel pelanggan
+CREATE TABLE pelanggans (
+    id_permohonan VARCHAR(255) PRIMARY KEY, 
+    sid VARCHAR(255), 
+    cust_name VARCHAR(255), 
+    telpn VARCHAR(255), 
+    latitude_pelanggan FLOAT, 
+    longitude_pelanggan FLOAT, 
+    fat_id VARCHAR(255) NOT NULL REFERENCES user_terminals(fat_id) ON DELETE CASCADE, -- Relasi ke fiber_network
+    notes TEXT 
 );

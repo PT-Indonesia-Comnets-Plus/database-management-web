@@ -1,7 +1,7 @@
 import streamlit as st
 from PIL import Image, ImageOps
 from streamlit_option_menu import option_menu
-from sub_pages.home import dashboard, search, update_data, chatbot, update
+from sub_pages.home import dashboard, search, update_data, chatbot, update, chatbot2
 from utils import initialize_session_state
 
 
@@ -38,7 +38,7 @@ class HomePage:
             app = option_menu(
                 menu_title="Select Menu",
                 options=["Dashboard", "Search",
-                         "Update Data", "Chatbot", "Test"],
+                         "Update Data", "Chatbot", "Test", "Chatbot2"],
                 icons=["grid", "search", "table", "chat", "code"],
                 default_index=0,
                 orientation="vertical",
@@ -62,6 +62,8 @@ class HomePage:
             update_data.app()
         elif app == 'Chatbot':
             chatbot.app()
+        elif app == 'Chatbot2':
+            chatbot2.app()
         elif app == 'Test':
             update.app()
 
@@ -69,5 +71,8 @@ class HomePage:
         self.configure_page()
         initialize_session_state()
         self.load_css("static/css/style.css")
+        if "username" not in st.session_state or not st.session_state.username:
+            st.warning("You must log in first to access this page.")
+            return  # Hentikan rendering jika pengguna belum login
         app = self.render_sidebar()
         self.render_page(app)

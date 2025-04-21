@@ -88,7 +88,7 @@ asyncpg==0.30.0
 folium==0.14.0
 streamlit-folium==0.15.0
 pillow==11.1.0
-psycosg2==2.9.1
+psycopg2==2.9.6
 seaborn==0.13.2
 langchain==0.0.304
 langchain-google-genai==0.0.5

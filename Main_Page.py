@@ -4,6 +4,7 @@ from io import BytesIO
 import base64
 from dotenv import load_dotenv
 from models.UserService import UserService
+from models.EmailService import EmailService
 from utils import initialize_session_state
 import os
 from PIL import ImageOps
@@ -22,9 +23,19 @@ initialize_session_state()
 fs = st.session_state.fs
 auth = st.session_state.auth
 fs_config = st.session_state.fs_config
-# Inisialisasi kelas User
+
+# Inisialisasi EmailService
+email_service = EmailService(
+    smtp_server=st.secrets['smtp']["server"],
+    smtp_port=st.secrets['smtp']["port"],
+    smtp_username=st.secrets['smtp']["username"],
+    smtp_password=st.secrets['smtp']["password"]
+)
+
+# Inisialisasi UserService
 user_service = UserService(
-    fs, auth, fs_config)
+    fs, auth, fs_config, email_service
+)
 
 # Load file .env
 load_dotenv()
