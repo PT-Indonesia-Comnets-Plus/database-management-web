@@ -1,4 +1,4 @@
-from page_logic.home_page_logic import HomePage
+from features.home.controller import HomePage
 # Inisialisasi HomePage
 home_page = HomePage()
 

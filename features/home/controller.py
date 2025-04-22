@@ -1,7 +1,7 @@
 import streamlit as st
 from PIL import Image, ImageOps
 from streamlit_option_menu import option_menu
-from sub_pages.home import dashboard, search, update_data, chatbot, update, chatbot2
+from .views import dashboard, search, update_data, chatbot, update, chatbot2
 from utils import initialize_session_state
 
 

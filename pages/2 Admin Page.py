@@ -1,4 +1,4 @@
-from page_logic.admin_page_logic import AdminPage
+from features.admin.controller import AdminPage
 from utils import initialize_session_state
 import streamlit as st
 from models.EmailService import EmailService

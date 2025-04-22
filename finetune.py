@@ -11,7 +11,6 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     max_seq_length=2048, load_in_4bit=True,
 )
 
-# Add LoRA adapters
 model = FastLanguageModel.get_peft_model(
     model, r=16,
     target_modules=[

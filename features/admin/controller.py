@@ -4,7 +4,7 @@ from models.UserDataService import UserDataService
 from streamlit_option_menu import option_menu
 from utils import initialize_session_state
 from PIL import Image, ImageOps
-from sub_pages.admin import dashboard, rag, verify_users
+from .views import dashboard, rag, verify_users
 
 
 class AdminPage:
