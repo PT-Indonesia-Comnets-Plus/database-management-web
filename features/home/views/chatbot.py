@@ -4,7 +4,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain.schema import BaseRetriever
-from utils.database import connect_db
+from core.database import connect_db
 import warnings
 from typing import List
 import os

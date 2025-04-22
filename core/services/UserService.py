@@ -3,7 +3,7 @@ import streamlit as st
 from firebase_admin import exceptions
 from utils.cookies import save_user_to_cookie, clear_user_cookie
 import requests
-from models.EmailService import EmailService
+from core.services.EmailService import send_verification_email
 
 
 class UserService:

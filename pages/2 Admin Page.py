@@ -1,8 +1,8 @@
 from features.admin.controller import AdminPage
 from utils import initialize_session_state
 import streamlit as st
-from models.EmailService import EmailService
-from models.UserService import UserService
+from core.services.EmailService import EmailService
+from core.services.UserService import UserService
 
 # Inisialisasi session state
 initialize_session_state()
