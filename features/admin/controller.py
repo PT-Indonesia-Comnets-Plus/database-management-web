@@ -2,7 +2,7 @@ import streamlit as st
 from core.services.UserService import UserService
 from core.services.UserDataService import UserDataService
 from streamlit_option_menu import option_menu
-from utils import initialize_session_state
+from core import initialize_session_state
 from PIL import Image, ImageOps
 from .views import dashboard, rag, verify_users
 

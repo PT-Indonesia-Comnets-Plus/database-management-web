@@ -2,7 +2,7 @@ import streamlit as st
 from PIL import Image, ImageOps
 from streamlit_option_menu import option_menu
 from .views import dashboard, search, update_data, chatbot, update, chatbot2
-from utils import initialize_session_state
+from core import initialize_session_state
 
 
 class HomePage:

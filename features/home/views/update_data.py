@@ -1,5 +1,5 @@
 import streamlit as st
-from utils.database import connect_db
+from core.database import connect_db
 import pandas as pd
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 import os
