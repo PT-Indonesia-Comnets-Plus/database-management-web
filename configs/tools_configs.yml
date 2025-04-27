@@ -14,8 +14,8 @@ pdf_rag:
   k: 2
 
 sqlagent_configs:
-  chinook_sqldb_dir: "data/Chinook.db"
-  llm: "gpt-3.5-turbo"
+  sqldb_dir: "data/Chinook.db"
+  llm: "gemini-2.0-flash"
   llm_temperature: 0.0
 
 langsmith:

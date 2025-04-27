@@ -121,8 +121,8 @@ def process_uploaded_file(uploaded_file):
         "Kota Kab": str,
         "Lokasi OLT": str,
         "Hostname OLT": str,
-        "Latitude OLT": str,
-        "Longtitude OLT": str,
+        "Latitude OLT": float,
+        "Longtitude OLT": float,
         "Brand OLT": str,
         "Type OLT": str,
         "Kapasitas OLT": int,
@@ -133,18 +133,18 @@ def process_uploaded_file(uploaded_file):
         "FDTID": str,
         "Jumlah Splitter FDT": int,
         "Kapasitas Splitter FDT": int,
-        "Latitude FDT": str,
-        "Longtitude FDT": str,
+        "Latitude FDT": float,
+        "Longtitude FDT": float,
         "Port FDT": int,
         "Status OSP AMARTA FDT": str,
         "Cluster": str,
-        "Latitude Cluster": str,
-        "Longtitude Cluster": str,
+        "Latitude Cluster": float,
+        "Longtitude Cluster": float,
         "FATID": str,
         "Jumlah Splitter FAT": int,
         "Kapasitas Splitter FAT": int,
-        "Latitude FAT": str,
-        "Longtitude FAT": str,
+        "Latitude FAT": float,
+        "Longtitude FAT": float,
         "Status OSP AMARTA FAT": str,
         "Kecamatan": str,
         "Kelurahan": str,
@@ -175,16 +175,15 @@ def process_uploaded_file(uploaded_file):
 
 def app():
     st.title("Update Data Aset")
-    db = st.session_state.db
-
+    db = st.session_state.get("db")
+    if not db:
+        st.error("Connection Pool tidak tersedia.")
     if os.path.exists("static\css\style.css"):
         with open("static\css\style.css") as f:
             st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
-    # Tabs untuk navigasi
     tab_manual, tab_upload = st.tabs(["Manual Input", "Upload File"])
 
-    # Tab Manual Input
     with tab_manual:
         st.subheader("Manual Data Input")
         with st.form("manual_input_form", clear_on_submit=True):
@@ -287,7 +286,6 @@ def app():
 
             if "df_data" in st.session_state:
                 st.write("### **Editable DataFrame**")
-                # Bisa diedit dalam form
                 edited_df = st.data_editor(
                     st.session_state.df_data, num_rows="dynamic")
 

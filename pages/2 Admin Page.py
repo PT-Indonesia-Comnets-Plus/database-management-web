@@ -1,11 +1,9 @@
 from features.admin.controller import AdminPage
-from utils import initialize_session_state
 import streamlit as st
 from core.services.EmailService import EmailService
 from core.services.UserService import UserService
 
 # Inisialisasi session state
-initialize_session_state()
 email_service = EmailService(
     smtp_server="smtp.gmail.com",
     smtp_port=587,
@@ -15,9 +13,9 @@ email_service = EmailService(
 
 # Inisialisasi UserService
 user_service = UserService(
-    firestore=st.session_state.fs,
-    auth=st.session_state.auth,
-    firebase_api=st.session_state.fs_config,
+    firestore=st.session_state.get('fs'),
+    auth=st.session_state.get('auth'),
+    firebase_api=st.session_state.get('fs_config'),
     email_service=email_service
 )
 

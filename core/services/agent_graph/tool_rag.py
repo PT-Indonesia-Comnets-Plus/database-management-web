@@ -3,21 +3,10 @@ from langchain.chains.retrieval_qa.base import RetrievalQA
 from langchain_core.documents import Document
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain.schema import BaseRetriever
-import warnings
 from typing import List
 import os
-import time
 import psycopg2
 import json
-from core.services.agent_graph.load_config import LoadToolsConfig
-
-TOOLS_CFG = LoadToolsConfig()
-
-warnings.filterwarnings('ignore')
-
-# Class untuk mendapatkan dokumen yang relevan dari PostgreSQL
-
-api_key = os.getenv("GOOGLE_API_KEY", st.secrets["google"]["api_key"])
 
 
 class PostgresRetriever(BaseRetriever):
@@ -120,64 +109,3 @@ def handle_prompt_response(prompt, qa_chain):
     except Exception as e:
         st.error(f"❌ Terjadi error saat memproses permintaan Anda: {e}")
         return "Terjadi kesalahan teknis. Silakan coba lagi nanti."
-
-
-def display_previous_messages():
-    for message in st.session_state.messages:
-        if message["role"] == "user":
-            st.chat_message("user").markdown(
-                f"**{message['content']}**", unsafe_allow_html=True)
-        elif message["role"] == "assistant":
-            st.chat_message("assistant").markdown(
-                message["content"], unsafe_allow_html=True)
-
-
-# Fungsi untuk menampilkan animasi bertahap
-def display_message_with_typing_animation(placeholder, message, typing_speed=0.1):
-    displayed_message = ""
-    for char in message:
-        displayed_message += char
-        time.sleep(0.02)  # Memberikan jeda waktu 20ms untuk setiap karakter
-        placeholder.markdown(displayed_message)
-
-
-def app():
-    st.title("Chatbot AgentGraph")
-
-    # Load style
-    if os.path.exists("static/css/style.css"):
-        with open("static/css/style.css") as f:
-            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
-
-    qa_chain = create_qa_chain()
-    if not qa_chain:
-        st.stop()
-
-    if 'messages' not in st.session_state:
-        st.session_state.messages = []
-
-    display_previous_messages()
-
-    prompt = st.chat_input(
-        "Tanyakan tentang prosedur, maintenance, laporan gangguan...")
-    if prompt:
-        st.chat_message("user").markdown(
-            f"**{prompt}**", unsafe_allow_html=True)
-        st.session_state.messages.append({"role": "user", "content": prompt})
-
-        with st.chat_message("assistant"):
-            thinking_placeholder = st.empty()
-            for _ in range(3):
-                thinking_placeholder.markdown("🤔 Thinking...")
-                time.sleep(0.7)
-
-            assistant_message = handle_prompt_response(prompt, qa_chain)
-            display_message_with_typing_animation(
-                thinking_placeholder, assistant_message)
-
-        st.session_state.messages.append(
-            {"role": "assistant", "content": assistant_message})
-
-
-if __name__ == "__main__":
-    app()

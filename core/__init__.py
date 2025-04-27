@@ -9,17 +9,13 @@ def initialize_session_state():
     """Inisialisasi atribut session_state jika belum ada."""
     if "username" not in st.session_state:
         load_cookie_to_session(st.session_state)
-
-    # --- PERBAIKAN NAMA STATE ---
-    if "db" not in st.session_state:  # Gunakan db_pool atau nama lain yang jelas
+    if "db" not in st.session_state:
         try:
-            # connect_db() mengembalikan (pool, supabase_client)
             st.session_state.db, st.session_state.storage = connect_db()
             if st.session_state.db is None:
                 st.error("Inisialisasi DB Pool gagal.")
         except Exception as e:
             st.error(f"Failed to connect to the database pool: {e}")
-    # ---------------------------
 
     if "fs" not in st.session_state or "auth" not in st.session_state:
         try:

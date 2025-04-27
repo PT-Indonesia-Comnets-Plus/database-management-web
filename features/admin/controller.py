@@ -59,13 +59,13 @@ class AdminPage:
         if app == 'Dashboard':
             dashboard.app(self.user_data_service)
         elif app == 'Verify Users':
-            verify_users.app()
+            verify_users.app(self.user_data_service)
         elif app == 'RAG':
             rag.app()
 
     def render(self):
         self.configure_page()
-        initialize_session_state()
+        fs = st.session_state.get("fs")
         self.load_css("static/css/style.css")
 
         # Periksa apakah pengguna sudah login

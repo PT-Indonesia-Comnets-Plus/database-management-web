@@ -78,12 +78,12 @@ if __name__ == "__main__":
         app_config = yaml.load(cfg, Loader=yaml.FullLoader)
 
     # Uncomment the following configs to run for swiss airline policy document
-    chunk_size = app_config["swiss_airline_policy_rag"]["chunk_size"]
-    chunk_overlap = app_config["swiss_airline_policy_rag"]["chunk_overlap"]
-    embedding_model = app_config["swiss_airline_policy_rag"]["embedding_model"]
-    vectordb_dir = app_config["swiss_airline_policy_rag"]["vectordb"]
-    collection_name = app_config["swiss_airline_policy_rag"]["collection_name"]
-    doc_dir = app_config["swiss_airline_policy_rag"]["unstructured_docs"]
+    chunk_size = app_config["pdf_rag"]["chunk_size"]
+    chunk_overlap = app_config["pdf_rag"]["chunk_overlap"]
+    embedding_model = app_config["pdf_rag"]["embedding_model"]
+    vectordb_dir = app_config["pdf_rag"]["vectordb"]
+    collection_name = app_config["pdf_rag"]["collection_name"]
+    doc_dir = app_config["pdf_rag"]["unstructured_docs"]
 
     prepare_db_instance = PrepareVectorDB(
         doc_dir=doc_dir,
