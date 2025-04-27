@@ -1,5 +1,4 @@
 import streamlit as st
-from core.database import connect_db
 import pandas as pd
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 import os
@@ -49,7 +48,6 @@ def insert_data(db, data):
 
         cursor.execute(query, tuple(data))  # Menggunakan Tuple
         db.commit()
-        cursor.close()
         st.success("Data inserted successfully!")
 
     except Exception as e:

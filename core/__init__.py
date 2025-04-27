@@ -1,7 +1,8 @@
+# core/__init__.py
 import streamlit as st
 from utils.cookies import load_cookie_to_session
 from .firebase_config import get_firebase_app
-from .database import connect_db
+from .database import connect_db  # Fungsi yang mengembalikan pool
 
 
 def initialize_session_state():
@@ -9,11 +10,16 @@ def initialize_session_state():
     if "username" not in st.session_state:
         load_cookie_to_session(st.session_state)
 
-    if "db_connection" not in st.session_state:
+    # --- PERBAIKAN NAMA STATE ---
+    if "db" not in st.session_state:  # Gunakan db_pool atau nama lain yang jelas
         try:
+            # connect_db() mengembalikan (pool, supabase_client)
             st.session_state.db, st.session_state.storage = connect_db()
+            if st.session_state.db is None:
+                st.error("Inisialisasi DB Pool gagal.")
         except Exception as e:
-            st.error(f"Failed to connect to the database: {e}")
+            st.error(f"Failed to connect to the database pool: {e}")
+    # ---------------------------
 
     if "fs" not in st.session_state or "auth" not in st.session_state:
         try:

@@ -4,7 +4,6 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain.schema import BaseRetriever
-from core.database import connect_db
 import warnings
 from typing import List
 import os
@@ -35,7 +34,7 @@ def search_similar_documents(query: str):
     Mencari dokumen yang relevan di PostgreSQL berdasarkan embedding query.
     """
     try:
-        conn = connect_db()  # Koneksi ke database
+        conn = st.session_state.db
         cur = conn.cursor()
 
         # Inisialisasi model embedding Google untuk query embedding

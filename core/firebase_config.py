@@ -2,9 +2,6 @@ import firebase_admin
 from firebase_admin import credentials, firestore, auth
 import streamlit as st
 import json
-from dotenv import load_dotenv
-
-load_dotenv()
 
 
 @st.cache_resource

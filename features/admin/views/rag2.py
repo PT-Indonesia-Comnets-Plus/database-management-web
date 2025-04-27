@@ -5,7 +5,6 @@ from langchain_chroma import Chroma
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from dotenv import load_dotenv
 
 
 class PrepareVectorDB:
@@ -75,9 +74,6 @@ class PrepareVectorDB:
 
 
 if __name__ == "__main__":
-    load_dotenv()
-    os.environ['GOOGLE_API_KEY'] = os.getenv("GOOGLE_API_KEY")
-
     with open(here("configs/tools_config.yml")) as cfg:
         app_config = yaml.load(cfg, Loader=yaml.FullLoader)
 

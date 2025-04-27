@@ -1,47 +1,44 @@
 import streamlit as st
 import google.generativeai as genai
-import psycopg2
-import os
-from dotenv import load_dotenv
 import re
-
-# Load API dan .env
-load_dotenv()
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY")
-                or st.secrets["GOOGLE_API_KEY"])
+import psycopg2
 
 # Fungsi ambil skema data
 
 
 def get_schema(db):
+
+    conn = None
     try:
-        conn = db
-        cur = conn.cursor()
-        cur.execute("""
+        conn = db.getconn()
+        with conn.cursor() as cur:
+            cur.execute("""
             SELECT table_name, column_name, data_type
             FROM information_schema.columns
             WHERE table_schema = 'public'
             AND table_name IN (
-                'user_terminals',
-                'clusters',
-                'home_connecteds',
-                'dokumentasis',
-                'additional_informations',
-                'pelanggans'
+                'user_terminals', 'clusters', 'home_connecteds',
+                'dokumentasis', 'additional_informations', 'pelanggans'
             )
             ORDER BY table_name, ordinal_position;
-        """)
-        rows = cur.fetchall()
-        cur.close()
-        conn.close()
+            """)
+            rows = cur.fetchall()
 
         schema = {}
         for table, column, dtype in rows:
             schema.setdefault(table, []).append(f"{column} ({dtype})")
         return schema
+
+    except (psycopg2.OperationalError, psycopg2.pool.PoolError) as pool_err:
+        st.error(
+            f"Error koneksi/pool database saat mengambil skema: {pool_err}")
+        return None
     except Exception as e:
         st.error(f"Gagal mengambil skema: {e}")
         return None
+    finally:
+        if conn:
+            db.putconn(conn)
 
 # Fungsi generate SQL dari Gemini
 
@@ -52,6 +49,10 @@ def generate_sql_query(schema, user_question):
     model = genai.GenerativeModel("gemini-2.0-flash")
     schema_str = "\n".join(
         f"Tabel {t}:\n" + "\n".join([f" - {c}" for c in cs]) for t, cs in schema.items())
+    max_schema_length = 5000
+    schema_str = schema_str[:max_schema_length] + \
+        "...\n(dipangkas)" if len(
+            schema_str) > max_schema_length else schema_str
     prompt = f"""
     Buat query SQL PostgreSQL berdasarkan skema dan pertanyaan berikut.
     Jika ada perbandingan string (seperti nama kota), pastikan gunakan fungsi LOWER() agar pencarian tidak sensitif terhadap huruf besar/kecil.
@@ -72,25 +73,43 @@ def generate_sql_query(schema, user_question):
         st.error(f"Error Gemini: {e}")
         return None
 
-# Fungsi eksekusi query ke DB
-
 
 def execute_query(query, db):
+
+    conn = None
     try:
-        conn = db
-        cur = conn.cursor()
-        cur.execute(query)
-        if cur.description:
-            data = cur.fetchall()
-            columns = [desc[0] for desc in cur.description]
-        else:
-            data = f"Berhasil. Baris terpengaruh: {cur.rowcount}"
-            columns = []
-        cur.close()
-        conn.close()
+        conn = db.getconn()
+        with conn.cursor() as cur:
+            cur.execute(query)
+            if cur.description:  # Jika query menghasilkan kolom (SELECT)
+                data = cur.fetchall()
+                columns = [desc[0] for desc in cur.description]
+            else:
+                conn.commit()
+                data = f"Berhasil. Baris terpengaruh: {cur.rowcount}"
+                columns = []
         return data, columns
+
+    except (psycopg2.OperationalError, psycopg2.pool.PoolError) as pool_err:
+        st.error(
+            f"Error koneksi/pool database saat eksekusi query: {pool_err}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        return None, f"Error Koneksi/Pool: {pool_err}"
     except Exception as e:
-        return None, f"Error: {e}"
+        st.error(f"Error saat eksekusi query: {e}")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        return None, f"Error Eksekusi: {e}"
+    finally:
+        if conn:
+            db.putconn(conn)
 
 # Jawaban natural dari hasil
 
@@ -137,17 +156,19 @@ Tolong berikan penjelasan dalam bahasa Indonesia yang ringkas dan alami berdasar
 
 def app():
     st.title("SQL Chatbot: Gemini x Supabase")
-    db = st.session_state.db
+    db = st.session_state.get("db")
+    if not db:
+        st.error("Connection Pool tidak tersedia.")
     question = st.text_input("Tanyakan sesuatu tentang data aset:")
     if st.button("Kirim Pertanyaan"):
         with st.spinner("Memproses..."):
-            schema = get_schema(db)
+            schema = get_schema(st.session_state.db)
             query = generate_sql_query(schema, question)
             if not query:
                 st.error("Gagal membuat query.")
                 return
 
-            results, info = execute_query(query, db)
+            results, info = execute_query(query, st.session_state.db)
             if isinstance(info, str):
                 st.error(info)
                 return

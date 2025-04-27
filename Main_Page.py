@@ -2,10 +2,9 @@ import streamlit as st
 from PIL import Image
 from io import BytesIO
 import base64
-from dotenv import load_dotenv
-from models.UserService import UserService
-from models.EmailService import EmailService
-from utils import initialize_session_state
+from core.services.UserService import UserService
+from core.services.EmailService import EmailService
+from core import initialize_session_state
 import os
 from PIL import ImageOps
 
@@ -37,8 +36,6 @@ user_service = UserService(
     fs, auth, fs_config, email_service
 )
 
-# Load file .env
-load_dotenv()
 
 # Load CSS
 if os.path.exists('static/css/style.css'):

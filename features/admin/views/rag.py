@@ -60,8 +60,6 @@ def check_file_exists_in_db(db, file_name: str) -> bool:
     except Exception as e:
         st.error(f"❌ Error checking file existence in database: {e}")
         return False
-    finally:
-        cur.close()
 
 
 def upload_file_to_supabase(file_path: str, bucket_name: str, file_name: str):
@@ -140,8 +138,6 @@ def save_embeddings_to_db(db, documents, embeddings, file_name: str):
     except Exception as e:
         db.rollback()
         st.error(f"❌ Failed to save embeddings to the database: {e}")
-    finally:
-        cur.close()
 
 
 def create_vector_store_and_save_to_db(db, documents, file_name: str):
