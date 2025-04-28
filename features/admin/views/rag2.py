@@ -1,114 +1,78 @@
+import streamlit as st
+from handler import (
+    check_file_exists_in_bucket,
+    upload_file_to_supabase,
+    check_file_exists_in_db,
+    save_embeddings_to_db,
+    load_pdf,
+    split_documents
+)
+from psycopg2 import pool
+from langchain.embeddings import OpenAIEmbeddings
+from langchain.vectorstores import Pinecone
 import os
-import yaml
-from pyprojroot import here
-from langchain_chroma import Chroma
-from langchain_community.document_loaders import PyPDFLoader
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+# Inisialisasi koneksi DB Pool (sesuaikan confignya)
+db_pool = pool.SimpleConnectionPool(
+    1, 10,
+    user=os.getenv("DB_USER"),
+    password=os.getenv("DB_PASS"),
+    host=os.getenv("DB_HOST"),
+    port=os.getenv("DB_PORT"),
+    database=os.getenv("DB_NAME"),
+)
 
 
-class PrepareVectorDB:
-    """
-    A class to prepare and manage a Vector Database (VectorDB) using documents from a specified directory.
-    The class performs the following tasks:
-    - Loads and splits documents (PDFs).
-    - Splits the text into chunks based on the specified chunk size and overlap.
-    - Embeds the document chunks using a specified embedding model.
-    - Stores the embedded vectors in a persistent VectorDB directory.
-    """
+def main():
+    st.title("Upload dan Proses PDF dengan Supabase dan DB")
 
-    def __init__(self,
-                 doc_dir: str,
-                 chunk_size: int,
-                 chunk_overlap: int,
-                 embedding_model: str,
-                 vectordb_dir: str,
-                 collection_name: str
-                 ) -> None:
+    db_pool = st.session_state.get("db")
 
-        self.doc_dir = doc_dir
-        self.chunk_size = chunk_size
-        self.chunk_overlap = chunk_overlap
-        self.embedding_model = embedding_model
-        self.vectordb_dir = vectordb_dir
-        self.collection_name = collection_name
+    bucket_name = "document.rag"
 
-    def path_maker(self, file_name: str, doc_dir):
-        """
-        Creates a full file path by joining the provided directory and file name.
-        """
-        return os.path.join(here(doc_dir), file_name)
+    uploaded_file = st.file_uploader("Upload file PDF", type=["pdf"])
+    if uploaded_file is not None:
+        file_name = uploaded_file.name
 
-    def run(self):
-        """
-        Executes the main logic to create and store document embeddings in a VectorDB.
-        """
-        if not os.path.exists(here(self.vectordb_dir)):
-            # If it doesn't exist, create the directory and create the embeddings
-            os.makedirs(here(self.vectordb_dir))
-            print(f"Directory '{self.vectordb_dir}' was created.")
+        # Simpan sementara file upload ke disk lokal
+        with open(file_name, "wb") as f:
+            f.write(uploaded_file.getbuffer())
 
-            file_list = os.listdir(here(self.doc_dir))
-            docs = [PyPDFLoader(self.path_maker(
-                fn, self.doc_dir)).load_and_split() for fn in file_list]
-            docs_list = [item for sublist in docs for item in sublist]
+        # Cek apakah file sudah ada di bucket
+        if check_file_exists_in_bucket(bucket_name, file_name):
+            st.warning(f"File {file_name} sudah ada di bucket.")
 
-            text_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
-                chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap
-            )
-            doc_splits = text_splitter.split_documents(docs_list)
-
-            # Add to vectorDB using Gemini embeddings
-            vectordb = Chroma.from_documents(
-                documents=doc_splits,
-                collection_name=self.collection_name,
-                embedding=GoogleGenerativeAIEmbeddings(
-                    model=self.embedding_model),
-                persist_directory=str(here(self.vectordb_dir))
-            )
-            print("VectorDB is created and saved.")
-            print("Number of vectors in vectordb:",
-                  vectordb._collection.count(), "\n\n")
         else:
-            print(f"Directory '{self.vectordb_dir}' already exists.")
+            # Upload file ke Supabase Storage
+            url = upload_file_to_supabase(file_name, bucket_name, file_name)
+            if url:
+                st.write(f"File berhasil diupload ke: {url}")
+
+                # Load dan split dokumen PDF
+                documents = load_pdf(file_name)
+                if documents:
+                    chunks = split_documents(documents)
+
+                    # Buat embeddings
+                    # Atur sesuai API key dan konfigurasi kamu
+                    embeddings_model = OpenAIEmbeddings()
+                    embeddings = [embeddings_model.embed(
+                        doc.page_content) for doc in chunks]
+
+                    # Cek dan simpan embedding ke DB
+                    if check_file_exists_in_db(db_pool, file_name):
+                        st.info(
+                            "Embedding untuk file ini sudah ada, akan dihapus dan diganti.")
+
+                    save_embeddings_to_db(
+                        db_pool, chunks, embeddings, file_name)
+
+        # Hapus file lokal setelah selesai
+        try:
+            os.remove(file_name)
+        except Exception as e:
+            st.warning(f"Gagal menghapus file lokal: {e}")
 
 
 if __name__ == "__main__":
-    with open(here("configs/tools_config.yml")) as cfg:
-        app_config = yaml.load(cfg, Loader=yaml.FullLoader)
-
-    # Uncomment the following configs to run for swiss airline policy document
-    chunk_size = app_config["pdf_rag"]["chunk_size"]
-    chunk_overlap = app_config["pdf_rag"]["chunk_overlap"]
-    embedding_model = app_config["pdf_rag"]["embedding_model"]
-    vectordb_dir = app_config["pdf_rag"]["vectordb"]
-    collection_name = app_config["pdf_rag"]["collection_name"]
-    doc_dir = app_config["pdf_rag"]["unstructured_docs"]
-
-    prepare_db_instance = PrepareVectorDB(
-        doc_dir=doc_dir,
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        embedding_model=embedding_model,
-        vectordb_dir=vectordb_dir,
-        collection_name=collection_name)
-
-    prepare_db_instance.run()
-
-    # Uncomment the following configs to run for stories document
-    chunk_size = app_config["stories_rag"]["chunk_size"]
-    chunk_overlap = app_config["stories_rag"]["chunk_overlap"]
-    embedding_model = app_config["stories_rag"]["embedding_model"]
-    vectordb_dir = app_config["stories_rag"]["vectordb"]
-    collection_name = app_config["stories_rag"]["collection_name"]
-    doc_dir = app_config["stories_rag"]["unstructured_docs"]
-
-    prepare_db_instance = PrepareVectorDB(
-        doc_dir=doc_dir,
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        embedding_model=embedding_model,
-        vectordb_dir=vectordb_dir,
-        collection_name=collection_name)
-
-    prepare_db_instance.run()
+    main()

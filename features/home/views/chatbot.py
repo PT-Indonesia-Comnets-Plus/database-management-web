@@ -1,182 +1,187 @@
 import streamlit as st
-from langchain.chains.retrieval_qa.base import RetrievalQA
-from langchain_core.documents import Document
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-from langchain.schema import BaseRetriever
 import warnings
-from typing import List
 import os
 import time
-import psycopg2
-import json
-from core.services.agent_graph.load_config import LoadToolsConfig
 
-TOOLS_CFG = LoadToolsConfig()
+# Import graph builder dan konfigurasi
+from core.services.agent_graph.build_graph import build_graph
+from core.services.agent_graph.load_config import TOOLS_CFG
+
+from static.load_css import load_custom_css
 
 warnings.filterwarnings('ignore')
 
-# Class untuk mendapatkan dokumen yang relevan dari PostgreSQL
 
-api_key = os.getenv("GOOGLE_API_KEY", st.secrets["google"]["api_key"])
+def load_custom_css(path: str) -> None:
+    """
+    Memuat custom CSS dari file yang ditentukan.
 
-
-class PostgresRetriever(BaseRetriever):
-    """Retriever yang mencari dokumen relevan dari database PostgreSQL."""
-
-    def get_relevant_documents(self, query: str) -> List[Document]:
+    Args:
+        path (str): Path ke file CSS.
+    """
+    if os.path.exists(path):
         try:
-            results = search_similar_documents(query, db=st.session_state.db)
-            documents = [
-                Document(page_content=row[1], metadata=json.loads(row[2])) for row in results]
-            if not documents:
-                st.warning("Tidak ditemukan dokumen relevan untuk query ini.")
-            return documents
+            with open(path) as f:
+                st.markdown(f"<style>{f.read()}</style>",
+                            unsafe_allow_html=True)
         except Exception as e:
-            st.error(f"Error saat mengambil dokumen relevan: {str(e)}")
-            return []
-
-    async def aget_relevant_documents(self, query: str) -> List[Document]:
-        return self.get_relevant_documents(query)
+            st.warning(f"Gagal memuat CSS: {e}")
 
 
-def search_similar_documents(query: str, db):
-    """Cari dokumen yang relevan di PostgreSQL berdasarkan embedding query."""
-    conn = None
-    try:
-        conn = db.getconn()
-        with conn.cursor() as cur:
-            embeddings = GoogleGenerativeAIEmbeddings(
-                model=TOOLS_CFG.policy_rag_embedding_model)
-            query_embedding = embeddings.embed_query(query)
-
-            cur.execute(
-                """
-                SELECT id, content, metadata, 1 - (embedding <=> %s::vector) AS similarity
-                FROM documents
-                WHERE embedding IS NOT NULL
-                ORDER BY embedding <=> %s::vector
-                LIMIT 5;
-                """,
-                (query_embedding, query_embedding)
-            )
-
-            return cur.fetchall()
-    except (psycopg2.OperationalError, psycopg2.pool.PoolError) as pool_err:
-        st.error(f"❌ Error koneksi database: {pool_err}")
-    except Exception as e:
-        st.error(f"❌ Error saat mencari dokumen: {e}")
-    finally:
-        if conn:
-            db.putconn(conn)
-    return []
-
-
-# Fungsi untuk membuat QA Chain
-
-
-def create_qa_chain() -> RetrievalQA:
-    """Membuat QA Chain dengan settingan advanced untuk backoffice telekomunikasi."""
-    try:
-        llm = ChatGoogleGenerativeAI(
-            model=TOOLS_CFG.policy_rag_llm,  # Model lebih kuat
-            api_key=os.getenv("GOOGLE_API_KEY",
-                              st.secrets["google"]["api_key"]),
-            temperature=TOOLS_CFG.policy_rag_llm_temperature,  # Konsisten, tidak ngawur
-            convert_system_message_to_human=True,
-            system_message=(
-                "Kamu adalah asisten cerdas untuk tim backoffice perusahaan telekomunikasi. "
-                "Jawablah hanya berdasarkan dokumen yang tersedia. "
-                "Jika jawaban tidak ada, katakan dengan sopan 'Maaf, informasi tersebut tidak tersedia dalam data kami.' "
-                "Jawaban harus singkat, padat, dan teknis."
-            ),
-            model_kwargs={
-                "max_output_tokens": 4096,
-                "top_p": 0.9,
-                "top_k": 10,
-            }
-        )
-
-        retriever = PostgresRetriever()
-
-        return RetrievalQA.from_chain_type(
-            llm=llm,
-            chain_type="stuff",
-            retriever=retriever,
-            return_source_documents=True
-        )
-    except Exception as e:
-        st.error(f"❌ Gagal membuat QA Chain: {e}")
-
-
-def handle_prompt_response(prompt, qa_chain):
-    try:
-        response = qa_chain.invoke({"query": prompt})
-        assistant_message = response.get("result", "").strip()
-
-        if not assistant_message:
-            assistant_message = "Maaf, saya tidak menemukan jawaban berdasarkan dokumen yang tersedia."
-
-        return assistant_message
-    except Exception as e:
-        st.error(f"❌ Terjadi error saat memproses permintaan Anda: {e}")
-        return "Terjadi kesalahan teknis. Silakan coba lagi nanti."
-
-
-def display_previous_messages():
-    for message in st.session_state.messages:
-        if message["role"] == "user":
-            st.chat_message("user").markdown(
-                f"**{message['content']}**", unsafe_allow_html=True)
-        elif message["role"] == "assistant":
-            st.chat_message("assistant").markdown(
-                message["content"], unsafe_allow_html=True)
-
-
-# Fungsi untuk menampilkan animasi bertahap
-def display_message_with_typing_animation(placeholder, message, typing_speed=0.1):
-    displayed_message = ""
-    for char in message:
-        displayed_message += char
-        time.sleep(0.02)  # Memberikan jeda waktu 20ms untuk setiap karakter
-        placeholder.markdown(displayed_message)
-
-
-def app():
-    st.title("Chatbot AgentGraph")
-
-    # Load style
-    if os.path.exists("static/css/style.css"):
-        with open("static/css/style.css") as f:
-            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
-
-    qa_chain = create_qa_chain()
-    if not qa_chain:
-        st.stop()
-
-    if 'messages' not in st.session_state:
+def display_previous_messages() -> None:
+    """
+    Menampilkan semua pesan yang tersimpan di session_state.
+    """
+    if "messages" not in st.session_state or not isinstance(st.session_state.messages, list):
         st.session_state.messages = []
 
-    display_previous_messages()
+    for message in st.session_state.messages:
+        role = message.get("role")
+        content = message.get("content", "")
+        if role == "user":
+            st.chat_message("user").markdown(
+                f"**{content}**", unsafe_allow_html=True)
+        elif role == "assistant":
+            st.chat_message("assistant").markdown(
+                content, unsafe_allow_html=True)
 
+
+def display_message_with_typing_animation(placeholder, message: str, typing_speed: float = 0.02) -> None:
+    """
+    Menampilkan pesan assistant dengan efek animasi mengetik karakter per karakter.
+
+    Args:
+        placeholder: Streamlit placeholder untuk output teks.
+        message (str): Pesan yang akan ditampilkan.
+        typing_speed (float, optional): Kecepatan mengetik per karakter. Default 0.02.
+    """
+    displayed_message = ""
+    lines = message.split('\n')
+    for i, line in enumerate(lines):
+        if i > 0:
+            placeholder.markdown(displayed_message + "\n",
+                                 unsafe_allow_html=True)
+            time.sleep(typing_speed * 5)
+        for char in line:
+            displayed_message += char
+            placeholder.markdown(displayed_message, unsafe_allow_html=True)
+            time.sleep(typing_speed)
+        if i < len(lines) - 1:
+            displayed_message += "\n"
+    placeholder.markdown(displayed_message, unsafe_allow_html=True)
+
+
+def initialize_messages() -> None:
+    """
+    Inisialisasi riwayat pesan dalam session_state jika belum ada.
+    """
+    if "messages" not in st.session_state or not isinstance(st.session_state.messages, list):
+        st.session_state.messages = []
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": "Halo! Ada yang bisa saya bantu terkait aset atau dokumen ICONNET?"
+        })
+
+
+def process_user_input(graph, config) -> None:
+    """
+    Memproses input dari pengguna, mengirimkan ke agent graph, 
+    lalu menampilkan respons dengan animasi.
+
+    Args:
+        graph: Graph agent untuk memproses pesan.
+        config (dict): Konfigurasi untuk stream graph.
+    """
     prompt = st.chat_input(
-        "Tanyakan tentang prosedur, maintenance, laporan gangguan...")
+        "Tanyakan tentang aset, dokumen, atau informasi umum...")
+
     if prompt:
-        st.chat_message("user").markdown(
-            f"**{prompt}**", unsafe_allow_html=True)
+        st.chat_message("user").markdown(f"{prompt}", unsafe_allow_html=True)
         st.session_state.messages.append({"role": "user", "content": prompt})
 
         with st.chat_message("assistant"):
             thinking_placeholder = st.empty()
-            for _ in range(3):
-                thinking_placeholder.markdown("🤔 Thinking...")
-                time.sleep(0.7)
+            thinking_placeholder.markdown("🤔 Memproses...")
 
-            assistant_message = handle_prompt_response(prompt, qa_chain)
+            assistant_response_content = ""
+
+            try:
+                events = graph.stream(
+                    {"messages": [("user", prompt)]},
+                    config,
+                    stream_mode="values"
+                )
+
+                final_state = None
+                for event in events:
+                    messages_in_event = event.get("messages", [])
+                    if messages_in_event:
+                        last_message = messages_in_event[-1]
+                        if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+                            tool_names = [tc['name']
+                                          for tc in last_message.tool_calls]
+                            thinking_placeholder.markdown(
+                                f"⚙️ Menggunakan tool: {', '.join(tool_names)}...")
+                        final_state = event
+
+                if final_state and final_state.get("messages"):
+                    assistant_response_message = final_state["messages"][-1]
+                    if assistant_response_message.type == 'ai':
+                        assistant_response_content = assistant_response_message.content
+                    else:
+                        assistant_response_content = "Maaf, terjadi sedikit kebingungan saat memproses. Bisa coba lagi?"
+                        print(
+                            f"⚠️ Pesan terakhir dari graph bukan AI: {assistant_response_message}")
+                else:
+                    assistant_response_content = "Maaf, saya tidak dapat menghasilkan respons saat ini."
+                    print(
+                        "⚠️ Tidak ada state final atau pesan di state final dari graph stream.")
+
+            except Exception as e:
+                st.error(f"Terjadi error saat menjalankan agent graph: {e}")
+                print(f"❌ Error during graph execution: {e}")
+                assistant_response_content = "Maaf, terjadi kesalahan teknis saat memproses permintaan Anda."
+
             display_message_with_typing_animation(
-                thinking_placeholder, assistant_message)
+                thinking_placeholder, assistant_response_content)
 
-        st.session_state.messages.append(
-            {"role": "assistant", "content": assistant_message})
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": assistant_response_content
+            })
+
+
+def app() -> None:
+    """
+    Fungsi utama untuk menjalankan aplikasi Streamlit Integrated ICONNET Assistant.
+    """
+    st.title("🤖 ICONNET Assistant")
+
+    # Load custom CSS
+    load_custom_css(os.path.join("static", "css", "style.css"))
+
+    # Cek database pool
+    db_pool = st.session_state.get("db")
+    if not db_pool:
+        st.error(
+            "Koneksi Database Pool tidak tersedia. Fitur RAG dan SQL tidak akan berfungsi.")
+
+    # Build atau load agent graph
+    try:
+        graph = build_graph()
+        if graph is None:
+            st.error(
+                "Gagal membangun atau memuat agent graph. Chatbot tidak dapat berfungsi.")
+            st.stop()
+    except Exception as e:
+        st.error(f"Terjadi error saat build/load graph: {e}")
+        st.stop()
+
+    config = {"configurable": {"thread_id": TOOLS_CFG.thread_id}}
+
+    initialize_messages()
+    display_previous_messages()
+    process_user_input(graph, config)
 
 
 if __name__ == "__main__":

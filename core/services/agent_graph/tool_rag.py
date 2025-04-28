@@ -1,111 +1,130 @@
-import streamlit as st
-from langchain.chains.retrieval_qa.base import RetrievalQA
-from langchain_core.documents import Document
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-from langchain.schema import BaseRetriever
-from typing import List
-import os
-import psycopg2
+# core/services/agent_graph/tool_rag.py
+
 import json
+from typing import List, Dict, Any
+
+import streamlit as st
+from langchain_core.tools import tool
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from psycopg2 import pool
+
+from .load_config import TOOLS_CFG
 
 
-class PostgresRetriever(BaseRetriever):
-    """Retriever yang mencari dokumen relevan dari database PostgreSQL."""
-
-    def get_relevant_documents(self, query: str) -> List[Document]:
-        try:
-            results = search_similar_documents(query, db=st.session_state.db)
-            documents = [
-                Document(page_content=row[1], metadata=json.loads(row[2])) for row in results]
-            if not documents:
-                st.warning("Tidak ditemukan dokumen relevan untuk query ini.")
-            return documents
-        except Exception as e:
-            st.error(f"Error saat mengambil dokumen relevan: {str(e)}")
-            return []
-
-    async def aget_relevant_documents(self, query: str) -> List[Document]:
-        return self.get_relevant_documents(query)
+def _initialize_embeddings() -> GoogleGenerativeAIEmbeddings:
+    """Inisialisasi model embedding Google Generative AI."""
+    return GoogleGenerativeAIEmbeddings(
+        model=TOOLS_CFG.rag_embedding_model,
+        google_api_key=TOOLS_CFG.google_api_key,
+    )
 
 
-def search_similar_documents(query: str, db):
-    """Cari dokumen yang relevan di PostgreSQL berdasarkan embedding query."""
+def _fetch_similar_documents(
+    query_embedding: List[float],
+    db_conn: pool.SimpleConnectionPool,
+    k: int
+) -> List[tuple]:
+    """Mengambil dokumen serupa dari database berdasarkan embedding query."""
+    with db_conn.cursor() as cur:
+        embedding_json = json.dumps(query_embedding)
+        cur.execute(
+            """
+            SELECT content, metadata, 1 - (embedding <=> %s::vector) AS similarity
+            FROM documents
+            WHERE embedding IS NOT NULL
+            ORDER BY embedding <=> %s::vector
+            LIMIT %s;
+            """,
+            (embedding_json, embedding_json, k)
+        )
+        return cur.fetchall()
+
+
+def _parse_metadata(metadata_raw: Any) -> Dict[str, Any]:
+    """Parse metadata dokumen dari hasil database."""
+    try:
+        if isinstance(metadata_raw, str):
+            return json.loads(metadata_raw)
+        elif isinstance(metadata_raw, dict):
+            return metadata_raw
+        else:
+            return {"raw": str(metadata_raw)}
+    except Exception:
+        return {"raw": str(metadata_raw)}
+
+
+def _search_similar_documents_in_db(
+    query: str,
+    db_pool: pool.SimpleConnectionPool,
+    k: int
+) -> List[Dict[str, Any]]:
+    """Cari dokumen internal yang relevan berdasarkan query."""
     conn = None
     try:
-        conn = db.getconn()
-        with conn.cursor() as cur:
-            embeddings = GoogleGenerativeAIEmbeddings(
-                model=TOOLS_CFG.policy_rag_embedding_model)
-            query_embedding = embeddings.embed_query(query)
+        conn = db_pool.getconn()
+        embeddings = _initialize_embeddings()
+        query_embedding = embeddings.embed_query(query)
 
-            cur.execute(
-                """
-                SELECT id, content, metadata, 1 - (embedding <=> %s::vector) AS similarity
-                FROM documents
-                WHERE embedding IS NOT NULL
-                ORDER BY embedding <=> %s::vector
-                LIMIT 5;
-                """,
-                (query_embedding, query_embedding)
-            )
+        results = _fetch_similar_documents(query_embedding, conn, k)
 
-            return cur.fetchall()
-    except (psycopg2.OperationalError, psycopg2.pool.PoolError) as pool_err:
-        st.error(f"❌ Error koneksi database: {pool_err}")
+        return [
+            {
+                "content": content,
+                "metadata": _parse_metadata(metadata_raw),
+                "similarity": similarity,
+            }
+            for content, metadata_raw, similarity in results
+        ]
+
     except Exception as e:
-        st.error(f"❌ Error saat mencari dokumen: {e}")
+        print(f"❌ Error mencari dokumen RAG: {e}")
+        return [{"error": f"Error during RAG search: {e}"}]
+
     finally:
         if conn:
-            db.putconn(conn)
-    return []
+            db_pool.putconn(conn)
 
 
-# Fungsi untuk membuat QA Chain
+@tool
+def search_internal_documents(query: str) -> str:
+    """
+    Gunakan tool ini untuk mencari informasi spesifik dalam dokumen internal perusahaan,
+    seperti prosedur standar operasi (SOP), kebijakan, panduan teknis, atau laporan lama.
+    Sangat berguna untuk pertanyaan tentang 'bagaimana cara', 'apa kebijakan tentang', 'jelaskan prosedur untuk'.
+    Input adalah pertanyaan atau topik yang ingin dicari.
+    Output adalah ringkasan atau potongan teks relevan dari dokumen internal.
+    """
+    db_pool = st.session_state.get("db")
+    k_results = TOOLS_CFG.rag_k
 
-
-def create_qa_chain() -> RetrievalQA:
-    """Membuat QA Chain dengan settingan advanced untuk backoffice telekomunikasi."""
     try:
-        llm = ChatGoogleGenerativeAI(
-            model=TOOLS_CFG.policy_rag_llm,  # Model lebih kuat
-            api_key=os.getenv("GOOGLE_API_KEY",
-                              st.secrets["google"]["api_key"]),
-            temperature=TOOLS_CFG.policy_rag_llm_temperature,  # Konsisten, tidak ngawur
-            convert_system_message_to_human=True,
-            system_message=(
-                "Kamu adalah asisten cerdas untuk tim backoffice perusahaan telekomunikasi. "
-                "Jawablah hanya berdasarkan dokumen yang tersedia. "
-                "Jika jawaban tidak ada, katakan dengan sopan 'Maaf, informasi tersebut tidak tersedia dalam data kami.' "
-                "Jawaban harus singkat, padat, dan teknis."
-            ),
-            model_kwargs={
-                "max_output_tokens": 4096,
-                "top_p": 0.9,
-                "top_k": 10,
-            }
+        search_results = _search_similar_documents_in_db(
+            query=query,
+            db_pool=db_pool,
+            k=k_results,
         )
 
-        retriever = PostgresRetriever()
+        if not search_results:
+            return "Tidak ada dokumen internal yang relevan ditemukan."
 
-        return RetrievalQA.from_chain_type(
-            llm=llm,
-            chain_type="stuff",
-            retriever=retriever,
-            return_source_documents=True
-        )
+        if any("error" in res for res in search_results):
+            first_error = next(
+                (res["error"] for res in search_results if "error" in res),
+                "Unknown error during search."
+            )
+            return f"Gagal mencari dokumen internal: {first_error}"
+
+        context = "\n\n---\n\n".join([
+            f"Source: {res['metadata'].get('file_name', 'N/A')}\nContent: {res['content']}"
+            for res in search_results
+        ])
+
+        max_context_len = 4000
+        if len(context) > max_context_len:
+            context = context[:max_context_len] + "\n... (truncated)"
+
+        return context
+
     except Exception as e:
-        st.error(f"❌ Gagal membuat QA Chain: {e}")
-
-
-def handle_prompt_response(prompt, qa_chain):
-    try:
-        response = qa_chain.invoke({"query": prompt})
-        assistant_message = response.get("result", "").strip()
-
-        if not assistant_message:
-            assistant_message = "Maaf, saya tidak menemukan jawaban berdasarkan dokumen yang tersedia."
-
-        return assistant_message
-    except Exception as e:
-        st.error(f"❌ Terjadi error saat memproses permintaan Anda: {e}")
-        return "Terjadi kesalahan teknis. Silakan coba lagi nanti."
+        print(f"❌ Unexpected error in RAG tool function: {e}")
+        return f"Error processing document search: {e}"

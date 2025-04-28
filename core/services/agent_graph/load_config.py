@@ -1,6 +1,8 @@
+# core/services/agent_graph/load_config.py
 
 import os
 import yaml
+import streamlit as st
 from dotenv import load_dotenv
 from pyprojroot import here
 
@@ -8,44 +10,82 @@ load_dotenv()
 
 
 class LoadToolsConfig:
+    """Load configuration for tools and project settings."""
 
     def __init__(self) -> None:
-        with open(here(r"configs\tools_configs.yml")) as cfg:
-            app_config = yaml.load(cfg, Loader=yaml.FullLoader)
+        self._load_app_config()
+        self._set_environment_variables()
+        self._load_primary_agent_config()
+        self._load_tavily_search_config()
+        self._load_rag_config()
+        self._load_sqlagent_config()
+        self._load_langsmith_config()
+        self._load_memory_config()
+        self._load_graph_config()
 
-        # Set environment variables
-        os.environ['GEMINI_API_KEY'] = os.getenv("GEMINI_API_KEY")
-        os.environ['TAVILY_API_KEY'] = os.getenv("TAVILY_API_KEY")
+    def _load_app_config(self) -> None:
+        """Load application configuration from YAML."""
+        config_path = here("configs/tools_configs.yml")
+        with open(config_path, "r") as cfg_file:
+            self.app_config = yaml.load(cfg_file, Loader=yaml.FullLoader)
 
-        # Primary agent
-        self.primary_agent_llm = app_config["primary_agent"]["llm"]
-        self.primary_agent_llm_temperature = app_config["primary_agent"]["llm_temperature"]
+    def _set_environment_variables(self) -> None:
+        """Set environment variables from dotenv or Streamlit secrets."""
+        self.google_api_key = os.environ["GEMINI_API_KEY"] = os.getenv(
+            "GEMINI_API_KEY") or st.secrets.get(["google"]["api_key"])
+        self.tavily_api_key = os.environ["TAVILY_API_KEY"] = os.getenv(
+            "TAVILY_API_KEY") or st.secrets.get(["tavily"]["api_key"])
+        self.langchain_api_key = os.environ["LANGCHAIN_API_KEY"] = os.getenv(
+            "LANGCHAIN_API_KEY") or st.secrets.get(["langsmith"]["api_key"])
 
-        # Internet Search config
+    def _load_primary_agent_config(self) -> None:
+        """Load primary agent configuration."""
+        primary_agent = self.app_config.get("primary_agent", {})
+        self.primary_agent_llm = primary_agent.get("llm")
+        self.primary_agent_llm_temperature = primary_agent.get(
+            "llm_temperature")
+
+    def _load_tavily_search_config(self) -> None:
+        """Load internet search (Tavily) configuration."""
+        tavily_config = self.app_config.get("tavily_search_api", {})
         self.tavily_search_max_results = int(
-            app_config["tavily_search_api"]["tavily_search_max_results"])
+            tavily_config.get("tavily_search_max_results", 0))
 
-        # Swiss Airline Policy RAG configs
-        self.policy_rag_llm = app_config["pdf_rag"]["llm"]
-        self.policy_rag_llm_temperature = float(
-            app_config["pdf_rag"]["llm_temperature"])
-        self.policy_rag_embedding_model = app_config["pdf_rag"]["embedding_model"]
-        self.policy_rag_vectordb_directory = str(here(
-            app_config["pdf_rag"]["vectordb"]))  # needs to be strin for summation in chromadb backend: self._settings.require("persist_directory") + "/chroma.sqlite3"
-        self.policy_rag_unstructured_docs_directory = str(here(
-            app_config["pdf_rag"]["unstructured_docs"]))
-        self.policy_rag_k = app_config["pdf_rag"]["k"]
-        self.policy_rag_chunk_size = app_config["pdf_rag"]["chunk_size"]
-        self.policy_rag_chunk_overlap = app_config["pdf_rag"]["chunk_overlap"]
-        self.policy_rag_collection_name = app_config["pdf_rag"]["collection_name"]
+    def _load_rag_config(self) -> None:
+        """Load Retrieval Augmented Generation (RAG) configuration."""
+        rag_config = self.app_config.get("rag_configs", {})
+        self.rag_llm = rag_config.get("llm")
+        self.rag_llm_temperature = float(rag_config.get("llm_temperature", 0))
+        self.rag_embedding_model = rag_config.get("embedding_model")
+        self.rag_unstructured_docs_directory = str(
+            here(rag_config.get("unstructured_docs", "")))
+        self.rag_k = rag_config.get("k")
+        self.rag_collection_name = self.app_config.get(
+            "srag_configs", {}).get("collection_name")
 
-        # Travel SQL Agent configs
-        self.travel_sqldb_directory = str(here(
-            app_config["sqlagent_configs"]["sqldb_dir"]))
-        self.travel_sqlagent_llm = app_config["sqlagent_configs"]["llm"]
-        self.travel_sqlagent_llm_temperature = float(
-            app_config["sqlagent_configs"]["llm_temperature"])
+    def _load_sqlagent_config(self) -> None:
+        """Load SQL Agent configuration."""
+        sqlagent_config = self.app_config.get("sqlagent_configs", {})
+        self.sql_agent_llm = sqlagent_config.get("llm")
+        self.sq_lagent_llm_temperature = float(
+            sqlagent_config.get("llm_temperature"))
 
-        # Graph configs
-        self.thread_id = str(
-            app_config["graph_configs"]["thread_id"])
+    def _load_langsmith_config(self) -> None:
+        """Load LangSmith tracking configuration."""
+        langsmith_config = self.app_config.get("langsmith", {})
+        self.langsmith_project_name = langsmith_config.get("project_name")
+        self.langsmith_tracing = langsmith_config.get("tracing")
+
+    def _load_memory_config(self) -> None:
+        """Load memory directory configuration."""
+        memory_config = self.app_config.get("memory", {})
+        self.memory_dir = memory_config.get("directory")
+
+    def _load_graph_config(self) -> None:
+        """Load graph configuration."""
+        graph_config = self.app_config.get("graph_configs", {})
+        self.thread_id = str(graph_config.get("thread_id"))
+
+
+# Instance for use
+TOOLS_CFG = LoadToolsConfig()

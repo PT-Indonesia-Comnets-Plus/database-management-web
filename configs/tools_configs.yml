@@ -2,10 +2,10 @@ primary_agent:
   llm: gemini-2.0-flash
   llm_temperature: 0.0
 
-pdf_rag:
+rag_configs:
   unstructured_docs: "data/unstructured_docs/swiss_airline_policy"
   vectordb: "data/airline_policy_vectordb"
-  collection_name: rag-chroma
+  collection_name: documnets.rag
   llm: gemini-2.0-flash
   llm_temperature: 0.9
   embedding_model: models/embedding-001
@@ -21,6 +21,9 @@ sqlagent_configs:
 langsmith:
   tracing: "true"
   project_name: "rag_sqlagent_project"
+
+memory:
+  directory: memory
 
 tavily_search_api:
   tavily_search_max_results: 2
