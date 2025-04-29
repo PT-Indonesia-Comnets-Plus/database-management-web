@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 import pandas as pd
 import plotly.graph_objects as go
+from firebase_admin import firestore
 
 
 class UserDataService:
@@ -84,6 +85,33 @@ class UserDataService:
                         times.get("Logout_Time", []))
 
         return daily_totals
+
+    def verify_user(self, uid: str) -> str:
+        """
+        Updates the status of a user with the given UID to 'Verified' in Firestore.
+
+        Args:
+            uid: The unique identifier (UID) of the user to verify.
+
+        Returns:
+            A status message indicating success or failure.
+        """
+        if not uid:
+            return "Error: User UID cannot be empty."
+
+        user_ref = self.fs.collection('users').document(uid)
+
+        try:
+            user_doc = user_ref.get()
+            if not user_doc.exists:
+                return f"Error: User with UID '{uid}' not found."
+            user_ref.update({
+                'status': 'Verified',
+                'verification_time': datetime.now().strftime("%S:%M:%H %d-%m-%Y")
+            })
+            return "User verified successfully."
+        except Exception as e:
+            return f"Error verifying user: {e}"
 
     def plot_daily_login_logout_totals(self, daily_totals):
         end_date = datetime.now()

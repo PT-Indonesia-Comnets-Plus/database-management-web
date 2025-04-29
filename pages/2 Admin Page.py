@@ -1,27 +1,18 @@
 from features.admin.controller import AdminPage
 import streamlit as st
-from core.services.EmailService import EmailService
-from core.services.UserService import UserService
+from core import initialize_session_state
 
-# Inisialisasi session state
-email_service = EmailService(
-    smtp_server="smtp.gmail.com",
-    smtp_port=587,
-    smtp_username="your_email@gmail.com",
-    smtp_password="your_email_password"
+initialize_session_state()
+# Ambil service dari session state
+user_service = st.session_state.get("user_service")
+user_data_service = st.session_state.get("user_data_service")
+rag_service = st.session_state.get("rag_service")
+
+admin_page = AdminPage(
+    user_service=user_service,
+    user_data_service=user_data_service,
+    rag_service=rag_service
 )
-
-# Inisialisasi UserService
-user_service = UserService(
-    firestore=st.session_state.get('fs'),
-    auth=st.session_state.get('auth'),
-    firebase_api=st.session_state.get('fs_config'),
-    email_service=email_service
-)
-
-# Periksa apakah pengguna memiliki role "Admin"
-admin_page = AdminPage(st.session_state.fs,
-                       st.session_state.auth, st.session_state.fs_config)
 
 # Render halaman AdminPage
 admin_page.render()

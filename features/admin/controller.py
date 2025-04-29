@@ -1,47 +1,68 @@
 import streamlit as st
+# Import type hinting untuk services
 from core.services.UserService import UserService
 from core.services.UserDataService import UserDataService
 from streamlit_option_menu import option_menu
 from core import initialize_session_state
 from PIL import Image, ImageOps
-from .views import dashboard, rag, verify_users
+from .views import dashboard, rag2, verify_users
+from core.services.RAG import RAGService
 
 
 class AdminPage:
-    def __init__(self, firestore, auth, firestore_config):
-        self.user_data_service = UserDataService(
-            firestore)
+    """Controller for the Admin section."""
+
+    # Terima instance service di __init__
+    def __init__(self,
+                 user_service: UserService,
+                 user_data_service: UserDataService,
+                 rag_service: RAGService
+                 ):
+        """
+        Initializes the AdminPage controller.
+
+        Args:
+            user_service: Instance of UserService.
+            user_data_service: Instance of UserDataService.
+            rag_service: Instance of RAGService.
+        """
+        self.user_service = user_service
+        self.user_data_service = user_data_service
+        self.rag_service = rag_service
 
     def configure_page(self):
-        """Konfigurasi halaman Streamlit."""
+        """Configures Streamlit page settings."""
         try:
             logo = Image.open("static/image/icon.png").resize((40, 50))
             logo_with_padding = ImageOps.expand(
                 logo, border=8, fill=(255, 255, 255, 0)
             )
-            st.set_page_config(page_title="Admin Page",
-                               page_icon=logo_with_padding)
-        except st.errors.StreamlitSetPageConfigMustBeFirstCommandError:
+        except st.errors.StreamlitAPIException:
             pass
+        except FileNotFoundError:
+            st.warning("Logo icon file not found.")
         st.logo("static/image/logo_iconplus.png", size="large")
 
-    def load_css(self, file_path):
-        """Muat file CSS ke dalam aplikasi Streamlit."""
+    def load_css(self, file_path: str):
+        """Loads a CSS file into the Streamlit app."""
         try:
             with open(file_path) as f:
                 st.markdown(f"<style>{f.read()}</style>",
                             unsafe_allow_html=True)
         except FileNotFoundError:
-            st.error("CSS file not found.")
+            st.error(f"CSS file not found at: {file_path}")
 
-    def render_sidebar(self):
-        """Render menu navigasi di sidebar."""
+    def render_sidebar(self) -> str:
+        """Renders the navigation menu in the sidebar."""
         with st.sidebar:
-            app = option_menu(
-                menu_title="Select Menu",
+            # Ensure options match the keys used in render_page
+            selected_option = option_menu(
+                menu_title="Admin Menu",
                 options=["Dashboard", "Verify Users",
-                         "RAG"],
-                icons=["grid", "search", "table"],
+                         "RAG Management"],
+                icons=["grid-fill", "person-check-fill",
+                       "file-earmark-arrow-up-fill"],
+                menu_icon="person-workspace",
                 default_index=0,
                 orientation="vertical",
                 styles={
@@ -52,34 +73,38 @@ class AdminPage:
                     "nav-link-selected": {"background-color": "#42c2ff", "color": "#FFFFFF", "font-weight": "bold"},
                 }
             )
-        return app
+        return selected_option
 
-    def render_page(self, app):
-        """Render sub-halaman berdasarkan pilihan menu."""
-        if app == 'Dashboard':
+    def render_page(self, selected_option: str):
+        """Renders the sub-page based on the menu selection."""
+        if selected_option == 'Dashboard':
             dashboard.app(self.user_data_service)
-        elif app == 'Verify Users':
+        elif selected_option == 'Verify Users':
             verify_users.app(self.user_data_service)
-        elif app == 'RAG':
-            rag.app()
+        elif selected_option == 'RAG Management':  # Sesuaikan dengan nama di options
+            rag2.app(self.rag_service)
 
     def render(self):
+        """Renders the complete Admin Page."""
         self.configure_page()
-        fs = st.session_state.get("fs")
-        self.load_css("static/css/style.css")
+        initialize_session_state()
+        self.load_css("static/css/style.css")  # Pastikan path CSS benar
 
-        # Periksa apakah pengguna sudah login
+        # --- Authentication and Authorization Check ---
+        # Pindahkan ini ke awal render untuk efisiensi
         if "username" not in st.session_state or not st.session_state.username:
-            st.warning("You must log in first to access this page.")
-            return  # Hentikan rendering jika pengguna belum login
+            st.warning("🔒 You must log in first to access this page.")
+            st.page_link("Main_Page.py", label="Go to Login", icon="🏠")
+            return  # Stop rendering further
 
-        # Periksa apakah pengguna memiliki role "Admin"
         if "role" not in st.session_state or st.session_state.role != "Admin":
-            st.warning(
-                "You are not authorized to view this page. Only admins can access this page."
-            )
-            return  # Hentikan rendering konten admin, tetapi tetap tampilkan elemen umum
+            st.error("🚫 You are not authorized to view this page.")
+            st.info(
+                f"Your current role: {st.session_state.get('role', 'Unknown')}")
+            st.page_link("pages/1 Home Page.py", label="Go to Home", icon="🏠")
+            return  # Stop rendering further
+        # --- End Check ---
 
-        # Jika pengguna sudah login dan memiliki role "Admin", render halaman
-        app = self.render_sidebar()
-        self.render_page(app)
+        # Render sidebar and selected page content if authorized
+        selected_option = self.render_sidebar()
+        self.render_page(selected_option)

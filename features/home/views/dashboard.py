@@ -1,125 +1,31 @@
+# features/home/views/dashboard.py
 import streamlit as st
 import pandas as pd
-import psycopg2
+from core.services.AssetDataService import AssetDataService  # Import service
 
 
-@st.cache_resource
-def load_data(_db):
-    """Load data aset dari database."""
-    conn = None
-    try:
-        conn = _db.getconn()
-        with conn.cursor() as cur:
-            cur.execute("""
-    SELECT
-        -- Kolom dari user_terminals
-        ut.fat_id,
-        ut.hostname_olt,
-        ut.latitude_olt,
-        ut.longitude_olt,
-        ut.brand_olt,
-        ut.type_olt,
-        ut.kapasitas_olt,
-        ut.kapasitas_port_olt,
-        ut.olt_port,
-        ut.olt,
-        ut.interface_olt,
-        ut.fdt_id,
-        ut.status_osp_amarta_fdt,
-        ut.jumlah_splitter_fdt,
-        ut.kapasitas_splitter_fdt,
-        ut.fdt_new_existing,
-        ut.port_fdt,
-        ut.latitude_fdt,
-        ut.longitude_fdt,
-        ut.jumlah_splitter_fat,
-        ut.kapasitas_splitter_fat,
-        ut.latitude_fat,
-        ut.longitude_fat,
-        ut.status_osp_amarta_fat,
-        ut.fat_kondisi,
-        ut.fat_filter_pemakaian,
-        ut.keterangan_full,
-        ut.fat_id_x,
-        ut.filter_fat_cap,
+def app(asset_data_service: AssetDataService):
+    """
+    Displays the main dashboard with a sample of asset data.
 
-        -- Kolom dari clusters
-        cl.latitude_cluster,
-        cl.longitude_cluster,
-        cl.area_kp,
-        cl.kota_kab,
-        cl.kecamatan,
-        cl.kelurahan,
-        cl.up3,
-        cl.ulp,
+    Args:
+        asset_data_service: An instance of AssetDataService to load data.
+    """
+    st.title("📊 Asset Dashboard")
+    st.markdown("Overview of the ICONNET asset management system.")
 
-        -- Kolom dari home_connecteds
-        hc.hc_old,
-        hc.hc_icrm,
-        hc.total_hc,
-        hc.cleansing_hp,
+    # Load data using the service
+    with st.spinner("Loading asset data..."):
+        df = asset_data_service.load_all_assets(
+            limit=50)  # Load limited data for dashboard
 
-        -- Kolom dari dokumentasis (dengan alias untuk status_osp_amarta_fat)
-        dk.status_osp_amarta_fat AS dk_status_osp_amarta_fat,
-        dk.link_dokumen_feeder,
-        dk.keterangan_dokumen,
-        dk.link_data_aset,
-        dk.keterangan_data_aset,
-        dk.link_maps,
-        dk.update_aset,
-        dk.amarta_update,
-
-        -- Kolom dari additional_informations
-        ai.pa,
-        ai.tanggal_rfs,
-        ai.mitra,
-        ai.kategori,
-        ai.sumber_datek
-
-    FROM
-        user_terminals ut
-    LEFT JOIN
-        clusters cl ON ut.fat_id = cl.fat_id
-    LEFT JOIN
-        home_connecteds hc ON ut.fat_id = hc.fat_id
-    LEFT JOIN
-        dokumentasis dk ON ut.fat_id = dk.fat_id
-    LEFT JOIN
-        additional_informations ai ON ut.fat_id = ai.fat_id
-
-    -- Batasi hasil query ke 10 baris
-    LIMIT 50;
-                        """)
-            rows = cur.fetchall()
-            colnames = [desc[0] for desc in cur.description]
-            df = pd.DataFrame(rows, columns=colnames)
-            return df
-    except psycopg2.OperationalError as e:
-        st.error(f"Database connection error: {e}")
-        return None
-    except Exception as e:
-        st.error(f"Query Error: {e}")
-        return None
-    finally:
-        if conn:
-            _db.putconn(conn)
-
-
-def app():
-    st.title("Management System Iconnet")
-    db = st.session_state.get("db")
-    if not db:
-        st.error("Connection Pool tidak tersedia.")
-    if "df" not in st.session_state:
-        st.session_state.df = load_data(db)
-
-    df = st.session_state.df
-    if df is not None:
-        st.subheader("Welcome to Iconnet Management System")
-        st.dataframe(df)
+    if df is not None and not df.empty:
+        st.subheader("Recent Asset Data Sample")
+        st.dataframe(df, use_container_width=True, hide_index=True)
+    elif df is not None and df.empty:
+        st.info("No asset data found in the database.")
     else:
-        st.warning("Tidak ada data yang bisa ditampilkan.")
+        # Error message already shown by the service
+        st.warning("Could not display asset data.")
 
-
-if __name__ == "__main__":
-    app()
+# Hapus `if __name__ == "__main__":` jika ada

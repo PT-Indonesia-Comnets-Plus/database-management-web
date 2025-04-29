@@ -16,8 +16,8 @@ import psycopg2  # <-- Tambahkan kembali import psycopg2
 from psycopg2 import pool  # <-- Pastikan pool diimpor
 
 # Ambil API Key Google (tetap diperlukan untuk embedding)
-api_key = os.getenv("GOOGLE_API_KEY", st.secrets.get(
-    "google", {}).get("api_key"))
+api_key = os.getenv("GEMINI_API_KEY", st.secrets.get(
+    "gemini", {}).get("api_key"))
 if not api_key:
     st.error("GOOGLE_API_KEY tidak ditemukan.")
     st.stop()

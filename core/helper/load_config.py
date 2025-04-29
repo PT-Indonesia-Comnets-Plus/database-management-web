@@ -31,12 +31,19 @@ class LoadToolsConfig:
 
     def _set_environment_variables(self) -> None:
         """Set environment variables from dotenv or Streamlit secrets."""
-        self.google_api_key = os.environ["GEMINI_API_KEY"] = os.getenv(
-            "GEMINI_API_KEY") or st.secrets.get(["google"]["api_key"])
+        self.gemini_api_key = os.getenv("GEMINI_API_KEY", st.secrets.get(
+            "gemini", {}).get("api_key"))
         self.tavily_api_key = os.environ["TAVILY_API_KEY"] = os.getenv(
             "TAVILY_API_KEY") or st.secrets.get(["tavily"]["api_key"])
         self.langchain_api_key = os.environ["LANGCHAIN_API_KEY"] = os.getenv(
             "LANGCHAIN_API_KEY") or st.secrets.get(["langsmith"]["api_key"])
+
+        if self.gemini_api_key:
+            os.environ["GOOGLE_API_KEY"] = self.gemini_api_key
+            print("🔑 GOOGLE_API_KEY environment variable set from GEMINI_API_KEY.")
+        else:
+            print(
+                "⚠️ GEMINI_API_KEY not found. langchain-google-genai might fall back to ADC.")
 
     def _load_primary_agent_config(self) -> None:
         """Load primary agent configuration."""
@@ -67,7 +74,7 @@ class LoadToolsConfig:
         """Load SQL Agent configuration."""
         sqlagent_config = self.app_config.get("sqlagent_configs", {})
         self.sql_agent_llm = sqlagent_config.get("llm")
-        self.sq_lagent_llm_temperature = float(
+        self.sql_agent_llm_temperature = float(
             sqlagent_config.get("llm_temperature"))
 
     def _load_langsmith_config(self) -> None:

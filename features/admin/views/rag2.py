@@ -1,78 +1,45 @@
 import streamlit as st
-from handler import (
-    check_file_exists_in_bucket,
-    upload_file_to_supabase,
-    check_file_exists_in_db,
-    save_embeddings_to_db,
-    load_pdf,
-    split_documents
-)
-from psycopg2 import pool
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.vectorstores import Pinecone
-import os
-
-# Inisialisasi koneksi DB Pool (sesuaikan confignya)
-db_pool = pool.SimpleConnectionPool(
-    1, 10,
-    user=os.getenv("DB_USER"),
-    password=os.getenv("DB_PASS"),
-    host=os.getenv("DB_HOST"),
-    port=os.getenv("DB_PORT"),
-    database=os.getenv("DB_NAME"),
-)
+# Import RAGService for type hinting
+from core.services.RAG import RAGService
 
 
-def main():
-    st.title("Upload dan Proses PDF dengan Supabase dan DB")
+def app(rag_service: RAGService):
+    """
+    Provides an interface for administrators to upload PDF documents
+    to be processed and added to the RAG knowledge base.
 
-    db_pool = st.session_state.get("db")
+    Args:
+        rag_service: An instance of RAGService to handle PDF processing.
+    """
+    st.title("📚 RAG Document Management")  # features/admin/views/rag2.py
 
-    bucket_name = "document.rag"
+    st.markdown("Upload PDF files to update the internal knowledge base.")
 
-    uploaded_file = st.file_uploader("Upload file PDF", type=["pdf"])
+    # File Uploader
+    uploaded_file = st.file_uploader(
+        "Upload a PDF document",
+        type=["pdf"],
+        accept_multiple_files=False,  # Process one file at a time for clarity
+        key="rag_pdf_uploader"
+    )
+
     if uploaded_file is not None:
-        file_name = uploaded_file.name
+        st.subheader(f"Preview: {uploaded_file.name}")
 
-        # Simpan sementara file upload ke disk lokal
-        with open(file_name, "wb") as f:
-            f.write(uploaded_file.getbuffer())
+        rag_service.display_pdf_preview(uploaded_file)
 
-        # Cek apakah file sudah ada di bucket
-        if check_file_exists_in_bucket(bucket_name, file_name):
-            st.warning(f"File {file_name} sudah ada di bucket.")
-
-        else:
-            # Upload file ke Supabase Storage
-            url = upload_file_to_supabase(file_name, bucket_name, file_name)
-            if url:
-                st.write(f"File berhasil diupload ke: {url}")
-
-                # Load dan split dokumen PDF
-                documents = load_pdf(file_name)
-                if documents:
-                    chunks = split_documents(documents)
-
-                    # Buat embeddings
-                    # Atur sesuai API key dan konfigurasi kamu
-                    embeddings_model = OpenAIEmbeddings()
-                    embeddings = [embeddings_model.embed(
-                        doc.page_content) for doc in chunks]
-
-                    # Cek dan simpan embedding ke DB
-                    if check_file_exists_in_db(db_pool, file_name):
-                        st.info(
-                            "Embedding untuk file ini sudah ada, akan dihapus dan diganti.")
-
-                    save_embeddings_to_db(
-                        db_pool, chunks, embeddings, file_name)
-
-        # Hapus file lokal setelah selesai
-        try:
-            os.remove(file_name)
-        except Exception as e:
-            st.warning(f"Gagal menghapus file lokal: {e}")
+        st.subheader("Processing Options")
+        if st.button(f"🚀 Process and Add '{uploaded_file.name}' to Knowledge Base"):
+            with st.spinner(f"Processing {uploaded_file.name}... This may take a few moments."):
+                success = rag_service.process_uploaded_pdf(uploaded_file)
+            if success:
+                st.success(
+                    f"File '{uploaded_file.name}' processed successfully!")
+            else:
+                st.error("Processing failed. Please check the logs or try again.")
+    else:
+        st.info("Upload a PDF file to begin.")
 
 
-if __name__ == "__main__":
-    main()
+# Note: The main execution block `if __name__ == "__main__":` is usually
+# not needed for view files called by a controller. Remove it if present.

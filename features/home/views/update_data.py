@@ -1,304 +1,313 @@
+# features/home/views/update_data.py
 import streamlit as st
 import pandas as pd
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
-import os
+from core.services.AssetDataService import AssetDataService  # Import service
+from datetime import date, datetime  # Import date and datetime
+
+# Fungsi-fungsi lama (editable_dataframe, insert_data, insert_dataframe, process_uploaded_file)
+# telah dihapus karena logikanya dipindahkan ke AssetDataService.
 
 
-def editable_dataframe(df):
-    gb = GridOptionsBuilder.from_dataframe(df)
-    gb.configure_pagination(enabled=True)
-    gb.configure_side_bar()
-    gb.configure_default_column(editable=True)
-    for col in df.columns:
-        gb.configure_column(col, auto_size=True)
+def app(asset_data_service: AssetDataService):
+    """
+    Provides interfaces for manual asset data input and bulk upload via CSV file,
+    utilizing AssetDataService for processing and database interactions.
 
-    grid_options = gb.build()
+    Args:
+        asset_data_service: An instance of AssetDataService.
+    """
+    st.title("⬆️ Upload Asset Data")
 
-    grid_response = AgGrid(
-        df,
-        gridOptions=grid_options,
-        update_mode=GridUpdateMode.MODEL_CHANGED,  # Update data saat diubah
-        allow_unsafe_jscode=True,
-        fit_columns_on_grid_load=True
-    )
-
-    return grid_response["data"]
-
-# Fungsi untuk memasukkan data pasien ke database
-
-
-def insert_data(db, data):
-    try:
-        cursor = db.cursor()
-
-        query = """
-        INSERT INTO data_aset ("PA", "Tanggal RFS", "Mitra", "Kategori", "Area KP", "Kota Kab",
-            "Lokasi OLT", "Hostname OLT", "Latitude OLT", "Longtitude OLT", "Brand OLT", "Type OLT",
-            "Kapasitas OLT", "Kapasitas port OLT", "OLT Port", "Interface OLT", "FDT New/Existing", "FDTID",
-            "Jumlah Splitter FDT", "Kapasitas Splitter FDT", "Latitude FDT", "Longtitude FDT", "Port FDT",
-            "Status OSP AMARTA FDT", "Cluster", "Latitude Cluster", "Longtitude Cluster", "FATID",
-            "Jumlah Splitter FAT", "Kapasitas Splitter FAT", "Latitude FAT", "Longtitude FAT",
-            "Status OSP AMARTA FAT", "Kecamatan", "Kelurahan", "Sumber Datek", "HC OLD", "HC iCRM+",
-            "TOTAL HC", "CLEANSING HP", "OLT", "UPDATE ASET", "FAT KONDISI", "FILTER FAT CAP",
-            "FAT ID X", "FAT FILTER PEMAKAIAN", "KETERANGAN FULL", "AMARTA UPDATE",
-            "LINK DOKUMEN FEEDER", "KETERANGAN DOKUMEN", "LINK DATA ASET", "KETERANGAN DATA ASET",
-            "LINK MAPS", "UP3", "ULP")
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """
-
-        cursor.execute(query, tuple(data))  # Menggunakan Tuple
-        db.commit()
-        st.success("Data inserted successfully!")
-
-    except Exception as e:
-        db.rollback()  # Rollback transaksi jika terjadi kesalahan
-        st.error(f"Error inserting data: {e}")
-
-
-def insert_dataframe(conn, df):
-    try:
-        for _, row in df.iterrows():
-            data = row.tolist()
-            insert_data(conn, data)
-    except Exception as e:
-        st.error(f"Error inserting data records: {e}")
-
-# Fungsi untuk memproses file yang diunggah
-
-
-def process_uploaded_file(uploaded_file):
-    df = pd.read_csv(uploaded_file)
-
-    df.rename(columns={
-        "Kordinat OLT": "Koordinat OLT",
-        "Koodinat FDT": "Koordinat FDT",
-        "Koordinat Cluster": "Koordinat Cluster",
-        "Koodinat FAT": "Koordinat FAT"
-    }, inplace=True)
-
-    if "Koordinat OLT" in df.columns:
-        df[['Latitude OLT', 'Longtitude OLT']
-           ] = df['Koordinat OLT'].str.split(',', expand=True)
-        df.drop(columns=['Koordinat OLT'], inplace=True)
-
-    if "Koordinat FDT" in df.columns:
-        df[['Latitude FDT', 'Longtitude FDT']
-           ] = df['Koordinat FDT'].str.split(',', expand=True)
-        df.drop(columns=['Koordinat FDT'], inplace=True)
-
-    if "Koordinat Cluster" in df.columns:
-        df[['Latitude Cluster', 'Longtitude Cluster']
-           ] = df['Koordinat Cluster'].str.split(',', expand=True)
-        df.drop(columns=(['Koordinat Cluster']), inplace=True)
-
-    if "Koordinat FAT" in df.columns:
-        df[['Latitude FAT', 'Longtitude FAT']
-           ] = df['Koordinat FAT'].str.split(',', expand=True)
-        df.drop(columns=(['Koordinat FAT']), inplace=True)
-
-    df['Tanggal RFS'].fillna(pd.Timestamp.now().normalize(), inplace=True)
-
-    df.fillna({
-        "Jumlah Splitter FDT": 0,
-        "Kapasitas Splitter FDT": 0,
-        "Jumlah Splitter FAT": 0,
-        "Kapasitas Splitter FAT": 0,
-        "Kapasitas OLT": 0,
-        "Kapasitas port OLT": 0,
-        "OLT Port": 0,
-        "Port FDT": 0,
-        "HC OLD": 0,
-        "HC iCRM+": 0,
-        "TOTAL HC": 0
-    }, inplace=True)
-
-    df = df.astype({
-        "PA": str,
-        "Tanggal RFS": 'datetime64[ns]',
-        "Mitra": str,
-        "Kategori": str,
-        "Area KP": str,
-        "Kota Kab": str,
-        "Lokasi OLT": str,
-        "Hostname OLT": str,
-        "Latitude OLT": float,
-        "Longtitude OLT": float,
-        "Brand OLT": str,
-        "Type OLT": str,
-        "Kapasitas OLT": int,
-        "Kapasitas port OLT": int,
-        "OLT Port": int,
-        "Interface OLT": str,
-        "FDT New/Existing": str,
-        "FDTID": str,
-        "Jumlah Splitter FDT": int,
-        "Kapasitas Splitter FDT": int,
-        "Latitude FDT": float,
-        "Longtitude FDT": float,
-        "Port FDT": int,
-        "Status OSP AMARTA FDT": str,
-        "Cluster": str,
-        "Latitude Cluster": float,
-        "Longtitude Cluster": float,
-        "FATID": str,
-        "Jumlah Splitter FAT": int,
-        "Kapasitas Splitter FAT": int,
-        "Latitude FAT": float,
-        "Longtitude FAT": float,
-        "Status OSP AMARTA FAT": str,
-        "Kecamatan": str,
-        "Kelurahan": str,
-        "Sumber Datek": str,
-        "HC OLD": int,
-        "HC iCRM+": int,
-        "TOTAL HC": int,
-        "CLEANSING HP": str,
-        "OLT": str,
-        "UPDATE ASET": str,
-        "FAT KONDISI": str,
-        "FILTER FAT CAP": str,
-        "FAT ID X": str,
-        "FAT FILTER PEMAKAIAN": str,
-        "KETERANGAN FULL": str,
-        "AMARTA UPDATE": str,
-        "LINK DOKUMEN FEEDER": str,
-        "KETERANGAN DOKUMEN": str,
-        "LINK DATA ASET": str,
-        "KETERANGAN DATA ASET": str,
-        "LINK MAPS": str,
-        "UP3": str,
-        "ULP": str
-    })
-
-    return df
-
-
-def app():
-    st.title("Update Data Aset")
-    db = st.session_state.get("db")
-    if not db:
-        st.error("Connection Pool tidak tersedia.")
-    if os.path.exists("static\css\style.css"):
-        with open("static\css\style.css") as f:
-            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+    if asset_data_service is None:
+        st.error("Asset Data Service is not available. Cannot process data.")
+        return
 
     tab_manual, tab_upload = st.tabs(["Manual Input", "Upload File"])
 
+    # --- Tab Input Manual ---
     with tab_manual:
         st.subheader("Manual Data Input")
+        st.info(
+            "Manual input is complex due to many fields and potential errors. "
+            "Using file upload is recommended for multiple entries."
+        )
+
+        # Form untuk input manual
         with st.form("manual_input_form", clear_on_submit=True):
-            data = []
+            st.write("**Required Fields:**")
+            fat_id = st.text_input(
+                "FAT ID*", help="Unique identifier for the FAT (e.g., FAT-ABC-001). Mandatory and must be unique.")
 
-            with st.expander("General Information"):
-                data.append(st.text_input("PA"))
-                data.append(st.date_input("Tanggal RFS"))
-                data.append(st.text_input("Mitra"))
-                data.append(st.text_input("Kategori"))
-                data.append(st.text_input("Area KP"))
-                data.append(st.text_input("Kota/Kab"))
+            st.divider()
+            st.write("**Optional Fields:**")
 
-            with st.expander("OLT Information"):
-                data.append(st.text_input("Lokasi OLT"))
-                data.append(st.text_input("Hostname OLT"))
-                data.append(st.text_input("Latitude OLT"))
-                data.append(st.text_input("Longtitude OLT"))
-                data.append(st.text_input("Brand OLT"))
-                data.append(st.text_input("Type OLT"))
-                data.append(st.number_input("Kapasitas OLT", min_value=0))
-                data.append(st.number_input("Kapasitas port OLT", min_value=0))
-                data.append(st.text_input("OLT Port"))
-                data.append(st.text_input("Interface OLT"))
+            # --- Grouping Fields (Sama seperti sebelumnya) ---
+            with st.expander("General Information (Additional Info)"):
+                pa = st.text_input("PA", key="manual_pa")
+                tanggal_rfs = st.date_input(
+                    "Tanggal RFS", value=date.today(), key="manual_tanggal_rfs")
+                mitra = st.text_input("Mitra", key="manual_mitra")
+                kategori = st.text_input("Kategori", key="manual_kategori")
+                sumber_datek = st.text_input(
+                    "Sumber Datek", key="manual_sumber_datek")
 
-            with st.expander("FDT Information"):
-                data.append(st.selectbox(
-                    "FDT New/Existing", ["New", "Existing"]))
-                data.append(st.text_input("FDT ID"))
-                data.append(st.number_input(
-                    "Jumlah Splitter FDT", min_value=0))
-                data.append(st.number_input(
-                    "Kapasitas Splitter FDT", min_value=0))
-                data.append(st.text_input("Latitude FDT"))
-                data.append(st.text_input("Longtitude FDT"))
-                data.append(st.text_input("Port FDT"))
-                data.append(st.text_input("Status OSP AMARTA FDT"))
+            with st.expander("OLT Information (User Terminals)"):
+                hostname_olt = st.text_input(
+                    "Hostname OLT", key="manual_hostname_olt")
+                latitude_olt = st.number_input("Latitude OLT", value=None, format="%.8f",
+                                               key="manual_latitude_olt", help="Decimal format (e.g., -6.12345678)")
+                longitude_olt = st.number_input("Longitude OLT", value=None, format="%.8f",
+                                                key="manual_longitude_olt", help="Decimal format (e.g., 106.12345678)")
+                brand_olt = st.text_input("Brand OLT", key="manual_brand_olt")
+                type_olt = st.text_input("Type OLT", key="manual_type_olt")
+                kapasitas_olt = st.number_input(
+                    "Kapasitas OLT", min_value=0, value=None, step=1, key="manual_kapasitas_olt")  # Ubah default ke None
+                kapasitas_port_olt = st.number_input(
+                    "Kapasitas Port OLT", min_value=0, value=None, step=1, key="manual_kapasitas_port_olt")  # Ubah default ke None
+                olt_port = st.number_input(
+                    "OLT Port", min_value=0, value=None, step=1, key="manual_olt_port")  # Ubah default ke None
+                olt = st.text_input("OLT", key="manual_olt")
+                interface_olt = st.text_input(
+                    "Interface OLT", key="manual_interface_olt")
 
-            with st.expander("Cluster Information"):
-                data.append(st.text_input("Cluster"))
-                data.append(st.text_input("Latitude Cluster"))
-                data.append(st.text_input("Longtitude Cluster"))
+            # ... (Tambahkan expander lain untuk FDT, FAT, Cluster, HC, Dokumentasi seperti di jawaban sebelumnya) ...
+            # Pastikan semua input memiliki key unik (e.g., key="manual_fdt_id")
+            # Gunakan value=None untuk number_input opsional agar service bisa handle None
+            with st.expander("FDT Information (User Terminals)"):
+                fdt_id = st.text_input("FDT ID", key="manual_fdt_id")
+                status_osp_amarta_fdt = st.text_input(
+                    "Status OSP AMARTA FDT", key="manual_status_osp_amarta_fdt")
+                jumlah_splitter_fdt = st.number_input(
+                    "Jumlah Splitter FDT", min_value=0, value=None, step=1, key="manual_jumlah_splitter_fdt")
+                kapasitas_splitter_fdt = st.number_input(
+                    "Kapasitas Splitter FDT", min_value=0, value=None, step=1, key="manual_kapasitas_splitter_fdt")
+                fdt_new_existing = st.selectbox(
+                    "FDT New/Existing", ["New", "Existing", None], index=2, key="manual_fdt_new_existing")
+                port_fdt = st.number_input(
+                    "Port FDT", min_value=0, value=None, step=1, key="manual_port_fdt")
+                latitude_fdt = st.number_input(
+                    "Latitude FDT", value=None, format="%.8f", key="manual_latitude_fdt")
+                longitude_fdt = st.number_input(
+                    "Longitude FDT", value=None, format="%.8f", key="manual_longitude_fdt")
 
-            with st.expander("FAT Information"):
-                data.append(st.text_input("FATID"))
-                data.append(st.number_input(
-                    "Jumlah Splitter FAT", min_value=0))
-                data.append(st.number_input(
-                    "Kapasitas Splitter FAT", min_value=0))
-                data.append(st.text_input("Latitude FAT"))
-                data.append(st.text_input("Longtitude FAT"))
-                data.append(st.text_input("Status OSP AMARTA FAT"))
+            with st.expander("FAT Information (User Terminals)"):
+                jumlah_splitter_fat = st.number_input(
+                    "Jumlah Splitter FAT", min_value=0, value=None, step=1, key="manual_jumlah_splitter_fat")
+                kapasitas_splitter_fat = st.number_input(
+                    "Kapasitas Splitter FAT", min_value=0, value=None, step=1, key="manual_kapasitas_splitter_fat")
+                latitude_fat = st.number_input(
+                    "Latitude FAT", value=None, format="%.8f", key="manual_latitude_fat")
+                longitude_fat = st.number_input(
+                    "Longitude FAT", value=None, format="%.8f", key="manual_longitude_fat")
+                status_osp_amarta_fat = st.text_input(
+                    "Status OSP AMARTA FAT", key="manual_status_osp_amarta_fat")
+                fat_kondisi = st.text_input(
+                    "FAT Kondisi", key="manual_fat_kondisi")
+                fat_filter_pemakaian = st.text_input(
+                    "FAT Filter Pemakaian", key="manual_fat_filter_pemakaian")
+                keterangan_full = st.text_area(
+                    "Keterangan Full", key="manual_keterangan_full")
+                fat_id_x = st.text_input("FAT ID X", key="manual_fat_id_x")
+                filter_fat_cap = st.text_input(
+                    "Filter FAT Cap", key="manual_filter_fat_cap")
 
-            with st.expander("Additional Information"):
-                data.append(st.text_input("Kecamatan"))
-                data.append(st.text_input("Kelurahan"))
-                data.append(st.text_input("Sumber Datek"))
-                data.append(st.text_input("HC OLD"))
-                data.append(st.text_input("HC iCRM+"))
-                data.append(st.text_input("TOTAL HC"))
-                data.append(st.text_input("CLEANSING HP"))
-                data.append(st.text_input("OLT"))
-                data.append(st.text_input("UPDATE ASET"))
-                data.append(st.text_input("FAT KONDISI"))
-                data.append(st.text_input("FILTER FAT CAP"))
-                data.append(st.text_input("FAT ID X"))
-                data.append(st.text_input("FAT FILTER PEMAKAIAN"))
-                data.append(st.text_area("KETERANGAN FULL", height=100))
-                data.append(st.text_input("AMARTA UPDATE"))
-                data.append(st.text_input("LINK DOKUMEN FEEDER"))
-                data.append(st.text_input("KETERANGAN DOKUMEN"))
-                data.append(st.text_input("LINK DATA ASET"))
-                data.append(st.text_input("KETERANGAN DATA ASET"))
-                data.append(st.text_input("LINK MAPS"))
-                data.append(st.text_input("UP3"))
-                data.append(st.text_input("ULP"))
+            with st.expander("Cluster Information (Clusters)"):
+                latitude_cluster = st.number_input(
+                    "Latitude Cluster", value=None, format="%.8f", key="manual_latitude_cluster")
+                longitude_cluster = st.number_input(
+                    "Longitude Cluster", value=None, format="%.8f", key="manual_longitude_cluster")
+                area_kp = st.text_input("Area KP", key="manual_area_kp")
+                kota_kab = st.text_input("Kota/Kab", key="manual_kota_kab")
+                kecamatan = st.text_input("Kecamatan", key="manual_kecamatan")
+                kelurahan = st.text_input("Kelurahan", key="manual_kelurahan")
+                up3 = st.text_input("UP3", key="manual_up3")
+                ulp = st.text_input("ULP", key="manual_ulp")
 
-            submitted = st.form_submit_button("Upload Data")
+            with st.expander("Home Connected Information (Home Connecteds)"):
+                hc_old = st.number_input(
+                    "HC OLD", min_value=0, value=None, step=1, key="manual_hc_old")
+                hc_icrm = st.number_input(
+                    "HC iCRM+", min_value=0, value=None, step=1, key="manual_hc_icrm")
+                total_hc = st.number_input(
+                    "TOTAL HC", min_value=0, value=None, step=1, key="manual_total_hc")
+                cleansing_hp = st.text_input(
+                    "Cleansing HP", key="manual_cleansing_hp")
+
+            with st.expander("Dokumentasi Information (Dokumentasis)"):
+                link_dokumen_feeder = st.text_input(
+                    "Link Dokumen Feeder", key="manual_link_dokumen_feeder")
+                keterangan_dokumen = st.text_input(
+                    "Keterangan Dokumen", key="manual_keterangan_dokumen")
+                link_data_aset = st.text_input(
+                    "Link Data Aset", key="manual_link_data_aset")
+                keterangan_data_aset = st.text_input(
+                    "Keterangan Data Aset", key="manual_keterangan_data_aset")
+                link_maps = st.text_input("Link Maps", key="manual_link_maps")
+                update_aset = st.text_input(
+                    "Update Aset", key="manual_update_aset")
+                amarta_update = st.text_input(
+                    "AMARTA Update", key="manual_amarta_update")
+
+            # Tombol Submit Form
+            submitted = st.form_submit_button("Add Single Asset")
+
             if submitted:
-                cursor = db.cursor()
-                select_query = """SELECT * FROM data_aset WHERE "FATID"=%s"""
-                cursor.execute(select_query, (data[28],))
-                existing_patient = cursor.fetchone()
-                if existing_patient:
-                    st.warning("A patient with the same FATID already exists.")
+                if not fat_id:
+                    st.warning("FAT ID is required.")
                 else:
-                    insert_data(db, data)
-                    st.success("Data uploaded successfully!")
+                    # --- Pre-check for existing FAT ID ---
+                    with st.spinner(f"Checking if FAT ID '{fat_id}' already exists..."):
+                        existing_df = asset_data_service.search_assets(
+                            column_name="fat_id", value=fat_id)
 
-    # Tab Upload File
+                    if existing_df is not None and not existing_df.empty:
+                        st.error(
+                            f"FAT ID '{fat_id}' already exists in the database. Cannot insert duplicate.")
+                    elif existing_df is None:
+                        st.error(
+                            "Failed to check for existing FAT ID due to a database error.")
+                    else:
+                        # --- Kumpulkan data ke dictionary ---
+                        final_data_dict = {
+                            "fat_id": fat_id,
+                            "pa": pa if pa else None,
+                            "tanggal_rfs": tanggal_rfs,  # Objek date
+                            "mitra": mitra if mitra else None,
+                            "kategori": kategori if kategori else None,
+                            "sumber_datek": sumber_datek if sumber_datek else None,
+                            "hostname_olt": hostname_olt if hostname_olt else None,
+                            "latitude_olt": latitude_olt,
+                            "longitude_olt": longitude_olt,
+                            "brand_olt": brand_olt if brand_olt else None,
+                            "type_olt": type_olt if type_olt else None,
+                            "kapasitas_olt": kapasitas_olt,
+                            "kapasitas_port_olt": kapasitas_port_olt,
+                            "olt_port": olt_port,
+                            "olt": olt if olt else None,
+                            "interface_olt": interface_olt if interface_olt else None,
+                            "fdt_id": fdt_id if fdt_id else None,
+                            "status_osp_amarta_fdt": status_osp_amarta_fdt if status_osp_amarta_fdt else None,
+                            "jumlah_splitter_fdt": jumlah_splitter_fdt,
+                            "kapasitas_splitter_fdt": kapasitas_splitter_fdt,
+                            "fdt_new_existing": fdt_new_existing,
+                            "port_fdt": port_fdt,
+                            "latitude_fdt": latitude_fdt,
+                            "longitude_fdt": longitude_fdt,
+                            "jumlah_splitter_fat": jumlah_splitter_fat,
+                            "kapasitas_splitter_fat": kapasitas_splitter_fat,
+                            "latitude_fat": latitude_fat,
+                            "longitude_fat": longitude_fat,
+                            "status_osp_amarta_fat": status_osp_amarta_fat if status_osp_amarta_fat else None,
+                            "fat_kondisi": fat_kondisi if fat_kondisi else None,
+                            "fat_filter_pemakaian": fat_filter_pemakaian if fat_filter_pemakaian else None,
+                            "keterangan_full": keterangan_full if keterangan_full else None,
+                            "fat_id_x": fat_id_x if fat_id_x else None,
+                            "filter_fat_cap": filter_fat_cap if filter_fat_cap else None,
+                            "latitude_cluster": latitude_cluster,
+                            "longitude_cluster": longitude_cluster,
+                            "area_kp": area_kp if area_kp else None,
+                            "kota_kab": kota_kab if kota_kab else None,
+                            "kecamatan": kecamatan if kecamatan else None,
+                            "kelurahan": kelurahan if kelurahan else None,
+                            "up3": up3 if up3 else None,
+                            "ulp": ulp if ulp else None,
+                            "hc_old": hc_old,
+                            "hc_icrm": hc_icrm,
+                            "total_hc": total_hc,
+                            "cleansing_hp": cleansing_hp if cleansing_hp else None,
+                            "link_dokumen_feeder": link_dokumen_feeder if link_dokumen_feeder else None,
+                            "keterangan_dokumen": keterangan_dokumen if keterangan_dokumen else None,
+                            "link_data_aset": link_data_aset if link_data_aset else None,
+                            "keterangan_data_aset": keterangan_data_aset if keterangan_data_aset else None,
+                            "link_maps": link_maps if link_maps else None,
+                            "update_aset": update_aset if update_aset else None,
+                            "amarta_update": amarta_update if amarta_update else None,
+                        }
+
+                        st.write("Data to be inserted (Preview):")
+                        st.dataframe(pd.DataFrame([final_data_dict]))
+
+                        with st.spinner("Inserting data..."):
+                            # Panggil service insert_single_asset
+                            error = asset_data_service.insert_single_asset(
+                                final_data_dict)
+
+                        if error:
+                            st.error(f"Failed to insert data: {error}")
+                        else:
+                            st.success(
+                                f"Asset data for FAT ID '{fat_id}' inserted successfully!")
+                            st.balloons()
+
+    # --- Tab Upload File ---
     with tab_upload:
-        st.subheader("Upload File")
-        with st.form("upload_file_form", clear_on_submit=True):  # Berikan key unik untuk form ini
-            uploaded_file = st.file_uploader("Choose a file")
+        st.subheader("Upload Asset File (CSV)")
+        uploaded_file = st.file_uploader(
+            "Choose a CSV file",
+            type=["csv"],
+            key="asset_uploader",
+            help="Upload a CSV file with asset data. Ensure columns match the required format."
+        )
 
-            if uploaded_file is not None:
-                df = process_uploaded_file(uploaded_file)
-                if df is not None:
-                    st.session_state.df_data = df.copy()
+        if uploaded_file is not None:
+            st.write("Processing uploaded file...")
+            with st.spinner("Reading and cleaning data from CSV..."):
+                # Panggil service process_uploaded_asset_file
+                processed_df = asset_data_service.process_uploaded_asset_file(
+                    uploaded_file)
 
-            if "df_data" in st.session_state:
-                st.write("### **Editable DataFrame**")
+            if processed_df is not None:
+                st.success("File processed successfully. Preview:")
+                st.caption(
+                    "You can edit the data below before inserting it into the database.")
+
+                # Gunakan st.data_editor untuk preview dan edit
                 edited_df = st.data_editor(
-                    st.session_state.df_data, num_rows="dynamic")
+                    processed_df,
+                    num_rows="dynamic",
+                    use_container_width=True,
+                    key="data_editor_assets",
+                    # disabled=["fat_id"] # Opsional: Buat fat_id tidak bisa diedit
+                )
 
-            if st.form_submit_button("Upload Data"):
-                if "df_data" in st.session_state:
-                    st.success("Upload Success!")
-                else:
-                    st.warning("No data to upload")
+                # Simpan DataFrame yang mungkin diedit ke session state
+                st.session_state.df_to_upload = edited_df
+                st.markdown("---")
 
-        if st.button("Insert Data"):
-            if "df_data" in st.session_state:
-                insert_dataframe(db, st.session_state.df_data)
-                st.session_state.pop("df_data")
-                st.success("Data inserted successfully!")
+                # Tombol untuk memasukkan data ke database
+                if st.button("⬆️ Insert Processed Data into Database"):
+                    if 'df_to_upload' in st.session_state and not st.session_state.df_to_upload.empty:
+                        df_final = st.session_state.df_to_upload
+                        st.write(
+                            f"Attempting to insert/update {len(df_final)} records...")
+
+                        with st.spinner("Inserting data into database... This might take some time."):
+                            # Panggil service insert_asset_dataframe
+                            processed_count, error_count = asset_data_service.insert_asset_dataframe(
+                                df_final)
+
+                        # Berikan feedback berdasarkan hasil insert dari service
+                        if error_count == 0:
+                            st.success(
+                                f"Successfully processed {processed_count} records from the file.")
+                        else:
+                            st.warning(
+                                f"Attempted to process {len(df_final)} records. "
+                                f"Successfully processed: {processed_count}. Failed/Skipped: {error_count}. "
+                                "Failures might be due to duplicate FAT IDs or other data errors. Check logs for details."
+                            )
+
+                        # Hapus state setelah upload
+                        del st.session_state.df_to_upload
+                        # st.rerun() # Opsional: Rerun untuk membersihkan
+                    else:
+                        st.warning(
+                            "No data available in the editor to upload. Please process a file first.")
             else:
-                st.warning("No data to insert")
+                # Jika process_uploaded_asset_file mengembalikan None
+                st.error(
+                    "Failed to process the uploaded file. Please check the file format, content, "
+                    "and ensure required columns/configurations are correct."
+                )
+
+# Tidak perlu `if __name__ == "__main__":`

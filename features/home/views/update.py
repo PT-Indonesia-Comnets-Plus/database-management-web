@@ -1,442 +1,410 @@
+# features/home/views/update.py
 import streamlit as st
 import pandas as pd
-from datetime import date
+# Import datetime jika diperlukan untuk konversi tipe
+from datetime import date, datetime
 from copy import deepcopy
+from core.services.AssetDataService import AssetDataService  # Import service
+
+# --- Fungsi Helper untuk UI ---
 
 
-def fetch_data(db, column_name, value):
-    """Fetch records from the 'data_aset' table based on column_name."""
-    try:
-        cursor = db.cursor()
-        query = f'SELECT * FROM data_aset WHERE "{column_name}" = %s'
-        cursor.execute(query, (value,))
-        records = cursor.fetchall()
-        columns = [desc[0] for desc in cursor.description]
-        return records, columns
-    except Exception as e:
-        st.error(f"An error occurred while fetching data: {e}")
-        return None, None
+def display_search_results(results_key: str):
+    """Displays search results from session_state if available."""
+    if results_key in st.session_state and not st.session_state[results_key].empty:
+        st.subheader("Search Results")
+        st.dataframe(st.session_state[results_key],
+                     hide_index=True, use_container_width=True)
+        return True
+    return False
+
+# --- Fungsi untuk Bagian Edit ---
 
 
-def delete_data_record(db, delete_option, delete_value):
-    """Delete a record from the 'data_aset' table."""
-    # Fetch data to confirm existence
-    records, columns = fetch_data(db, delete_option, delete_value)
-    if records:
-        st.session_state.delete_results = {
-            "records": records,
-            "columns": columns
-        }
-    else:
-        st.warning("No records found")
-        if "delete_results" in st.session_state:
-            del st.session_state.delete_results
-        return
-
-    # Display results for confirmation
-    if "delete_results" in st.session_state:
-        st.subheader("Delete Results")
-        df = pd.DataFrame(
-            st.session_state.delete_results["records"],
-            columns=st.session_state.delete_results["columns"]
-        )
-        st.dataframe(df)
-
-    # Allow user to select a record to delete
-    records = st.session_state.delete_results["records"]
-    columns = st.session_state.delete_results["columns"]
-
-    st.subheader("Select a Record to Delete")
-    selected_delete_idx = st.selectbox(
-        "Select record",
-        range(len(records)),
-        format_func=lambda x: f"Record {x+1} - {records[x][columns.index('FATID')]}",
-        key="record_selector"
-    )
-
-    if st.button("Confirm Selection", key="confirm_selection"):
-        selected_record = records[selected_delete_idx]
-        try:
-            cursor = db.cursor()
-            # Use the selected record's value for deletion
-            delete_query = f'DELETE FROM data_aset WHERE "{delete_option}" = %s'
-            cursor.execute(
-                delete_query, (selected_record[columns.index(delete_option)],))
-            db.commit()
-            st.success("✅ Record deleted successfully.")
-            # Clear session state after deletion
-            del st.session_state.delete_results
-        except Exception as e:
-            db.rollback()  # Rollback in case of error
-            st.error(f"❌ An error occurred while deleting data: {e}")
-
-
-def update_data_record(db):
-    """Search and display multiple records from the 'data_aset' table."""
-    st.subheader("Search Records")
-
+def search_for_edit(asset_data_service: AssetDataService):
+    """Handles the search UI for the edit process."""
+    st.subheader("1. Search Record to Edit")
     col1, col2 = st.columns([1, 3])
     with col1:
-        search_option = st.selectbox(
-            "Search by",
-            ["FATID", "FDTID", "OLT"],
-            key="search_option"
-        )
+        search_option_map = {"FAT ID": "fat_id",
+                             "FDT ID": "fdt_id", "OLT Hostname": "hostname_olt"}
+        search_display = st.selectbox("Search by", list(
+            search_option_map.keys()), key="edit_search_option")
+        search_column = search_option_map[search_display]
     with col2:
-        search_value = st.text_input(
-            "Search value",
-            key="search_value",
-            on_change=None
-        )
+        search_value = st.text_input("Search value", key="edit_search_value")
 
-    if st.button("Search 🔍", key="search_button"):
-        # Clear previous state related to editing
-        st.session_state.pop("selected_record", None)
-        st.session_state.pop("original_record", None)
-        st.session_state.pop("columns", None)
-        st.session_state.pop("show_confirmation", None)
+    if st.button("Search 🔍", key="edit_search_button"):
+        # Clear previous edit state
+        keys_to_clear = ["edit_search_results", "edit_selected_record_idx", "edit_selected_record_data",
+                         "edit_original_record_data", "edit_show_confirmation", "edit_changes_to_confirm"]
+        for key in keys_to_clear:
+            st.session_state.pop(key, None)
 
         if not search_value:
-            st.warning("Please enter a search value")
-            return
+            st.warning("Please enter a search value.")
         else:
-            records, columns = fetch_data(db, search_option, search_value)
-            if records:
-                st.session_state.search_results = {
-                    "records": records,
-                    "columns": columns
-                }
-            else:
-                st.warning("No records found")
-                st.session_state.pop("search_results", None)
+            with st.spinner("Searching..."):
+                df = asset_data_service.search_assets(
+                    column_name=search_column, value=search_value)
+            if df is not None and not df.empty:
+                st.session_state.edit_search_results = df
+                st.success(f"Found {len(df)} record(s).")
+            elif df is not None:
+                st.info("No matching records found.")
+            # Error handled by service
 
-    # Always display the DataFrame if search_results exist
-    if "search_results" in st.session_state:
-        st.subheader("Search Results")
-        df = pd.DataFrame(
-            st.session_state.search_results["records"],
-            columns=st.session_state.search_results["columns"]
-        )
-        st.dataframe(df)
+    display_search_results("edit_search_results")
 
 
-def show_record_selection(db):
-    """Show record selection interface after search."""
-    if "search_results" not in st.session_state:
+def select_for_edit(asset_data_service: AssetDataService):
+    """Handles the record selection UI for editing."""
+    if "edit_search_results" not in st.session_state or st.session_state.edit_search_results.empty:
         return
 
-    records = st.session_state.search_results["records"]
-    columns = st.session_state.search_results["columns"]
+    st.subheader("2. Select Record to Edit")
+    df = st.session_state.edit_search_results
+    record_options = {
+        f"FAT ID: {row['fat_id']} (Index: {idx})": idx for idx, row in df.iterrows()}
 
-    # Allow user to select a record
-    st.subheader("Select a Record to Edit")
-    selected_idx = st.selectbox(
-        "Select record",
-        range(len(records)),
-        format_func=lambda x: f"Record {x+1} - {records[x][columns.index('FATID')]}",
-        key="record_selector"
-    )
+    selected_display = st.selectbox("Choose record:", list(record_options.keys()),
+                                    key="edit_record_selector", index=None, placeholder="Select a record...")
 
-    if st.button("Confirm Selection", key="confirm_selection"):
-        # Ambil FATID atau identifier unik dari record yang dipilih
-        selected_fatid = records[selected_idx][columns.index("FATID")]
+    if selected_display:
+        selected_idx = record_options[selected_display]
+        st.session_state.edit_selected_record_idx = selected_idx  # Simpan index terpilih
+        selected_fatid = df.loc[selected_idx, 'fat_id']
+        st.info(
+            f"Record with FAT ID '{selected_fatid}' selected. Loading latest data for editing...")
 
-        # Fetch data ulang dari database
-        new_record, new_columns = fetch_data(db, "FATID", selected_fatid)
+        # Fetch latest data before editing
+        with st.spinner("Fetching latest record data..."):
+            latest_df = asset_data_service.search_assets(
+                column_name="fat_id", value=selected_fatid)
 
-        if new_record:
-            # Update session state dengan data baru
-            st.session_state.selected_record = list(
-                new_record[0])  # Data record asli
-            st.session_state.original_record = deepcopy(
-                new_record[0])  # Data asli untuk referensi
-            st.session_state.columns = new_columns
-
-            # Reset semua input form agar sesuai dengan data baru yang di-fetch
-            for col in new_columns:
-                key_name = f"input_{col}"
-                if key_name in st.session_state:
-                    # Clear existing form state
-                    st.session_state.pop(key_name)
-
-            st.success(
-                "Record reloaded from the database and ready for editing!")
+        if latest_df is not None and not latest_df.empty:
+            record_dict = latest_df.iloc[0].to_dict()
+            st.session_state.edit_selected_record_data = record_dict
+            st.session_state.edit_original_record_data = deepcopy(record_dict)
+            st.success("Latest data loaded. Proceed to edit form below.")
         else:
-            st.warning("Failed to reload record from the database.")
+            st.error("Failed to reload the selected record from the database.")
+            st.session_state.pop("edit_selected_record_idx", None)
+            st.session_state.pop("edit_selected_record_data", None)
+            st.session_state.pop("edit_original_record_data", None)
 
 
-def edit_data(db):
-    """Edit the selected record in the 'data_aset' table."""
-    if 'selected_record' not in st.session_state:
-        st.warning("No record selected for editing.")
+def display_edit_form_and_confirm(asset_data_service: AssetDataService):
+    """Displays the edit form and handles update logic including confirmation."""
+    if "edit_selected_record_data" not in st.session_state:
         return
 
-    st.subheader("Edit Record Details")
-    record = st.session_state.selected_record  # Data yang telah di-fetch ulang
-    columns = st.session_state.columns  # Kolom dari database
-    original_record = st.session_state.original_record  # Data asli dari database
-    new_values = {}
+    st.subheader("3. Edit Record Details")
+    record_data = st.session_state.edit_selected_record_data
+    original_data = st.session_state.edit_original_record_data
+    fat_id_display = record_data.get("fat_id", "N/A")
 
-    # Gunakan form untuk input dengan data dari original_record
-    with st.form(key="edit_form", clear_on_submit=False):
-        # General Information Section
-        with st.expander("General Information"):
-            new_values["PA"] = st.text_input(
-                "PA",
-                # Gunakan data asli dari record yang di-fetch ulang
-                value=record[columns.index("PA")] or "",
-                key="input_PA"
-            )
-            # Gunakan nilai yang di-fetch ulang
-            tanggal_rfs = record[columns.index("Tanggal RFS")]
-            new_values["Tanggal RFS"] = st.date_input(
-                "Tanggal RFS",
-                value=tanggal_rfs or date.today(),
-                key="input_Tanggal_RFS"
-            )
-            new_values["Mitra"] = st.text_input(
-                "Mitra",
-                # Gunakan data dari record terbaru
-                value=record[columns.index("Mitra")] or "",
-                key="input_Mitra"
-            )
-            new_values["Kategori"] = st.text_input(
-                "Kategori",
-                # Data terbaru dari database
-                value=record[columns.index("Kategori")] or "",
-                key="input_Kategori"
-            )
-            new_values["Area KP"] = st.text_input(
-                "Area KP",
-                # Data terbaru dari record
-                value=record[columns.index("Area KP")] or "",
-                key="input_Area_KP"
-            )
-            new_values["Kota Kab"] = st.text_input(
-                "Kota Kab",
-                # Data terbaru dari database
-                value=record[columns.index("Kota Kab")] or "",
-                key="input_Kota_Kab"
-            )
+    with st.form(key="edit_asset_form", clear_on_submit=False):
+        st.write(f"**Editing FAT ID:** {fat_id_display}")
+        edited_values = {}
 
-        # OLT Information Section
-        with st.expander("OLT Information"):
-            new_values["Lokasi OLT"] = st.text_input(
-                "Lokasi OLT", value=record[columns.index("Lokasi OLT")] or "")
-            new_values["Hostname OLT"] = st.text_input(
-                "Hostname OLT", value=record[columns.index("Hostname OLT")] or "")
-            new_values["Latitude OLT"] = st.text_input(
-                "Latitude OLT", value=record[columns.index("Latitude OLT")] or "")
-            new_values["Longtitude OLT"] = st.text_input(
-                "Longtitude OLT", value=record[columns.index("Longtitude OLT")] or "")
-            new_values["Brand OLT"] = st.text_input(
-                "Brand OLT", value=record[columns.index("Brand OLT")] or "")
-            new_values["Type OLT"] = st.text_input(
-                "Type OLT", value=record[columns.index("Type OLT")] or "")
-            new_values["Kapasitas OLT"] = st.number_input(
-                "Kapasitas OLT", min_value=0, value=record[columns.index("Kapasitas OLT")] or 0)
-            new_values["Kapasitas port OLT"] = st.number_input(
-                "Kapasitas port OLT", min_value=0, value=record[columns.index("Kapasitas port OLT")] or 0)
-            new_values["OLT Port"] = st.number_input(
-                "OLT Port", min_value=0, value=record[columns.index("OLT Port")] or 0)
-            new_values["Interface OLT"] = st.text_input(
-                "Interface OLT", value=record[columns.index("Interface OLT")] or "")
+        # --- Expander 1: General Information (Additional Info) ---
+        with st.expander("General Information (Additional Info)"):
+            edited_values["pa"] = st.text_input(
+                "PA", value=record_data.get("pa", ""), key="edit_pa")
+            tanggal_rfs_val = record_data.get("tanggal_rfs")
+            if isinstance(tanggal_rfs_val, str):
+                try:
+                    tanggal_rfs_val = datetime.strptime(
+                        tanggal_rfs_val, '%Y-%m-%d').date()
+                except:
+                    tanggal_rfs_val = date.today()
+            elif not isinstance(tanggal_rfs_val, date):
+                tanggal_rfs_val = date.today()
+            edited_values["tanggal_rfs"] = st.date_input(
+                "Tanggal RFS", value=tanggal_rfs_val, key="edit_tanggal_rfs")
+            edited_values["mitra"] = st.text_input(
+                "Mitra", value=record_data.get("mitra", ""), key="edit_mitra")
+            edited_values["kategori"] = st.text_input(
+                "Kategori", value=record_data.get("kategori", ""), key="edit_kategori")
+            edited_values["sumber_datek"] = st.text_input(
+                "Sumber Datek", value=record_data.get("sumber_datek", ""), key="edit_sumber_datek")
 
-        # FDT Information Section
+        # --- Expander 2: OLT Information (User Terminals) ---
+        with st.expander("OLT Information (User Terminals)"):
+            edited_values["hostname_olt"] = st.text_input(
+                "Hostname OLT", value=record_data.get("hostname_olt", ""), key="edit_hostname_olt")
+            edited_values["latitude_olt"] = st.number_input(
+                "Latitude OLT", value=record_data.get("latitude_olt"), format="%.8f", key="edit_latitude_olt")
+            edited_values["longitude_olt"] = st.number_input(
+                "Longitude OLT", value=record_data.get("longitude_olt"), format="%.8f", key="edit_longitude_olt")
+            edited_values["brand_olt"] = st.text_input(
+                "Brand OLT", value=record_data.get("brand_olt", ""), key="edit_brand_olt")
+            edited_values["type_olt"] = st.text_input(
+                "Type OLT", value=record_data.get("type_olt", ""), key="edit_type_olt")
+            edited_values["kapasitas_olt"] = st.number_input(
+                "Kapasitas OLT", min_value=0, value=int(record_data.get("kapasitas_olt", 0) or 0), step=1, key="edit_kapasitas_olt")
+            edited_values["kapasitas_port_olt"] = st.number_input(
+                "Kapasitas Port OLT", min_value=0, value=int(record_data.get("kapasitas_port_olt", 0) or 0), step=1, key="edit_kapasitas_port_olt")
+            edited_values["olt_port"] = st.number_input(
+                "OLT Port", min_value=0, value=int(record_data.get("olt_port", 0) or 0), step=1, key="edit_olt_port")
+            edited_values["olt"] = st.text_input(
+                "OLT", value=record_data.get("olt", ""), key="edit_olt")
+            edited_values["interface_olt"] = st.text_input(
+                "Interface OLT", value=record_data.get("interface_olt", ""), key="edit_interface_olt")
+
+        # --- Expander 3: FDT Information ---
         with st.expander("FDT Information"):
-            fdt_new_existing = record[columns.index(
-                "FDT New/Existing")] or "New"
-            if fdt_new_existing not in ["New", "Existing"]:
-                fdt_new_existing = "New"
-            new_values["FDT New/Existing"] = st.selectbox("FDT New/Existing", [
-                "New", "Existing"], index=["New", "Existing"].index(fdt_new_existing))
-            new_values["FDTID"] = st.text_input(
-                "FDT ID", value=record[columns.index("FDTID")] or "")
-            new_values["Jumlah Splitter FDT"] = st.number_input(
-                "Jumlah Splitter FDT", min_value=0, value=record[columns.index("Jumlah Splitter FDT")] or 0)
-            new_values["Kapasitas Splitter FDT"] = st.number_input(
-                "Kapasitas Splitter FDT", min_value=0, value=record[columns.index("Kapasitas Splitter FDT")] or 0)
-            new_values["Latitude FDT"] = st.text_input(
-                "Latitude FDT", value=record[columns.index("Latitude FDT")] or "")
-            new_values["Longtitude FDT"] = st.text_input(
-                "Longtitude FDT", value=record[columns.index("Longtitude FDT")] or "")
-            new_values["Port FDT"] = st.number_input(
-                "Port FDT", min_value=0, value=record[columns.index("Port FDT")] or 0)
-            new_values["Status OSP AMARTA FDT"] = st.text_input(
-                "Status OSP AMARTA FDT", value=record[columns.index("Status OSP AMARTA FDT")] or "")
+            edited_values["fdt_id"] = st.text_input(
+                "FDT ID", value=record_data.get("fdt_id", ""), key="edit_fdt_id")
+            edited_values["status_osp_amarta_fdt"] = st.text_input(
+                "Status OSP Amarta FDT", value=record_data.get("status_osp_amarta_fdt", ""), key="edit_status_osp_amarta_fdt")
+            edited_values["jumlah_splitter_fdt"] = st.number_input(
+                "Jumlah Splitter FDT", min_value=0, value=int(record_data.get("jumlah_splitter_fdt", 0) or 0), step=1, key="edit_jumlah_splitter_fdt")
+            edited_values["kapasitas_splitter_fdt"] = st.number_input(
+                "Kapasitas Splitter FDT", min_value=0, value=int(record_data.get("kapasitas_splitter_fdt", 0) or 0), step=1, key="edit_kapasitas_splitter_fdt")
 
-        # Cluster Information Section
-        with st.expander("Cluster Information"):
-            new_values["Cluster"] = st.text_input(
-                "Cluster", value=record[columns.index("Cluster")] or "")
-            new_values["Latitude Cluster"] = st.text_input(
-                "Latitude Cluster", value=record[columns.index("Latitude Cluster")] or "")
-            new_values["Longtitude Cluster"] = st.text_input(
-                "Longtitude Cluster", value=record[columns.index("Longtitude Cluster")] or "")
-
-        # FAT Information Section
+        # --- Expander 4: FAT Information ---
         with st.expander("FAT Information"):
-            new_values["FATID"] = st.text_input(
-                "FATID", value=record[columns.index("FATID")] or "")
-            new_values["Jumlah Splitter FAT"] = st.number_input(
-                "Jumlah Splitter FAT", min_value=0, value=record[columns.index("Jumlah Splitter FAT")] or 0)
-            new_values["Kapasitas Splitter FAT"] = st.number_input(
-                "Kapasitas Splitter FAT", min_value=0, value=record[columns.index("Kapasitas Splitter FAT")] or 0)
-            new_values["Latitude FAT"] = st.text_input(
-                "Latitude FAT", value=record[columns.index("Latitude FAT")] or "")
-            new_values["Longtitude FAT"] = st.text_input(
-                "Longtitude FAT", value=record[columns.index("Longtitude FAT")] or "")
-            new_values["Status OSP AMARTA FAT"] = st.text_input(
-                "Status OSP AMARTA FAT", value=record[columns.index("Status OSP AMARTA FAT")] or "")
+            edited_values["jumlah_splitter_fat"] = st.number_input(
+                "Jumlah Splitter FAT", min_value=0, value=int(record_data.get("jumlah_splitter_fat", 0) or 0), step=1, key="edit_jumlah_splitter_fat")
+            edited_values["kapasitas_splitter_fat"] = st.number_input(
+                "Kapasitas Splitter FAT", min_value=0, value=int(record_data.get("kapasitas_splitter_fat", 0) or 0), step=1, key="edit_kapasitas_splitter_fat")
+            edited_values["latitude_fat"] = st.number_input(
+                "Latitude FAT", value=record_data.get("latitude_fat"), format="%.8f", key="edit_latitude_fat")
+            edited_values["longitude_fat"] = st.number_input(
+                "Longitude FAT", value=record_data.get("longitude_fat"), format="%.8f", key="edit_longitude_fat")
 
-        # Additional Information Section
-        with st.expander("Additional Information"):
-            new_values["Kecamatan"] = st.text_input(
-                "Kecamatan", value=record[columns.index("Kecamatan")] or "")
-            new_values["Kelurahan"] = st.text_input(
-                "Kelurahan", value=record[columns.index("Kelurahan")] or "")
-            new_values["Sumber Datek"] = st.text_input(
-                "Sumber Datek", value=record[columns.index("Sumber Datek")] or "")
-            new_values["HC OLD"] = st.number_input(
-                "HC OLD", min_value=0, value=record[columns.index("HC OLD")] or 0)
-            new_values["HC iCRM+"] = st.number_input(
-                "HC iCRM+", min_value=0, value=record[columns.index("HC iCRM+")] or 0)
-            new_values["TOTAL HC"] = st.number_input(
-                "TOTAL HC", min_value=0, value=record[columns.index("TOTAL HC")] or 0)
-            new_values["CLEANSING HP"] = st.text_input(
-                "CLEANSING HP", value=record[columns.index("CLEANSING HP")] or "")
-            new_values["OLT"] = st.text_input(
-                "OLT", value=record[columns.index("OLT")] or "")
-            new_values["UPDATE ASET"] = st.text_input(
-                "UPDATE ASET", value=record[columns.index("UPDATE ASET")] or "")
-            new_values["FAT KONDISI"] = st.text_input(
-                "FAT KONDISI", value=record[columns.index("FAT KONDISI")] or "")
-            new_values["FILTER FAT CAP"] = st.text_input(
-                "FILTER FAT CAP", value=record[columns.index("FILTER FAT CAP")] or "")
-            new_values["FAT ID X"] = st.text_input(
-                "FAT ID X", value=record[columns.index("FAT ID X")] or "")
-            new_values["FAT FILTER PEMAKAIAN"] = st.text_input(
-                "FAT FILTER PEMAKAIAN", value=record[columns.index("FAT FILTER PEMAKAIAN")] or "")
-            new_values["KETERANGAN FULL"] = st.text_input(
-                "KETERANGAN FULL", value=record[columns.index("KETERANGAN FULL")] or "")
-            new_values["AMARTA UPDATE"] = st.text_input(
-                "AMARTA UPDATE", value=record[columns.index("AMARTA UPDATE")] or "")
-            new_values["LINK DOKUMEN FEEDER"] = st.text_input(
-                "LINK DOKUMEN FEEDER", value=record[columns.index("LINK DOKUMEN FEEDER")] or "")
-            new_values["KETERANGAN DOKUMEN"] = st.text_input(
-                "KETERANGAN DOKUMEN", value=record[columns.index("KETERANGAN DOKUMEN")] or "")
-            new_values["LINK DATA ASET"] = st.text_input(
-                "LINK DATA ASET", value=record[columns.index("LINK DATA ASET")] or "")
-            new_values["KETERANGAN DATA ASET"] = st.text_input(
-                "KETERANGAN DATA ASET", value=record[columns.index("KETERANGAN DATA ASET")] or "")
-            new_values["LINK MAPS"] = st.text_input(
-                "LINK MAPS", value=record[columns.index("LINK MAPS")] or "")
-            new_values["UP3"] = st.text_input(
-                "UP3", value=record[columns.index("UP3")] or "")
-            new_values["ULP"] = st.text_input(
-                "ULP", value=record[columns.index("ULP")] or "")
+        # --- Expander 5: Cluster Information ---
+        with st.expander("Cluster Information"):
+            edited_values["latitude_cluster"] = st.number_input(
+                "Latitude Cluster", value=record_data.get("latitude_cluster"), format="%.8f", key="edit_latitude_cluster")
+            edited_values["longitude_cluster"] = st.number_input(
+                "Longitude Cluster", value=record_data.get("longitude_cluster"), format="%.8f", key="edit_longitude_cluster")
+            edited_values["area_kp"] = st.text_input(
+                "Area KP", value=record_data.get("area_kp", ""), key="edit_area_kp")
+            edited_values["kota_kab"] = st.text_input(
+                "Kota/Kabupaten", value=record_data.get("kota_kab", ""), key="edit_kota_kab")
+            edited_values["kecamatan"] = st.text_input(
+                "Kecamatan", value=record_data.get("kecamatan", ""), key="edit_kecamatan")
+            edited_values["kelurahan"] = st.text_input(
+                "Kelurahan", value=record_data.get("kelurahan", ""), key="edit_kelurahan")
 
-        submitted = st.form_submit_button("Update Record", type="primary")
+        # --- Expander 6: Home Connecteds (HC) Information ---
+        with st.expander("Home Connecteds (HC) Information"):
+            edited_values["hc_old"] = st.number_input(
+                "HC OLD", min_value=0, value=int(record_data.get("hc_old", 0) or 0), step=1, key="edit_hc_old")
+            edited_values["hc_icrm"] = st.number_input(
+                "HC iCRM", min_value=0, value=int(record_data.get("hc_icrm", 0) or 0), step=1, key="edit_hc_icrm")
+            edited_values["total_hc"] = st.number_input(
+                "Total HC", min_value=0, value=int(record_data.get("total_hc", 0) or 0), step=1, key="edit_total_hc")
+
+        # --- Expander 7: Dokumentasi Information ---
+        with st.expander("Dokumentasi Information"):
+            edited_values["status_osp_amarta_fat"] = st.text_input(
+                "Status OSP Amarta FAT", value=record_data.get("status_osp_amarta_fat", ""), key="edit_status_osp_amarta_fat")
+            edited_values["link_dokumen_feeder"] = st.text_input(
+                "Link Dokumen Feeder", value=record_data.get("link_dokumen_feeder", ""), key="edit_link_dokumen_feeder")
+            edited_values["keterangan_dokumen"] = st.text_input(
+                "Keterangan Dokumen", value=record_data.get("keterangan_dokumen", ""), key="edit_keterangan_dokumen")
+            edited_values["link_maps"] = st.text_input(
+                "Link Maps", value=record_data.get("link_maps", ""), key="edit_link_maps")
+
+        submitted = st.form_submit_button("Submit Changes")
 
         if submitted:
-            # Pindahkan konfirmasi ke luar form
-            st.session_state.show_confirmation = True
+            # --- Compare edited_values with original_data ---
+            changes_to_update = {}
+            for key, new_value in edited_values.items():
+                original_value = original_data.get(key)
+                # Basic comparison (more robust type handling might be needed)
+                # Convert date object from form back to string if original was string or None
+                current_new_value = new_value
+                if isinstance(new_value, date) and (original_value is None or isinstance(original_value, str)):
+                    current_new_value = new_value.strftime('%Y-%m-%d')
+                # Handle NaN from number_input
+                elif isinstance(new_value, float) and pd.isna(new_value):
+                    current_new_value = None
 
-    # Bagian konfirmasi di luar form
-    if st.session_state.get('show_confirmation', False):
-        st.warning("Are you sure you want to update this record?")
+                # Compare (handle None)
+                if (original_value is None and current_new_value is not None) or \
+                   (original_value is not None and current_new_value is None) or \
+                   (original_value is not None and current_new_value is not None and current_new_value != original_value):
+                    changes_to_update[key] = current_new_value
+
+            if not changes_to_update:
+                st.info("No changes detected.")
+                st.session_state.pop('edit_show_confirmation', None)
+            else:
+                st.warning("The following changes will be applied:")
+                st.json(changes_to_update)
+                st.session_state.edit_changes_to_confirm = changes_to_update
+                st.session_state.edit_identifier = {"fat_id": fat_id_display}
+                st.session_state.edit_show_confirmation = True
+
+    # --- Confirmation Section (Outside Form) ---
+    if st.session_state.get('edit_show_confirmation'):
+        st.subheader("4. Confirm Update")
+        st.warning("Are you sure you want to apply these changes?")
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("Yes, Update", type="primary"):
-                try:
-                    cursor = db.cursor()
-                    set_clause = ", ".join(
-                        [f'"{col}" = %s' for col in new_values.keys()]
+            if st.button("Yes, Update Record", type="primary", key="confirm_update_yes"):
+                changes = st.session_state.edit_changes_to_confirm
+                identifier = st.session_state.edit_identifier
+                id_col, id_val = list(identifier.items())[0]
+
+                with st.spinner("Updating record..."):
+                    # Call service update_asset
+                    error = asset_data_service.update_asset(
+                        identifier_value=id_val,
+                        update_data=changes,
+                        identifier_col=id_col
                     )
 
-                    where_conditions = []
-                    where_values = []
-                    key_columns = ["FATID", "FDTID", "OLT",
-                                   "Tanggal RFS", "Hostname OLT"]
+                if error:
+                    st.error(f"Update failed: {error}")
+                else:
+                    st.success("Record updated successfully!")
+                    st.balloons()
+                    # Clear state after success
+                    keys_to_clear = ["edit_search_results", "edit_selected_record_idx", "edit_selected_record_data",
+                                     "edit_original_record_data", "edit_show_confirmation", "edit_changes_to_confirm",
+                                     "edit_identifier", "edit_columns"]
+                    for key in keys_to_clear:
+                        st.session_state.pop(key, None)
+                    st.rerun()
 
-                    for col in key_columns:
-                        if col in columns:
-                            original_value = original_record[columns.index(
-                                col)]
-                            if original_value is not None:
-                                where_conditions.append(f'"{col}" = %s')
-                                where_values.append(original_value)
-
-                    if not where_conditions:
-                        st.error("No valid conditions for update")
-                        return
-
-                    where_clause = " AND ".join(where_conditions)
-                    values = list(new_values.values()) + where_values
-
-                    update_query = f"""
-                    UPDATE data_aset
-                    SET {set_clause}
-                    WHERE {where_clause}
-                    """
-
-                    cursor.execute(update_query, values)
-                    db.commit()
-
-                    if cursor.rowcount == 1:
-                        st.success("✅ Record updated successfully!")
-                        del st.session_state.selected_record
-                        del st.session_state.original_record
-                        return
-                    else:
-                        st.warning(
-                            f"⚠️ Unexpected result: {cursor.rowcount} records updated")
-                except Exception as e:
-                    st.error(f"An error occurred while updating data: {e}")
         with col2:
-            if st.button("Cancel"):
-                del st.session_state.show_confirmation
+            if st.button("Cancel Update", key="confirm_update_no"):
+                st.session_state.pop('edit_show_confirmation', None)
+                st.session_state.pop('edit_changes_to_confirm', None)
+                st.session_state.pop('edit_identifier', None)
+                st.info("Update cancelled.")
                 st.rerun()
 
+# --- Fungsi untuk Bagian Delete ---
 
-def app():
-    st.title("Iconnet Management System 🏥")
-    db = st.session_state.get("db")
-    if not db:
-        st.error("Connection Pool tidak tersedia.")
-    tab_home, tab_edit_record, tab_delete_record = st.tabs([
-        "Home 🏠",
-        "Search and Edit ✏️",
-        "Delete Data Record ❌"
-    ])
 
-    with tab_home:
-        st.subheader("Welcome to Iconnet Management System")
-        st.write("Use the tabs above to manage records.")
+def search_for_delete(asset_data_service: AssetDataService):
+    """Handles the search UI for the delete process."""
+    st.subheader("1. Search Record to Delete")
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        search_option_map = {"FAT ID": "fat_id",
+                             "FDT ID": "fdt_id", "OLT Hostname": "hostname_olt"}
+        search_display = st.selectbox("Search by", list(
+            search_option_map.keys()), key="delete_search_option")
+        search_column = search_option_map[search_display]
+    with col2:
+        search_value = st.text_input("Search value", key="delete_search_value")
 
-    with tab_edit_record:
-        update_data_record(db)
-        show_record_selection(db)
-        if 'selected_record' in st.session_state:
-            edit_data(db)
+    if st.button("Search 🔍", key="delete_search_button"):
+        # Clear previous delete state
+        keys_to_clear = ["delete_search_results", "delete_selected_record_idx",
+                         "delete_record_to_confirm", "delete_show_confirmation"]
+        for key in keys_to_clear:
+            st.session_state.pop(key, None)
 
-    with tab_delete_record:
-        st.subheader("Delete a Data Record")
-        col1, col2 = st.columns([1, 3])
+        if not search_value:
+            st.warning("Please enter a search value.")
+        else:
+            with st.spinner("Searching..."):
+                df = asset_data_service.search_assets(
+                    column_name=search_column, value=search_value)
+            if df is not None and not df.empty:
+                st.session_state.delete_search_results = df
+                st.success(f"Found {len(df)} record(s).")
+            elif df is not None:
+                st.info("No matching records found.")
+            # Error handled by service
+
+    display_search_results("delete_search_results")
+
+
+def select_and_confirm_delete(asset_data_service: AssetDataService):
+    """Handles record selection and delete confirmation UI."""
+    if "delete_search_results" not in st.session_state or st.session_state.delete_search_results.empty:
+        return
+
+    st.subheader("2. Select Record to Delete")
+    df = st.session_state.delete_search_results
+    record_options = {
+        f"FAT ID: {row['fat_id']} (Index: {idx})": idx for idx, row in df.iterrows()}
+
+    selected_display = st.selectbox("Choose record:", list(record_options.keys()),
+                                    key="delete_record_selector", index=None, placeholder="Select a record...")
+
+    if selected_display:
+        selected_idx = record_options[selected_display]
+        record_to_delete = df.loc[selected_idx].to_dict()
+        fat_id_to_delete = record_to_delete.get('fat_id', 'N/A')
+
+        st.subheader("3. Confirm Deletion")
+        st.warning(
+            f"Are you sure you want to permanently delete this record (FAT ID: {fat_id_to_delete})?")
+        st.json(record_to_delete)  # Display record details
+
+        col1, col2 = st.columns(2)
         with col1:
-            delete_option = st.selectbox(
-                "Search by",
-                ["FATID", "FDTID", "OLT"],
-                key="delete_option"
-            )
+            if st.button("Yes, Delete Record", type="primary", key="confirm_delete_yes"):
+                if fat_id_to_delete != 'N/A':
+                    with st.spinner("Deleting record..."):
+                        # Call service delete_asset
+                        error = asset_data_service.delete_asset(
+                            identifier_col="fat_id",
+                            identifier_value=fat_id_to_delete
+                        )
+
+                    if error:
+                        st.error(f"Deletion failed: {error}")
+                    else:
+                        st.success("Record deleted successfully!")
+                        st.balloons()
+                        # Clear state after success
+                        keys_to_clear = ["delete_search_results", "delete_selected_record_idx",
+                                         "delete_record_to_confirm", "delete_show_confirmation"]
+                        for key in keys_to_clear:
+                            st.session_state.pop(key, None)
+                        st.rerun()
+                else:
+                    st.error(
+                        "Cannot delete record: Identifier (FAT ID) not found.")
+
         with col2:
-            delete_value = st.text_input(
-                "Value to delete",
-                key="delete_value",
-                on_change=None
-            )
-        if st.button("search data", key="search_button_delete"):
-            if delete_value:
-                delete_data_record(db, delete_option, delete_value)
-            else:
-                st.warning("Please enter a value to delete")
+            if st.button("Cancel Deletion", key="confirm_delete_no"):
+                st.info("Deletion cancelled.")
+                # Rerun to clear selection/confirmation
+                st.rerun()
+
+# --- Fungsi App Utama ---
+
+
+def app(asset_data_service: AssetDataService):
+    """
+    Main function for the Edit/Delete Asset page, orchestrating the UI flow.
+
+    Args:
+        asset_data_service: An instance of AssetDataService.
+    """
+    st.title("✏️ Edit / ❌ Delete Asset Records")
+
+    if asset_data_service is None:
+        st.error("Asset Data Service is not available. Cannot manage records.")
+        return
+
+    tab_edit, tab_delete = st.tabs(
+        ["Search and Edit ✏️", "Search and Delete ❌"])
+
+    with tab_edit:
+        search_for_edit(asset_data_service)
+        st.divider()
+        select_for_edit(asset_data_service)
+        st.divider()
+        display_edit_form_and_confirm(asset_data_service)
+
+    with tab_delete:
+        search_for_delete(asset_data_service)
+        st.divider()
+        select_and_confirm_delete(asset_data_service)
+
+# Tidak perlu `if __name__ == "__main__":`

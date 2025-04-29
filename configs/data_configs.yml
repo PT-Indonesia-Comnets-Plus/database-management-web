@@ -1,0 +1,46 @@
+table_columns:
+  user_terminals:
+    fat_id: str
+    hostname_olt: str
+    latitude_olt: float
+    longitude_olt: float
+    brand_olt: str
+    type_olt: str
+    kapasitas_olt: Int64
+    kapasitas_port_olt: Int64
+    olt_port: Int64
+    fdt_id: str
+    status_osp_amarta_fdt: str
+  clusters:
+    fat_id: str
+    latitude_cluster: float
+    longitude_cluster: float
+    area_kp: str
+    kota_kab: str
+    kecamatan: str
+    kelurahan: str
+    up3: str
+    ulp: str
+  home_connecteds:
+    fat_id: str
+    hc_old: Int64
+    hc_icrm: Int64
+    total_hc: Int64
+    cleansing_hp: str
+  dokumentasis:
+    fat_id: str
+    status_osp_amarta_fat: str
+    link_dokumen_feeder: str
+    keterangan_dokumen: str
+    link_data_aset: str
+    keterangan_data_aset: str
+    link_maps: str
+    update_aset: str
+    amarta_update: str
+  additional_informations:
+    fat_id: str
+    pa: str
+    tanggal_rfs: datetime64[ns]
+    mitra: str
+    kategori: str
+    sumber_datek: str

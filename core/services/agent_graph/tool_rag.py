@@ -8,14 +8,20 @@ from langchain_core.tools import tool
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from psycopg2 import pool
 
-from .load_config import TOOLS_CFG
+from ...helper.load_config import TOOLS_CFG
 
 
 def _initialize_embeddings() -> GoogleGenerativeAIEmbeddings:
-    """Inisialisasi model embedding Google Generative AI."""
+    """
+    Initialize the Google Generative AI embedding model
+    using configuration from TOOLS_CFG.
+
+    Returns:
+        GoogleGenerativeAIEmbeddings: An instance of the embedding model.
+    """
     return GoogleGenerativeAIEmbeddings(
         model=TOOLS_CFG.rag_embedding_model,
-        google_api_key=TOOLS_CFG.google_api_key,
+        gemini_api_key=TOOLS_CFG.gemini_api_key,
     )
 
 
@@ -24,7 +30,17 @@ def _fetch_similar_documents(
     db_conn: pool.SimpleConnectionPool,
     k: int
 ) -> List[tuple]:
-    """Mengambil dokumen serupa dari database berdasarkan embedding query."""
+    """
+    Fetch similar documents from the database based on query embeddings.
+
+    Args:
+        query_embedding (List[float]): Embedding vector of the user's query.
+        db_conn (SimpleConnectionPool): Database connection pool instance.
+        k (int): Number of most relevant documents to retrieve.
+
+    Returns:
+        List[tuple]: List of (content, metadata, similarity score) tuples.
+    """
     with db_conn.cursor() as cur:
         embedding_json = json.dumps(query_embedding)
         cur.execute(
@@ -41,7 +57,15 @@ def _fetch_similar_documents(
 
 
 def _parse_metadata(metadata_raw: Any) -> Dict[str, Any]:
-    """Parse metadata dokumen dari hasil database."""
+    """
+    Parse metadata from raw database result.
+
+    Args:
+        metadata_raw (Any): Raw metadata string or dictionary.
+
+    Returns:
+        Dict[str, Any]: Parsed metadata dictionary.
+    """
     try:
         if isinstance(metadata_raw, str):
             return json.loads(metadata_raw)
@@ -58,7 +82,17 @@ def _search_similar_documents_in_db(
     db_pool: pool.SimpleConnectionPool,
     k: int
 ) -> List[Dict[str, Any]]:
-    """Cari dokumen internal yang relevan berdasarkan query."""
+    """
+    Search for relevant internal documents using vector similarity search.
+
+    Args:
+        query (str): User's input question or topic.
+        db_pool (SimpleConnectionPool): Database connection pool.
+        k (int): Number of top documents to retrieve.
+
+    Returns:
+        List[Dict[str, Any]]: List of relevant documents with metadata and similarity.
+    """
     conn = None
     try:
         conn = db_pool.getconn()
@@ -77,7 +111,7 @@ def _search_similar_documents_in_db(
         ]
 
     except Exception as e:
-        print(f"❌ Error mencari dokumen RAG: {e}")
+        print(f"❌ Error while searching documents with RAG: {e}")
         return [{"error": f"Error during RAG search: {e}"}]
 
     finally:
@@ -88,11 +122,16 @@ def _search_similar_documents_in_db(
 @tool
 def search_internal_documents(query: str) -> str:
     """
-    Gunakan tool ini untuk mencari informasi spesifik dalam dokumen internal perusahaan,
-    seperti prosedur standar operasi (SOP), kebijakan, panduan teknis, atau laporan lama.
-    Sangat berguna untuk pertanyaan tentang 'bagaimana cara', 'apa kebijakan tentang', 'jelaskan prosedur untuk'.
-    Input adalah pertanyaan atau topik yang ingin dicari.
-    Output adalah ringkasan atau potongan teks relevan dari dokumen internal.
+    Use this tool to search for specific information inside internal company documents,
+    such as SOPs, policies, technical manuals, or archived reports.
+
+    Best suited for questions like "how to", "what is the policy on", or "explain the procedure for".
+
+    Args:
+        query (str): The user’s question or topic to search for.
+
+    Returns:
+        str: A summarized or relevant snippet from internal documents.
     """
     db_pool = st.session_state.get("db")
     k_results = TOOLS_CFG.rag_k
@@ -105,14 +144,14 @@ def search_internal_documents(query: str) -> str:
         )
 
         if not search_results:
-            return "Tidak ada dokumen internal yang relevan ditemukan."
+            return "No relevant internal documents were found."
 
         if any("error" in res for res in search_results):
             first_error = next(
                 (res["error"] for res in search_results if "error" in res),
-                "Unknown error during search."
+                "Unknown error during document search."
             )
-            return f"Gagal mencari dokumen internal: {first_error}"
+            return f"Failed to search internal documents: {first_error}"
 
         context = "\n\n---\n\n".join([
             f"Source: {res['metadata'].get('file_name', 'N/A')}\nContent: {res['content']}"

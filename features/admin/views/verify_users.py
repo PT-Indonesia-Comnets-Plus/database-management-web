@@ -1,77 +1,106 @@
 import streamlit as st
+import pandas as pd
+from core.services.UserDataService import UserDataService  # Import untuk type hinting
 
 
-def app(user_data):
+def app(user_data_service: UserDataService):
     """
-    Streamlit page for Admin User Verification.
+    Displays the user verification page for administrators.
+    Allows admins to view pending and verified users, and verify selected users.
+    Also shows recent employee attendance.
 
-    Parameters:
-    ----------
-    user_data : object
-        An object that provides methods to fetch and update user-related data,
-        including 'get_users', 'verify_user', and 'get_employee_attendance'.
+    Args:
+        user_data_service: An instance of UserDataService to fetch and update user data.
     """
-    # Title
-    st.title("Admin User Verification", anchor="page-title")
+    st.title("👤 User Verification Management")
 
-    # --- Section: Users Pending Verification ---
-    st.subheader("Users to be Verified:", anchor="subheader")
-    unverified_users_df = user_data.get_users(status='Pending')
+    try:
+        # --- Section: Users Pending Verification ---
+        st.subheader("⏳ Users Pending Verification")
+        unverified_users_df = user_data_service.get_users(status='Pending')
 
-    if not unverified_users_df.empty:
-        st.dataframe(unverified_users_df, use_container_width=True)
+        if not unverified_users_df.empty:
+            # Display relevant columns only
+            # UID needed for verification
+            display_cols_pending = ['username', 'email', 'created_at', 'UID']
+            st.dataframe(
+                unverified_users_df[display_cols_pending], use_container_width=True, hide_index=True)
 
-        selected_users = st.multiselect(
-            "Select users to verify:",
-            unverified_users_df['email']
-        )
+            # Use email for selection as it's more user-friendly than UID
+            emails_to_verify = unverified_users_df['email'].tolist()
+            selected_emails = st.multiselect(
+                "Select users to verify by email:",
+                options=emails_to_verify,
+                key="verify_multiselect"  # Add key for stability
+            )
 
-        if st.button("Verify Selected Users"):
-            for email in selected_users:
-                selected_user = unverified_users_df[
-                    unverified_users_df['email'] == email
-                ]
-                if not selected_user.empty:
-                    uid = selected_user['UID'].values[0]
-                    message = user_data.verify_user(uid)
-                    st.success(message)
-    else:
-        st.warning("No users found who need verification.")
+            if st.button("✅ Verify Selected Users"):
+                if not selected_emails:
+                    st.warning("Please select at least one user to verify.")
+                else:
+                    verified_count = 0
+                    # Map selected emails back to UIDs for verification
+                    uid_map = pd.Series(
+                        unverified_users_df.UID.values, index=unverified_users_df.email).to_dict()
+                    with st.spinner("Verifying users..."):
+                        for email in selected_emails:
+                            uid = uid_map.get(email)
+                            if uid:
+                                # Call the service method to verify
+                                message = user_data_service.verify_user(
+                                    uid)  # Assuming verify_user exists
+                                st.success(f"User {email}: {message}")
+                                verified_count += 1
+                            else:
+                                st.error(
+                                    f"Could not find UID for email: {email}")
+                    if verified_count > 0:
+                        st.toast(
+                            f"{verified_count} user(s) verified successfully!")
+                        # Optional: Rerun to refresh the lists immediately
+                        # st.rerun()
+        else:
+            st.info("No users are currently pending verification.")
 
-    # --- Section: Verified Users ---
-    st.subheader("Verified Users:", anchor="subheader")
-    verified_users_df = user_data.get_users(status='Verified')
+        # --- Section: Verified Users ---
+        st.subheader("✔️ Verified Users")
+        verified_users_df = user_data_service.get_users(status='Verified')
 
-    if not verified_users_df.empty:
-        # Rename columns for better readability
-        verified_users_df = verified_users_df.rename(columns={
-            'created_at': 'Created Time',
-            'username': 'Username',
-            'email': 'Email',
-            'status': 'Status',
-            'verification_time': 'Verify Time'
-        })
+        if not verified_users_df.empty:
+            # Prepare DataFrame for display
+            verified_display_df = verified_users_df.rename(columns={
+                'created_at': 'Created Time',
+                'username': 'Username',
+                'email': 'Email',
+                'status': 'Status',
+                # Assuming this column exists after verification
+                'verification_time': 'Verify Time'
+            })
+            # Select and reorder columns for display
+            display_cols_verified = ['Username', 'Email',
+                                     'Status', 'Created Time', 'Verify Time']
+            # Filter out columns that might not exist yet if verification_time is added later
+            display_cols_verified = [
+                col for col in display_cols_verified if col in verified_display_df.columns]
 
-        # Reorder columns
-        verified_users_df = verified_users_df[
-            ['Created Time', 'Username', 'Email', 'Status', 'Verify Time']
-        ]
+            st.dataframe(
+                verified_display_df[display_cols_verified], use_container_width=True, hide_index=True)
+        else:
+            st.info("No verified users found.")
 
-        # Display top 3 verified users
-        st.dataframe(verified_users_df.head(3), use_container_width=True)
-    else:
-        st.info("No verified users found.")
+        # --- Section: Employee Attendance ---
+        # Consider if this belongs here or in the main dashboard
+        st.subheader("🕒 Recent Employee Attendance")
+        employee_attendance_df = user_data_service.get_employee_attendance()
 
-    # --- Section: Employee Attendance ---
-    st.subheader("Employee Attendance:", anchor="subheader")
-    employee_attendance_df = user_data.get_employee_attendance()
+        if not employee_attendance_df.empty:
+            st.dataframe(employee_attendance_df,
+                         use_container_width=True, hide_index=True)
+        else:
+            st.info("No recent attendance data available.")
 
-    if not employee_attendance_df.empty:
-        st.dataframe(employee_attendance_df, use_container_width=True)
-    else:
-        st.info("No attendance data available.")
-
-    # --- Section: Logins and Logouts ---
-    st.subheader("Logins and Logouts for the Last 7 Days:", anchor="subheader")
-    # Placeholder for future login/logout data implementation
-    st.info("Logins and logouts data feature is under development.")
+    except AttributeError as e:
+        st.error(
+            f"Error accessing UserDataService method: {e}. Service might not be initialized correctly.")
+    except Exception as e:
+        st.error(f"An error occurred on the verification page: {e}")

@@ -5,7 +5,7 @@ import time
 
 # Import graph builder dan konfigurasi
 from core.services.agent_graph.build_graph import build_graph
-from core.services.agent_graph.load_config import TOOLS_CFG
+from core.helper.load_config import TOOLS_CFG
 
 from static.load_css import load_custom_css
 
