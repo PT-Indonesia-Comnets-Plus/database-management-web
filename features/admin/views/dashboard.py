@@ -32,11 +32,11 @@ def app(user_data_service: UserDataService):
 
     # Anda bisa menambahkan metrik lain dari UserDataService di sini jika ada
     # Misalnya: Jumlah pengguna pending, jumlah pengguna terverifikasi, dll.
-    # try:
-    #     pending_users_df = user_data_service.get_users(status='Pending')
-    #     verified_users_df = user_data_service.get_users(status='Verified')
-    #     col1, col2 = st.columns(2)
-    #     col1.metric("Users Pending Verification", len(pending_users_df))
-    #     col2.metric("Verified Users", len(verified_users_df))
-    # except Exception as e:
-    #      st.warning(f"Could not display user counts: {e}")
+    try:
+        pending_users_df = user_data_service.get_users(status='Pending')
+        verified_users_df = user_data_service.get_users(status='Verified')
+        col1, col2 = st.columns(2)
+        col1.metric("Users Pending Verification", len(pending_users_df))
+        col2.metric("Verified Users", len(verified_users_df))
+    except Exception as e:
+        st.warning(f"Could not display user counts: {e}")

@@ -9,8 +9,27 @@ table_columns:
     kapasitas_olt: Int64
     kapasitas_port_olt: Int64
     olt_port: Int64
+    olt: str
+    interface_olt: str
     fdt_id: str
     status_osp_amarta_fdt: str
+    jumlah_splitter_fdt: Int64
+    kapasitas_splitter_fdt: Int64
+    fdt_new_existing: str
+    port_fdt: Int64
+    latitude_fdt: float
+    longitude_fdt: float
+    jumlah_splitter_fat: Int64
+    kapasitas_splitter_fat: Int64
+    latitude_fat: float
+    longitude_fat: float
+    status_osp_amarta_fat: str
+    fat_kondisi: str
+    fat_filter_pemakaian: str
+    keterangan_full: str
+    fat_id_x: str
+    filter_fat_cap: str
+
   clusters:
     fat_id: str
     latitude_cluster: float
@@ -21,12 +40,14 @@ table_columns:
     kelurahan: str
     up3: str
     ulp: str
+
   home_connecteds:
     fat_id: str
     hc_old: Int64
     hc_icrm: Int64
     total_hc: Int64
     cleansing_hp: str
+
   dokumentasis:
     fat_id: str
     status_osp_amarta_fat: str
@@ -37,6 +58,7 @@ table_columns:
     link_maps: str
     update_aset: str
     amarta_update: str
+
   additional_informations:
     fat_id: str
     pa: str
@@ -44,3 +66,13 @@ table_columns:
     mitra: str
     kategori: str
     sumber_datek: str
+
+  pelanggans:
+    id_permohonan: str
+    sid: str
+    cust_name: str
+    telpn: str
+    latitude_pelanggan: float
+    longitude_pelanggan: float
+    fat_id: str
+    notes: str

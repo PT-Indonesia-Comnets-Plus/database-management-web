@@ -8,6 +8,7 @@ import numpy as np
 import re
 from datetime import date
 from core.helper.load_data_configs import load_data_config
+import asyncio
 
 
 class AssetDataService:
@@ -75,47 +76,51 @@ class AssetDataService:
             if conn:
                 self.db_pool.putconn(conn)
 
-    def load_all_assets(self, limit: Optional[int] = 50) -> Optional[pd.DataFrame]:
+    def load_all_assets(self, limit: Optional[int] = None) -> Optional[pd.DataFrame]:
         """
-        Loads asset data by joining relevant tables.
+        Loads essential asset data for the dashboard by joining relevant tables.
 
         Args:
-            limit: Maximum number of rows to load. Defaults to 50.
+            limit: Maximum number of rows to load. If None, loads all.
 
         Returns:
-            A pandas DataFrame containing the asset data, or None if an error occurs.
+            A pandas DataFrame containing the essential asset data, or None if an error occurs.
         """
+        # --- MODIFIKASI QUERY ---
         query = """
             SELECT
-                ut.fat_id, ut.hostname_olt, ut.latitude_olt, ut.longitude_olt, ut.brand_olt, ut.type_olt,
-                ut.kapasitas_olt, ut.kapasitas_port_olt, ut.olt_port, ut.olt, ut.interface_olt,
-                ut.fdt_id, ut.status_osp_amarta_fdt, ut.jumlah_splitter_fdt, ut.kapasitas_splitter_fdt,
-                ut.fdt_new_existing, ut.port_fdt, ut.latitude_fdt, ut.longitude_fdt,
-                ut.jumlah_splitter_fat, ut.kapasitas_splitter_fat, ut.latitude_fat, ut.longitude_fat,
-                ut.status_osp_amarta_fat, ut.fat_kondisi, ut.fat_filter_pemakaian, ut.keterangan_full,
-                ut.fat_id_x, ut.filter_fat_cap,
-                cl.latitude_cluster, cl.longitude_cluster, cl.area_kp, cl.kota_kab, cl.kecamatan,
-                cl.kelurahan, cl.up3, cl.ulp,
-                hc.hc_old, hc.hc_icrm, hc.total_hc, hc.cleansing_hp,
-                dk.status_osp_amarta_fat AS dk_status_osp_amarta_fat, dk.link_dokumen_feeder,
-                dk.keterangan_dokumen, dk.link_data_aset, dk.keterangan_data_aset, dk.link_maps,
-                dk.update_aset, dk.amarta_update,
-                ai.pa, ai.tanggal_rfs, ai.mitra, ai.kategori, ai.sumber_datek
+                ut.fat_id,          -- Kunci join dan digunakan di KPI/Map
+                ut.olt,             -- Digunakan di KPI/Map
+                ut.fdt_id,          -- Digunakan di KPI
+                ut.brand_olt,       -- Digunakan di Visualisasi
+                ut.fat_filter_pemakaian, -- Digunakan di Visualisasi
+                ut.latitude_fat,    -- Untuk Peta
+                ut.longitude_fat,   -- Untuk Peta
+                ut.fat_id_x,        -- Untuk ikon Peta
+                cl.kota_kab,        -- Digunakan di Filter, KPI, Visualisasi, Map
+                hc.total_hc,        -- Digunakan di KPI, Visualisasi, Map, Bump Chart
+                dk.link_dokumen_feeder, -- Untuk popup Peta
+                ai.tanggal_rfs      -- <<< BARU: Untuk Bump Chart
             FROM user_terminals ut
             LEFT JOIN clusters cl ON ut.fat_id = cl.fat_id
             LEFT JOIN home_connecteds hc ON ut.fat_id = hc.fat_id
             LEFT JOIN dokumentasis dk ON ut.fat_id = dk.fat_id
-            LEFT JOIN additional_informations ai ON ut.fat_id = ai.fat_id
-            LIMIT %s;
+            LEFT JOIN additional_informations ai ON ut.fat_id = ai.fat_id -- <<< BARU: Join untuk tanggal RFS
         """
+        query_params = []
+        if limit is not None:
+            query += " LIMIT %s"
+            query_params.append(limit)
+        query += ";"
+
         data, columns, error = self._execute_query(
-            query, (limit,), fetch="all")
+            query, tuple(query_params) if query_params else None, fetch="all")
+
         if error:
             st.error(f"Failed to load asset data: {error}")
             return None
-        if data is None:  # Should not happen if error is None, but check anyway
+        if data is None:
             st.warning("No asset data returned from query.")
-            # Return empty DF with columns if possible
             return pd.DataFrame(columns=columns or [])
         return pd.DataFrame(data, columns=columns)
 

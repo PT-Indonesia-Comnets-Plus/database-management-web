@@ -14,7 +14,7 @@ try:
     logo_with_padding = ImageOps.expand(
         logo, border=8, fill=(255, 255, 255, 0)
     )
-    st.set_page_config(page_title="Admin Page",
+    st.set_page_config(page_title="Main Page",
                        page_icon=logo_with_padding)
 except st.errors.StreamlitSetPageConfigMustBeFirstCommandError:
     pass
