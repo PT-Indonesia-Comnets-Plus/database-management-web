@@ -18,6 +18,7 @@ try:
                        page_icon=logo_with_padding)
 except st.errors.StreamlitSetPageConfigMustBeFirstCommandError:
     pass
+
 initialize_session_state()
 fs = st.session_state.fs
 auth = st.session_state.auth

@@ -37,10 +37,10 @@ class AdminPage:
             logo_with_padding = ImageOps.expand(
                 logo, border=8, fill=(255, 255, 255, 0)
             )
-        except st.errors.StreamlitAPIException:
+            st.set_page_config(page_title="Home Page",
+                               page_icon=logo_with_padding)
+        except st.errors.StreamlitSetPageConfigMustBeFirstCommandError:
             pass
-        except FileNotFoundError:
-            st.warning("Logo icon file not found.")
         st.logo("static/image/logo_iconplus.png", size="large")
 
     def load_css(self, file_path: str):

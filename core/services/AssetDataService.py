@@ -5,9 +5,7 @@ import streamlit as st
 from psycopg2 import pool, Error as Psycopg2Error
 from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
-import re
-from datetime import date
-from core.helper.load_data_configs import load_data_config
+from etl_proces import AssetPipeline
 import asyncio
 
 
@@ -56,12 +54,11 @@ class AssetDataService:
                 elif fetch == "one" and cur.description:
                     data = cur.fetchone()
                     columns = [desc[0] for desc in cur.description]
-                    # Return as list for consistency
                     return [data] if data else [], columns, None
                 elif fetch == "none":
                     conn.commit()
                     return [], [], f"Query executed (rows affected: {cur.rowcount})"
-                else:  # Non-SELECT query without explicit fetch='none'
+                else:
                     conn.commit()
                     return [], [], f"Non-SELECT query executed (rows affected: {cur.rowcount})"
         except Psycopg2Error as db_err:
@@ -135,18 +132,14 @@ class AssetDataService:
         Returns:
             A pandas DataFrame containing the matching assets, or None if an error occurs.
         """
-        # Basic validation to prevent SQL injection (use parameterized query)
-        # Further validation might be needed depending on allowed column_names
         allowed_columns = ["FATID", "FDTID", "OLT",
-                           "fat_id", "fdt_id", "olt"]  # Add more if needed
-        # Use lower case for internal query consistency if DB columns are lower case
+                           "fat_id", "fdt_id", "olt"]
+
         db_column_name = column_name.lower()
         if db_column_name not in allowed_columns:
             st.error(f"Invalid search column: {column_name}")
             return None
 
-        # Assuming all tables use 'fat_id' as a common key if joining is needed later
-        # For now, search only in user_terminals for simplicity, adjust if needed
         query = f'SELECT * FROM user_terminals WHERE "{db_column_name}" = %s'
 
         data, columns, error = self._execute_query(
@@ -160,133 +153,161 @@ class AssetDataService:
             return pd.DataFrame(columns=columns or [])
         return pd.DataFrame(data, columns=columns)
 
+    def _get_existing_fat_ids(self) -> Tuple[Optional[set], Optional[str]]:
+        """
+        Fetches distinct, cleaned (stripped, uppercase) FAT IDs from the user_terminals table.
+
+        Returns:
+            A tuple containing (set_of_fat_ids, error_message).
+            set_of_fat_ids is None if an error occurs.
+            error_message is None if successful.
+        """
+        print("DEBUG: Fetching existing FAT IDs from database...")
+        query_existing = "SELECT DISTINCT fat_id FROM user_terminals;"
+        existing_data, _, db_error = self._execute_query(
+            query_existing, fetch="all")
+
+        if db_error:
+            return None, f"Failed to fetch existing FAT IDs: {db_error}"
+
+        db_fat_id_set = set()
+        if existing_data:
+            db_fat_id_set = {str(item[0]).strip().upper()
+                             for item in existing_data if item[0] is not None}
+            print(
+                f"DEBUG: Found {len(db_fat_id_set)} unique existing FAT IDs.")
+        else:
+            print("DEBUG: No existing FAT IDs found in database.")
+        return db_fat_id_set, None
+
+    def _filter_new_records(self, df: pd.DataFrame, existing_ids: set) -> pd.DataFrame:
+        """Filters a DataFrame to keep only rows with fat_id not present in the existing_ids set."""
+        if 'fat_id' not in df.columns or not existing_ids:
+            # No filtering needed if column missing or no existing IDs to compare against
+            return df
+
+        print("DEBUG: Filtering DataFrame for new FAT IDs...")
+        df['fat_id_clean_temp'] = df['fat_id'].astype(
+            str).str.strip().str.upper()
+        filtered_df = df[~df['fat_id_clean_temp'].isin(existing_ids)].copy()
+        filtered_df.drop(columns=['fat_id_clean_temp'], inplace=True)
+        print(
+            f"DEBUG: Filtering complete. Kept {len(filtered_df)} new records.")
+        return filtered_df
+
     def process_uploaded_asset_file(self, uploaded_file) -> Optional[pd.DataFrame]:
         """
         Processes an uploaded asset file (CSV assumed).
-        Applies cleaning, renaming, type conversion, and coordinate splitting.
+        Applies the AssetPipeline, fetches existing FAT IDs, and returns a DataFrame
+        containing only the records with new FAT IDs.
 
         Args:
             uploaded_file: The file object from st.file_uploader.
 
         Returns:
-            A processed pandas DataFrame, or None if an error occurs.
+            A single processed pandas DataFrame, or None if an error occurs.
         """
         try:
-            # Load file CSV ke DataFrame
+            print("DEBUG: Starting file processing...")
             df = pd.read_csv(uploaded_file)
+            print(f"DEBUG: CSV loaded successfully. Shape: {df.shape}")
 
-            # Rename columns untuk standarisasi nama kolom
-            df.rename(columns={
-                "Kordinat OLT": "Koordinat OLT",
-                "Koodinat FDT": "Koordinat FDT",
-                "Koordinat Cluster": "Koordinat Cluster",
-                "Koodinat FAT": "Koordinat FAT"
-            }, inplace=True)
-
-            # Split koordinat ke kolom latitude dan longitude
-            coordinate_columns = {
-                "Koordinat OLT": ("Latitude OLT", "Longitude OLT"),
-                "Koordinat FDT": ("Latitude FDT", "Longitude FDT"),
-                "Koordinat Cluster": ("Latitude Cluster", "Longitude Cluster"),
-                "Koordinat FAT": ("Latitude FAT", "Longitude FAT")
-            }
-            for coord_col, (lat_col, lon_col) in coordinate_columns.items():
-                if coord_col in df.columns:
-                    df[[lat_col, lon_col]] = df[coord_col].str.split(
-                        ",", expand=True)
-                    df.drop(columns=[coord_col], inplace=True)
-
-            # Fill default values untuk kolom tertentu
-            df.fillna({
-                "Jumlah Splitter FDT": 0,
-                "Kapasitas Splitter FDT": 0,
-                "Jumlah Splitter FAT": 0,
-                "Kapasitas Splitter FAT": 0,
-                "Kapasitas OLT": 0,
-                "Kapasitas port OLT": 0,
-                "OLT Port": 0,
-                "Port FDT": 0,
-                "HC OLD": 0,
-                "HC iCRM+": 0,
-                "TOTAL HC": 0
-            }, inplace=True)
-
-            # Drop kolom original koordinat jika masih ada
-            df.drop(columns=["koordinat_olt", "koordinat_fdt", "koordinat_cluster", "koordinat_fat"],
-                    errors="ignore", inplace=True)
-
-            # Load konfigurasi tipe data dari YAML
-            try:
-                # --- Panggil fungsi yang benar ---
-                table_configs = load_data_config()  # Panggil fungsi yang sudah diimpor
-                # ---------------------------------
-                if not table_configs:
-                    st.error(
-                        "Failed to load data configuration (data_config.yml). Cannot proceed with type conversion.")
-                    return None
-                flat_astype_map = {}
-                for table, columns in table_configs.items():
-                    flat_astype_map.update(columns)
-                st.write("Loaded data type configuration.")
-            except FileNotFoundError:
-                st.error("Configuration file 'data_config.yml' not found.")
+            # --- Run the main processing pipeline ---
+            print("DEBUG: Starting asset data processing pipeline...")
+            pipeline = AssetPipeline()
+            processed_df = pipeline.run(df)
+            if processed_df is None:
+                # Error logged within pipeline.run()
+                st.error("Data processing pipeline failed.")
                 return None
-            except Exception as e:
-                st.error(f"Error loading or parsing 'data_config.yml': {e}")
+            print(
+                "DEBUG: Asset data processing pipeline finished. Shape after processing: {processed_df.shape}")
+
+            # --- Fetch existing IDs ---
+            db_fat_id_set, fetch_error = self._get_existing_fat_ids()
+            if fetch_error:
+                st.error(fetch_error)
                 return None
 
-            return df
+            # --- Filter for new records ---
+            if 'fat_id' not in processed_df.columns:
+                print(
+                    "WARN: 'fat_id' column not found after processing. Cannot filter new records.")
+                filtered_df = processed_df  # Return all if filtering not possible
+            elif not db_fat_id_set:
+                print(
+                    "DEBUG: No existing FAT IDs in DB. All records are considered new.")
+                filtered_df = processed_df  # Return all if DB is empty
+            else:
+                filtered_df = self._filter_new_records(
+                    processed_df, db_fat_id_set)
+
+                if filtered_df.empty:
+                    st.info(
+                        "All FAT IDs in the uploaded file already exist in the database. No new records to display/insert.")
+                else:
+                    st.success(
+                        f"Found {len(filtered_df)} new FAT ID records in the uploaded file.")
+
+            # Return the final DataFrame (filtered or original)
+            return filtered_df
 
         except pd.errors.ParserError as e:
+            print(
+                f"ERROR: Failed to parse uploaded file '{uploaded_file.name}'. Error: {e}")
             st.error(f"Failed to parse uploaded file: {e}")
             return None
+        except KeyError as e:
+            print(
+                f"ERROR: Missing expected column during processing. Error: {e}")
+            st.error(
+                f"Processing error: Missing expected column '{e}'. Please check the file structure.")
+            return None
         except Exception as e:
+            print(
+                f"ERROR: An unexpected error occurred during file processing. Error: {e}")
             st.error(
                 f"An unexpected error occurred during file processing: {e}")
             return None
 
-    def insert_asset_dataframe(self, df: pd.DataFrame) -> Tuple[int, int]:
+    def insert_asset_dataframe(self, df_processed: pd.DataFrame) -> Tuple[int, int]:
         """
-        Inserts data from a DataFrame into the respective asset tables.
-        This requires splitting the DataFrame first based on the target table schema.
+        Splits the processed DataFrame using AssetPipeline and inserts data
+        into the respective asset tables, handling potential duplicates via ON CONFLICT.
 
         Args:
-            df: The processed DataFrame containing combined asset data.
+            df_processed: The processed (and potentially user-edited) DataFrame
+                          containing combined asset data.
 
         Returns:
             Tuple (inserted_count, error_count).
         """
-        inserted_count = 0
+        attempted_count = 0  # Tracks rows attempted to insert
         error_count = 0
 
-        # Define columns for each target table (must match DB schema)
-        table_columns = {
-            # Add all columns
-            "user_terminals": ["fat_id", "hostname_olt", "latitude_olt", "longitude_olt", ...],
-            # Add all columns
-            "clusters": ["fat_id", "latitude_cluster", "longitude_cluster", ...],
-            # Add all columns
-            "home_connecteds": ["fat_id", "hc_old", "hc_icrm", ...],
-            # Add all columns
-            "dokumentasis": ["fat_id", "status_osp_amarta_fat", "link_dokumen_feeder", ...],
-            # Add all columns
-            "additional_informations": ["fat_id", "pa", "tanggal_rfs", ...]
-        }
+        if df_processed is None or df_processed.empty:
+            st.warning("No processed data provided for insertion.")
+            return 0, 0
+
+        # --- Split the data just before insertion using the pipeline ---
+        try:
+            print("DEBUG: Splitting data before insertion...")
+            pipeline = AssetPipeline()
+            split_dfs = pipeline.split_data(df_processed.copy())
+            if not split_dfs:
+                st.error("Failed to split data before insertion. Aborting.")
+                return 0, len(df_processed)
+        except Exception as split_err:
+            st.error(
+                f"Error during data splitting before insertion: {split_err}")
+            return 0, len(df_processed)
+        # -------------------------------------------------------------
 
         conn = None
         try:
             conn = self.db_pool.getconn()
             with conn.cursor() as cur:
-                for table_name, columns in table_columns.items():
-                    # Select only the relevant columns from the input DataFrame
-                    df_subset = df[[
-                        col for col in columns if col in df.columns]].copy()
-                    # Drop duplicates based on primary/unique keys if necessary before insert
-                    if table_name == "user_terminals":
-                        df_subset.drop_duplicates(
-                            subset=['fat_id'], keep='first', inplace=True)
-                    # Add similar logic for other tables if they have unique constraints
-
+                for table_name, df_subset in split_dfs.items():
                     if df_subset.empty:
                         st.info(f"No data to insert into '{table_name}'.")
                         continue
@@ -297,40 +318,49 @@ class AssetDataService:
                         [f'"{col}"' for col in df_subset.columns])
                     placeholders = ", ".join(["%s"] * len(df_subset.columns))
                     insert_query = f"INSERT INTO {table_name} ({cols_str}) VALUES ({placeholders})"
-                    # Handle ON CONFLICT for updates if needed, e.g., ON CONFLICT (fat_id) DO UPDATE SET ...
+
+                    # --- Conditionally add ON CONFLICT clause ---
+                    # Apply ON CONFLICT only to tables where fat_id is expected to be unique
+                    # Adjust this set based on your actual database schema constraints
+                    # Example: Only user_terminals has unique fat_id
+                    tables_with_fat_id_pk = {"user_terminals"}
+                    if table_name in tables_with_fat_id_pk:
+                        insert_query += " ON CONFLICT (fat_id) DO NOTHING"
 
                     # Convert DataFrame rows to list of tuples, handling NaT/NaN
                     data_tuples = [
-                        tuple(None if pd.isna(x) else x for x in row)
+                        tuple(
+                            int(x) if isinstance(x, np.integer) else
+                            (None if pd.isna(x) else x)
+                            for x in row
+                        )
                         for row in df_subset.itertuples(index=False, name=None)
                     ]
 
                     try:
                         cur.executemany(insert_query, data_tuples)
-                        inserted_count += cur.rowcount  # executemany might not return accurate count easily
-                        # Simplified success message
-                        st.success(f"Inserted data into '{table_name}'.")
+                        attempted_count += len(data_tuples)
                     except Psycopg2Error as insert_err:
                         conn.rollback()  # Rollback this batch
                         st.error(
                             f"Error inserting into '{table_name}': {insert_err}")
                         # Assume all failed in batch
                         error_count += len(data_tuples)
-                        # Optionally break or continue to next table
                         continue  # Continue to next table
 
-                conn.commit()  # Commit successful insertions
+                # Summary message
+                st.success(f"Attempted to process data for all tables.")
+                conn.commit()
 
         except Exception as e:
             if conn:
                 conn.rollback()
             st.error(f"General error during DataFrame insertion: {e}")
-            # Hard to estimate error_count here
         finally:
             if conn:
                 self.db_pool.putconn(conn)
 
-        return inserted_count, error_count
+        return attempted_count, error_count
 
     def insert_single_asset(self, data: Dict[str, Any]) -> Optional[str]:
         """

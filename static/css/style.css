@@ -17,6 +17,10 @@
   color: black !important;
 }
 
+[data-testid="stBaseButton-secondary"]:active {
+  background-color: #78b4d2 !important; /* Latar belakang biru pastel saat diklik */
+}
+
 [data-testid="stFileUploaderDropzoneInstructions"] div {
   font-size: 16px !important; /* Ukuran font */
   font-weight: bold !important; /* Tebal */

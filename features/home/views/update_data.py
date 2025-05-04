@@ -1,8 +1,9 @@
-# features/home/views/update_data.py
+# c:\Users\rizky\OneDrive\Dokumen\GitHub\intern-iconnet\features\home\views\update_data.py
 import streamlit as st
 import pandas as pd
 from core.services.AssetDataService import AssetDataService  # Import service
 from datetime import date, datetime  # Import date and datetime
+from copy import deepcopy  # Import deepcopy for manual input check
 
 # Fungsi-fungsi lama (editable_dataframe, insert_data, insert_dataframe, process_uploaded_file)
 # telah dihapus karena logikanya dipindahkan ke AssetDataService.
@@ -41,11 +42,12 @@ def app(asset_data_service: AssetDataService):
             st.divider()
             st.write("**Optional Fields:**")
 
-            # --- Grouping Fields (Sama seperti sebelumnya) ---
+            # --- Grouping Fields ---
             with st.expander("General Information (Additional Info)"):
                 pa = st.text_input("PA", key="manual_pa")
+                # Default ke hari ini, bisa diubah pengguna
                 tanggal_rfs = st.date_input(
-                    "Tanggal RFS", value=date.today(), key="manual_tanggal_rfs")
+                    "Tanggal RFS", value=None, key="manual_tanggal_rfs", format="YYYY-MM-DD")
                 mitra = st.text_input("Mitra", key="manual_mitra")
                 kategori = st.text_input("Kategori", key="manual_kategori")
                 sumber_datek = st.text_input(
@@ -61,18 +63,15 @@ def app(asset_data_service: AssetDataService):
                 brand_olt = st.text_input("Brand OLT", key="manual_brand_olt")
                 type_olt = st.text_input("Type OLT", key="manual_type_olt")
                 kapasitas_olt = st.number_input(
-                    "Kapasitas OLT", min_value=0, value=None, step=1, key="manual_kapasitas_olt")  # Ubah default ke None
+                    "Kapasitas OLT", min_value=0, value=None, step=1, key="manual_kapasitas_olt")
                 kapasitas_port_olt = st.number_input(
-                    "Kapasitas Port OLT", min_value=0, value=None, step=1, key="manual_kapasitas_port_olt")  # Ubah default ke None
+                    "Kapasitas Port OLT", min_value=0, value=None, step=1, key="manual_kapasitas_port_olt")
                 olt_port = st.number_input(
-                    "OLT Port", min_value=0, value=None, step=1, key="manual_olt_port")  # Ubah default ke None
+                    "OLT Port", min_value=0, value=None, step=1, key="manual_olt_port")
                 olt = st.text_input("OLT", key="manual_olt")
                 interface_olt = st.text_input(
                     "Interface OLT", key="manual_interface_olt")
 
-            # ... (Tambahkan expander lain untuk FDT, FAT, Cluster, HC, Dokumentasi seperti di jawaban sebelumnya) ...
-            # Pastikan semua input memiliki key unik (e.g., key="manual_fdt_id")
-            # Gunakan value=None untuk number_input opsional agar service bisa handle None
             with st.expander("FDT Information (User Terminals)"):
                 fdt_id = st.text_input("FDT ID", key="manual_fdt_id")
                 status_osp_amarta_fdt = st.text_input(
@@ -82,7 +81,7 @@ def app(asset_data_service: AssetDataService):
                 kapasitas_splitter_fdt = st.number_input(
                     "Kapasitas Splitter FDT", min_value=0, value=None, step=1, key="manual_kapasitas_splitter_fdt")
                 fdt_new_existing = st.selectbox(
-                    "FDT New/Existing", ["New", "Existing", None], index=2, key="manual_fdt_new_existing")
+                    "FDT New/Existing", ["New", "Existing", None], index=2, key="manual_fdt_new_existing")  # Default None
                 port_fdt = st.number_input(
                     "Port FDT", min_value=0, value=None, step=1, key="manual_port_fdt")
                 latitude_fdt = st.number_input(
@@ -91,6 +90,7 @@ def app(asset_data_service: AssetDataService):
                     "Longitude FDT", value=None, format="%.8f", key="manual_longitude_fdt")
 
             with st.expander("FAT Information (User Terminals)"):
+                # FAT ID sudah di atas
                 jumlah_splitter_fat = st.number_input(
                     "Jumlah Splitter FAT", min_value=0, value=None, step=1, key="manual_jumlah_splitter_fat")
                 kapasitas_splitter_fat = st.number_input(
@@ -127,13 +127,14 @@ def app(asset_data_service: AssetDataService):
                 hc_old = st.number_input(
                     "HC OLD", min_value=0, value=None, step=1, key="manual_hc_old")
                 hc_icrm = st.number_input(
-                    "HC iCRM+", min_value=0, value=None, step=1, key="manual_hc_icrm")
+                    "HC iCRM", min_value=0, value=None, step=1, key="manual_hc_icrm")  # Sesuaikan key jika perlu
                 total_hc = st.number_input(
                     "TOTAL HC", min_value=0, value=None, step=1, key="manual_total_hc")
                 cleansing_hp = st.text_input(
                     "Cleansing HP", key="manual_cleansing_hp")
 
             with st.expander("Dokumentasi Information (Dokumentasis)"):
+                # status_osp_amarta_fat sudah ada di FAT Info
                 link_dokumen_feeder = st.text_input(
                     "Link Dokumen Feeder", key="manual_link_dokumen_feeder")
                 keterangan_dokumen = st.text_input(
@@ -168,10 +169,11 @@ def app(asset_data_service: AssetDataService):
                             "Failed to check for existing FAT ID due to a database error.")
                     else:
                         # --- Kumpulkan data ke dictionary ---
+                        # Gunakan nama kolom lowercase sesuai hasil rename pipeline
                         final_data_dict = {
                             "fat_id": fat_id,
                             "pa": pa if pa else None,
-                            "tanggal_rfs": tanggal_rfs,  # Objek date
+                            "tanggal_rfs": tanggal_rfs,  # Objek date atau None
                             "mitra": mitra if mitra else None,
                             "kategori": kategori if kategori else None,
                             "sumber_datek": sumber_datek if sumber_datek else None,
@@ -224,20 +226,32 @@ def app(asset_data_service: AssetDataService):
                             "amarta_update": amarta_update if amarta_update else None,
                         }
 
+                        # Buat DataFrame satu baris
+                        df_single = pd.DataFrame([final_data_dict])
+
+                        # Konversi tanggal ke string jika perlu sebelum insert
+                        if 'tanggal_rfs' in df_single.columns and pd.notna(df_single.loc[0, 'tanggal_rfs']):
+                            df_single['tanggal_rfs'] = df_single['tanggal_rfs'].astype(
+                                str)
+
                         st.write("Data to be inserted (Preview):")
-                        st.dataframe(pd.DataFrame([final_data_dict]))
+                        st.dataframe(df_single)  # Tampilkan DataFrame
 
                         with st.spinner("Inserting data..."):
-                            # Panggil service insert_single_asset
-                            error = asset_data_service.insert_single_asset(
-                                final_data_dict)
+                            # Panggil service insert_asset_dataframe dengan DataFrame satu baris
+                            processed_count, error_count = asset_data_service.insert_asset_dataframe(
+                                df_single)
 
-                        if error:
-                            st.error(f"Failed to insert data: {error}")
-                        else:
+                        if error_count == 0 and processed_count > 0:
                             st.success(
                                 f"Asset data for FAT ID '{fat_id}' inserted successfully!")
                             st.balloons()
+                        elif error_count > 0:
+                            st.error(
+                                f"Failed to insert data for FAT ID '{fat_id}'. Check logs or database constraints.")
+                        else:  # processed_count == 0 and error_count == 0
+                            st.warning(
+                                f"Data for FAT ID '{fat_id}' might already exist or was skipped (e.g., due to ON CONFLICT DO NOTHING).")
 
     # --- Tab Upload File ---
     with tab_upload:
@@ -253,10 +267,11 @@ def app(asset_data_service: AssetDataService):
             st.write("Processing uploaded file...")
             with st.spinner("Reading and cleaning data from CSV..."):
                 # Panggil service process_uploaded_asset_file
+                # Hasilnya adalah DataFrame tunggal yang sudah diproses
                 processed_df = asset_data_service.process_uploaded_asset_file(
                     uploaded_file)
 
-            if processed_df is not None:
+            if processed_df is not None and not processed_df.empty:  # Tambahkan cek not empty
                 st.success("File processed successfully. Preview:")
                 st.caption(
                     "You can edit the data below before inserting it into the database.")
@@ -282,7 +297,7 @@ def app(asset_data_service: AssetDataService):
                             f"Attempting to insert/update {len(df_final)} records...")
 
                         with st.spinner("Inserting data into database... This might take some time."):
-                            # Panggil service insert_asset_dataframe
+                            # Panggil service insert_asset_dataframe dengan DataFrame tunggal
                             processed_count, error_count = asset_data_service.insert_asset_dataframe(
                                 df_final)
 
@@ -294,7 +309,7 @@ def app(asset_data_service: AssetDataService):
                             st.warning(
                                 f"Attempted to process {len(df_final)} records. "
                                 f"Successfully processed: {processed_count}. Failed/Skipped: {error_count}. "
-                                "Failures might be due to duplicate FAT IDs or other data errors. Check logs for details."
+                                "Failures might be due to duplicate FAT IDs (ON CONFLICT DO NOTHING) or other data errors. Check logs for details."
                             )
 
                         # Hapus state setelah upload
@@ -303,11 +318,12 @@ def app(asset_data_service: AssetDataService):
                     else:
                         st.warning(
                             "No data available in the editor to upload. Please process a file first.")
+            elif processed_df is not None and processed_df.empty:
+                st.warning(
+                    "The processed file resulted in empty data. Nothing to display or insert.")
             else:
                 # Jika process_uploaded_asset_file mengembalikan None
                 st.error(
                     "Failed to process the uploaded file. Please check the file format, content, "
-                    "and ensure required columns/configurations are correct."
+                    "and ensure required columns/configurations are correct. Check logs for details."
                 )
-
-# Tidak perlu `if __name__ == "__main__":`
