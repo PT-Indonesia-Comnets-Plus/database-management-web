@@ -1,13 +1,15 @@
 # features/home/controller.py
 
 import streamlit as st
+import os
 from PIL import Image, ImageOps
 from streamlit_option_menu import option_menu
 # Import views
-from .views import dashboard, search, update_data, chatbot, update, chatbot2
+from .views import dashboard, search, update_data, chatbot, update
 # Import services dan init function
 from core.services.AssetDataService import AssetDataService
 from psycopg2 import pool
+from core.utils.load_css import load_custom_css
 
 
 class HomePage:
@@ -35,15 +37,6 @@ class HomePage:
         except st.errors.StreamlitSetPageConfigMustBeFirstCommandError:
             pass
         st.logo("static/image/logo_iconplus.png", size="large")
-
-    def load_css(self, file_path: str):
-        """Loads a CSS file into the Streamlit app."""
-        try:
-            with open(file_path) as f:
-                st.markdown(f"<style>{f.read()}</style>",
-                            unsafe_allow_html=True)
-        except FileNotFoundError:
-            st.error(f"CSS file not found at: {file_path}")
 
     def render_sidebar(self) -> str:
         """Renders the navigation menu in the sidebar."""
@@ -85,7 +78,8 @@ class HomePage:
     def render(self):
         """Renders the complete Home Page."""
         self.configure_page()
-        self.load_css("static/css/style.css")
+        # Load custom CSS
+        load_custom_css(os.path.join("static", "css", "style.css"))
 
         # --- Authentication Check ---
         if "username" not in st.session_state or not st.session_state.username:

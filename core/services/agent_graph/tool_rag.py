@@ -8,7 +8,7 @@ from langchain_core.tools import tool
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from psycopg2 import pool
 
-from ...helper.load_config import TOOLS_CFG
+from ...utils.load_config import TOOLS_CFG
 
 
 def _initialize_embeddings() -> GoogleGenerativeAIEmbeddings:

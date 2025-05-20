@@ -7,6 +7,7 @@ from core.services.EmailService import EmailService
 from core import initialize_session_state
 import os
 from PIL import ImageOps
+from core.utils.load_css import load_custom_css
 
 st.logo("static/image/logo_iconplus.png", size="large")
 try:
@@ -40,8 +41,7 @@ user_service = UserService(
 
 # Load CSS
 if os.path.exists('static/css/style.css'):
-    with open('static/css/style.css') as f:
-        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+    load_custom_css(os.path.join("static", "css", "style.css"))
 
 
 def image_to_base64(image: Image.Image) -> str:

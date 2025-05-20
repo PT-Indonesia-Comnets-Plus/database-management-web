@@ -7,7 +7,7 @@ from .tool_rag import search_internal_documents
 from .tool_tavily_search import load_tavily_search_tool
 # Tambahkan import tool visualisasi
 from .tool_visualization import create_visualization
-from ...helper.load_config import TOOLS_CFG
+from ...utils.load_config import TOOLS_CFG
 from .agent_backend import State, BasicToolNode, route_tools
 import streamlit as st
 

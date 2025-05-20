@@ -25,7 +25,7 @@ class LoadToolsConfig:
 
     def _load_app_config(self) -> None:
         """Load application configuration from YAML."""
-        config_path = here("configs/tools_configs.yml")
+        config_path = here("core/configs/tools_configs.yml")
         with open(config_path, "r") as cfg_file:
             self.app_config = yaml.load(cfg_file, Loader=yaml.FullLoader)
 

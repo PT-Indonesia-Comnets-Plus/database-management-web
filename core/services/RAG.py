@@ -13,7 +13,7 @@ from psycopg2 import pool
 from supabase import Client as SupabaseClient  # Import Supabase Client
 
 # Import konfigurasi (jika diperlukan untuk model embedding, dll.)
-from ..helper.load_config import TOOLS_CFG
+from ..utils.load_config import TOOLS_CFG
 
 
 class RAGService:

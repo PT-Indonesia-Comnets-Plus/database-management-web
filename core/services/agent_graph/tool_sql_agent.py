@@ -6,7 +6,7 @@ from typing import Optional, Tuple, List, Dict
 from psycopg2 import pool
 from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
-from ...helper.load_config import TOOLS_CFG
+from ...utils.load_config import TOOLS_CFG
 
 # =====================
 # === Helper Functions ===

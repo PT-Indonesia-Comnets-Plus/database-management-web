@@ -7,25 +7,8 @@ import plotly.graph_objects as go
 import json
 from core.services.agent_graph.build_graph import build_graph
 from typing import Any
-# from static.load_css import load_custom_css # Akan didefinisikan di sini jika tidak ada
-
+from core.utils.load_css import load_custom_css
 warnings.filterwarnings('ignore')
-
-
-def load_custom_css(path: str) -> None:
-    """
-    Memuat custom CSS dari file yang ditentukan.
-
-    Args:
-        path (str): Path ke file CSS.
-    """
-    if os.path.exists(path):
-        try:
-            with open(path) as f:
-                st.markdown(f"<style>{f.read()}</style>",
-                            unsafe_allow_html=True)
-        except Exception as e:
-            st.warning(f"Gagal memuat CSS: {e}")
 
 
 def display_message_with_typing_animation(placeholder, message: str, typing_speed: float = 0.02) -> None:

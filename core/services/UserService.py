@@ -1,7 +1,7 @@
 from datetime import datetime
 import streamlit as st
 from firebase_admin import exceptions
-from utils.cookies import save_user_to_cookie, clear_user_cookie
+from core.utils.cookies import save_user_to_cookie, clear_user_cookie
 import requests
 
 

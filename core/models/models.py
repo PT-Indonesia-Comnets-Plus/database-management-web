@@ -51,9 +51,6 @@ class UserTerminal(Base):
     fat_id_x = Column(String(255))
     filter_fat_cap = Column(String(255))
 
-    # Relasi (sisi "one" dari one-to-one atau one-to-many)
-    # Asumsi relasi ke cluster, home_connected, dokumentasi, additional_info adalah one-to-one
-    # karena FK ada di tabel lain dan merujuk ke PK user_terminals (fat_id)
     cluster = relationship("Cluster", back_populates="user_terminal",
                            uselist=False, cascade="all, delete-orphan")
     home_connected = relationship(
