@@ -14,7 +14,6 @@ class LoadToolsConfig:
 
     def __init__(self) -> None:
         self._load_app_config()
-        self._set_environment_variables()
         self._load_primary_agent_config()
         self._load_tavily_search_config()
         self._load_rag_config()
@@ -22,6 +21,7 @@ class LoadToolsConfig:
         self._load_langsmith_config()
         self._load_memory_config()
         self._load_graph_config()
+        self._set_environment_variables()
 
     def _load_app_config(self) -> None:
         """Load application configuration from YAML."""
@@ -36,11 +36,24 @@ class LoadToolsConfig:
         self.tavily_api_key = os.environ["TAVILY_API_KEY"] = os.getenv(
             "TAVILY_API_KEY") or st.secrets.get(["tavily"]["api_key"])
         self.langchain_api_key = os.environ["LANGCHAIN_API_KEY"] = os.getenv(
-            "LANGCHAIN_API_KEY") or st.secrets.get(["langsmith"]["api_key"])
+            "LANGCHAIN_API_KEY") or st.secrets.get("langsmith", {}).get("api_key")
 
+        if self.langchain_api_key:
+            os.environ["LANGCHAIN_API_KEY"] = self.langchain_api_key
+            print("🔑 LANGCHAIN_API_KEY environment variable set from LANGCHAIN_API_KEY.")
         if self.gemini_api_key:
             os.environ["GOOGLE_API_KEY"] = self.gemini_api_key
             print("🔑 GOOGLE_API_KEY environment variable set from GEMINI_API_KEY.")
+
+        # --- Set Langsmith Environment Variables ---
+        # Ensure tracing is enabled if configured
+        if self.langsmith_tracing:
+            os.environ["LANGCHAIN_TRACING_V2"] = "true"
+            print("✅ LANGCHAIN_TRACING_V2 environment variable set to 'true'.")
+        if self.langsmith_project_name:
+            os.environ["LANGCHAIN_PROJECT"] = self.langsmith_project_name
+            print(
+                f"✅ LANGCHAIN_PROJECT environment variable set to '{self.langsmith_project_name}'.")
         else:
             print(
                 "⚠️ GEMINI_API_KEY not found. langchain-google-genai might fall back to ADC.")

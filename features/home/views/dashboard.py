@@ -8,8 +8,6 @@ from typing import Optional
 import folium
 from folium.plugins import MarkerCluster
 from streamlit_folium import folium_static
-import streamlit.components.v1 as components
-from folium.plugins import HeatMap
 import geopandas as gpd
 
 
@@ -144,7 +142,7 @@ def app(asset_data_service: AssetDataService):
                 unsafe_allow_html=True)
 
     # --- Load Data (Tetap sama) ---
-    with st.spinner("Loading asset data... (cached if possible)"):
+    with st.spinner("Loading asset data..."):
         df_raw = load_dashboard_data(asset_data_service)
 
     # --- Initial Data Check and Cleaning (Tetap sama) ---

@@ -1,9 +1,12 @@
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph, START
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import AIMessage  # Import AIMessage
 from .tool_sql_agent import query_asset_database
 from .tool_rag import search_internal_documents
 from .tool_tavily_search import load_tavily_search_tool
+# Tambahkan import tool visualisasi
+from .tool_visualization import create_visualization
 from ...helper.load_config import TOOLS_CFG
 from .agent_backend import State, BasicToolNode, route_tools
 import streamlit as st
@@ -34,6 +37,7 @@ def build_graph():
             search_internal_documents,
             query_asset_database,
             tavily_search_tool,
+            create_visualization,
         ]
         primary_llm_with_tools = primary_llm.bind_tools(tools)
         print(f"🛠️ Tools bound to LLM: {[tool.name for tool in tools]}")
@@ -55,13 +59,18 @@ def build_graph():
             dict: Updated messages after LLM invocation.
         """
         print("💬 Calling Chatbot Node...")
-        if not state.get("messages"):
-            return {"messages": []}
+        current_messages = state.get("messages", [])
+        if not current_messages:  # Seharusnya tidak terjadi jika START ke chatbot
+            return {"messages": [AIMessage(content="Tidak ada pesan untuk diproses.")]}
         try:
-            response = primary_llm_with_tools.invoke(state["messages"])
+            response = primary_llm_with_tools.invoke(current_messages)
             return {"messages": [response]}
-        except Exception:
-            return {"messages": state.get("messages", [])}
+        except Exception as e:
+            print(f"❌ Error in chatbot node during LLM invocation: {e}")
+            error_response = AIMessage(
+                content=f"Maaf, terjadi kesalahan saat saya mencoba memproses permintaan Anda dengan LLM: {str(e)}")
+            # Mengembalikan pesan error sebagai AIMessage baru
+            return {"messages": [error_response]}
 
     graph_builder.add_node("chatbot", chatbot)
 

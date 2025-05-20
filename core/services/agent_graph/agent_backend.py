@@ -56,9 +56,17 @@ class BasicToolNode:
             tool_result = self.tools_by_name[tool_call["name"]].invoke(
                 tool_call["args"]
             )
+            # Prepare content for ToolMessage
+            # If tool_result is already a string (e.g., from create_visualization), use it directly.
+            # Otherwise, assume it's a dict/list and dump to JSON string.
+            if isinstance(tool_result, str):
+                content_for_message = tool_result
+            else:
+                content_for_message = json.dumps(tool_result)
+
             outputs.append(
                 ToolMessage(
-                    content=json.dumps(tool_result),
+                    content=content_for_message,
                     name=tool_call["name"],
                     tool_call_id=tool_call["id"],
                 )
