@@ -1,0 +1,40 @@
+# Git
+.git
+.gitignore
+
+# Python virtual environment
+.venv
+venv/
+env/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE and editor specific files
+.vscode/
+.idea/
+*.project
+*.classpath
+*.DS_Store
+
+# Secrets and environment files (should be managed via CI/CD variables)
+.env
+*.env.*
+
+# Local data and notebooks (if not needed in production image)
+data/data.xlsx
+ETL_proces.ipynb
+
+# Test reports and coverage
+htmlcov/
+.coverage
+.pytest_cache/
+.tox/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/

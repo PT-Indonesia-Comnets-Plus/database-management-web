@@ -1,25 +1,35 @@
-# pull official base image
-FROM python:3.11.8-slim
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+# Gunakan base image Python yang sesuai dengan versi di pyproject.toml
+# 'requires-python = ">=3.11"'
+FROM python:3.11-slim
 
-# set work directory
-WORKDIR /usr/src/app
+# Set working directory di dalam container
+WORKDIR /app
 
-# set environment variables
-ENV PYTHONUNBUFFERED=1
+# Install Poetry
+# Sebaiknya pin versi Poetry untuk build yang konsisten
+ENV POETRY_VERSION=1.8.3
+RUN pip install "poetry==${POETRY_VERSION}"
 
-# install python dependencies
-COPY ./requirements.txt .
-RUN uv pip install --no-cache-dir -r requirements.txt
+# Nonaktifkan pembuatan virtual environment oleh Poetry di dalam container,
+# karena container itu sendiri sudah merupakan lingkungan terisolasi.
+RUN poetry config virtualenvs.create false
 
-# copy project
-COPY . .
+# Salin file dependensi terlebih dahulu untuk memanfaatkan Docker layer caching
+# Jika file-file ini tidak berubah, Docker tidak perlu menginstal ulang dependensi
+COPY pyproject.toml poetry.lock* /app/
 
-# expose port
-EXPOSE 8000
+# Install dependensi proyek (hanya dependensi produksi, tanpa dev dependencies)
+# --no-interaction: Jangan ajukan pertanyaan interaktif
+# --no-ansi: Nonaktifkan output ANSI untuk log yang lebih bersih
+RUN poetry install --no-dev --no-interaction --no-ansi
 
-# add health check
-HEALTHCHECK CMD curl --fail http://localhost:8000/_stcore/health
+# Salin sisa kode aplikasi ke dalam working directory di container
+COPY . /app/
 
-# start app
-CMD ["streamlit", "run", "Main_Page.py", "--server.port=8000", "--server.address=0.0.0.0"]
+# Port default yang digunakan Streamlit
+EXPOSE 8501
+
+# Perintah untuk menjalankan aplikasi Streamlit Anda
+# Ganti 'your_streamlit_app_file.py' dengan nama file Python utama aplikasi Streamlit Anda
+# Misalnya, jika file utama Anda adalah main.py, gunakan "streamlit", "run", "main.py"
+CMD ["streamlit", "run", "your_streamlit_app_file.py", "--server.port=8501", "--server.address=0.0.0.0"]

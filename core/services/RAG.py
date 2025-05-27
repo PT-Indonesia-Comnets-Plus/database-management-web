@@ -13,6 +13,7 @@ from psycopg2 import pool
 from supabase import Client as SupabaseClient  # Import Supabase Client
 
 # Import konfigurasi (jika diperlukan untuk model embedding, dll.)
+# Corrected import: TOOLS_CFG is in core.utils.load_config
 from ..utils.load_config import TOOLS_CFG
 
 
