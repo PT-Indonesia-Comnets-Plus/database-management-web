@@ -58,14 +58,7 @@ def _get_db_schema(db_pool: pool.SimpleConnectionPool) -> Optional[Dict[str, Lis
 def _generate_sql_query_from_question(schema: Dict[str, List[str]], user_question: str) -> Optional[str]:
     """
     Generates an SQL SELECT query from a natural language user question using Gemini model.
-
-    Args:
-        schema (dict): Database schema containing table and column information.
-        user_question (str): Question provided by the user.
-
-    Returns:
-        str: SQL SELECT query string.
-        None: If an invalid query is generated.
+    Returns the query string (and logs it).
     """
     try:
         sql_model = ChatGoogleGenerativeAI(
@@ -80,11 +73,19 @@ def _generate_sql_query_from_question(schema: Dict[str, List[str]], user_questio
         if len(schema_str) > 5000:
             schema_str = schema_str[:5000] + "...\n(dipangkas)"
 
+        mapping_hint = """
+Catatan penting:
+- Istilah 'HC' pada pertanyaan berarti 'home connected' dan data terkait terdapat pada tabel/kolom 'home_connecteds'.
+- Abaikan makna lain seperti 'human capital'.
+"""
+
         prompt = f"""
         Anda adalah ahli SQL PostgreSQL. Buat SATU query SQL SELECT berdasarkan skema dan pertanyaan berikut.
 
         Skema:
         {schema_str}
+
+        {mapping_hint}
 
         Pertanyaan:
         {user_question}
@@ -95,6 +96,11 @@ def _generate_sql_query_from_question(schema: Dict[str, List[str]], user_questio
         response = sql_model.invoke(prompt)
         query = re.sub(r"```sql\s*|\s*```", "",
                        response.content.strip(), flags=re.IGNORECASE)
+
+        print(f"[DEBUG] Generated SQL Query: {query}")
+        # Save to session for UI access
+        st.session_state['last_sql_query'] = query
+        # st.write(f"[DEBUG] Generated SQL Query: {query}")  # Optional: keep or remove
 
         if not query.lower().startswith("select"):
             print(f"⚠️ Peringatan: Query bukan SELECT: {query}")
@@ -226,6 +232,9 @@ def query_asset_database(user_question: str) -> str:
         sql_query = _generate_sql_query_from_question(schema, user_question)
         if not sql_query:
             return "Tidak dapat membuat query SQL dari pertanyaan."
+
+        # Tampilkan query SQL di UI utama
+        st.write(f"[DEBUG] Generated SQL Query (main): {sql_query}")
 
         results, columns, error = _execute_sql_query(sql_query, db_pool)
         if error:

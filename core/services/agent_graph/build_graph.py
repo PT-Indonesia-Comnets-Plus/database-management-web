@@ -12,7 +12,6 @@ from .agent_backend import State, BasicToolNode, route_tools
 import streamlit as st
 
 
-@st.cache_resource
 def build_graph():
     """
     Build a LangGraph agent integrating LLM with RAG, SQL, and Tavily search tools.

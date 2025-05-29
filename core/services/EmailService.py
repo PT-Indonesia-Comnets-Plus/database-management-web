@@ -87,10 +87,9 @@ class EmailService:
                 <div class="email-header">
                     <img src="https://raw.githubusercontent.com/rizkyyanuark/intern-iconnet/blob/main/image/static\image\logo_Iconnet.png" alt="Harmon Corp Logo">
                 </div>
-                <div class="email-body">
-                    <p>Hi {user.display_name or user.email},</p>
+                <div class="email-body">                    <p>Hi {user.display_name or user.email},</p>
                     <p>Please verify your email address by clicking the button below:</p>
-                    <p style="text-align: center;">
+                    <p class="email-text-center">
                         <a href="{verification_link}" class="verify-button">Verify Email</a>
                     </p>
                     <p>If you did not create an account, please ignore this email.</p>

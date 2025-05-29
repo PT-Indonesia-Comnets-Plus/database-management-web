@@ -1,148 +1,775 @@
-/* Gaya untuk file uploader */
-[data-testid="stFileUploaderDropzoneInstructions"] {
-  background-color: #f5f5f5 !important;
-  color: white !important;
-  border-radius: 15px !important;
-  padding: 10px;
+/* ========================================================================== */
+/*                             ICONNET ASSISTANT - CSS                       */
+/*                          Comprehensive Style Sheet                        */
+/* ========================================================================== */
+
+/*
+ * Table of Contents:
+ * 1. CSS Variables & Theme Configuration
+ * 2. Global Styles & Layout
+ * 3. Header & Logo Components
+ * 4. Authentication & User Interface
+ * 5. Dashboard Components
+ * 6. Form Controls & Inputs
+ * 7. Chat Interface
+ * 8. File Upload Components
+ * 9. Email Templates
+ * 10. Responsive Design
+ * 11. Utility Classes
+ * 
+ * Developer Notes:
+ * - All colors are defined as CSS variables for easy theming
+ * - Components are organized by functionality for easy maintenance
+ * - Responsive breakpoints: Mobile (<768px), Tablet (769-1024px), Desktop (>1024px)
+ * - Use existing utility classes before creating new styles
+ * - Follow the naming convention: component-element-modifier
+ */
+
+/* ========================================================================== */
+/* 1. CSS VARIABLES & THEME CONFIGURATION                                    */
+/* ========================================================================== */
+
+:root {
+  /* === PRIMARY BRAND COLORS === */
+  --primary-color: #0078d4; /* Main ICONNET blue */
+  --primary-darker: #005a9e; /* Darker shade for accents */
+  --primary-lighter: #f1f7fc; /* Light background */
+  --primary-light-hover: #e6f2ff; /* Hover state */
+
+  /* === SECONDARY COLORS === */
+  --secondary-color: #42c2ff; /* Bright blue for UI elements */
+  --secondary-light: #7dcdf1; /* Light blue for backgrounds */
+  --secondary-lighter: #82d7f3; /* Lighter blue for hover states */
+  --secondary-pastel: #78b4d2; /* Pastel blue for active states */
+
+  /* === TEXT COLORS === */
+  --text-primary: #1a1a1a; /* Main text color */
+  --text-secondary: #333333; /* Secondary text */
+  --text-tertiary: #555555; /* Tertiary text */
+  --text-light: #777777; /* Light text for metadata */
+  --text-on-primary: #ffffff; /* Text on primary background */
+  --text-chat-user: #004085; /* Chat user text */
+
+  /* === NEUTRAL COLORS === */
+  --neutral-white: #ffffff;
+  --neutral-light: #f5f5f5;
+  --neutral-medium: #f9f9f9;
+  --neutral-gray: #cfd8dc;
+  --neutral-dark: #252121;
+
+  /* === SHADOW & EFFECTS === */
+  --shadow-light: rgba(0, 0, 0, 0.08);
+  --shadow-medium: rgba(0, 0, 0, 0.1);
+  --shadow-heavy: rgba(0, 0, 0, 0.15);
+
+  /* === BORDER RADIUS === */
+  --radius-small: 5px;
+  --radius-medium: 10px;
+  --radius-large: 12px;
+  --radius-xlarge: 15px;
+  --radius-round: 50%;
+
+  /* === SPACING === */
+  --spacing-xs: 5px;
+  --spacing-sm: 8px;
+  --spacing-md: 10px;
+  --spacing-lg: 12px;
+  --spacing-xl: 15px;
+  --spacing-xxl: 20px;
+
+  /* === TRANSITIONS === */
+  --transition-fast: 0.2s ease;
+  --transition-medium: 0.3s ease;
+  --transition-slow: 0.5s ease;
 }
-/* Efek hover */
+
+/* ========================================================================== */
+/* 2. GLOBAL STYLES & LAYOUT                                                 */
+/* ========================================================================== */
+
+/* Default layout - no wide layout by default */
+/* Wide layout is applied per-page as needed (e.g., dashboard page) */
+
+/* Global font improvements */
+* {
+  font-family: "Arial", "Segoe UI", "Roboto", sans-serif;
+}
+
+/* ========================================================================== */
+/* 3. HEADER & LOGO COMPONENTS                                               */
+/* ========================================================================== */
+
+/* Main Page Header Styles */
+.main-header {
+  text-align: center;
+  padding-bottom: var(--spacing-md);
+}
+
+.main-header img {
+  width: 100%;
+  max-width: 400px;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+}
+
+.main-subtitle {
+  text-align: center;
+  color: var(--text-light);
+  font-size: 16px;
+  margin-top: 0px;
+  margin-bottom: var(--spacing-lg);
+}
+
+/* Logo container for consistent styling */
+.logo-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: var(--spacing-lg);
+}
+
+/* ========================================================================== */
+/* 4. AUTHENTICATION & USER INTERFACE                                        */
+/* ========================================================================== */
+
+/* Welcome Message Container */
+.welcome-container {
+  background-color: #f0f2f6;
+  padding: var(--spacing-xxl);
+  border-radius: var(--radius-medium);
+  margin-bottom: var(--spacing-xxl);
+  box-shadow: 0 2px 8px var(--shadow-light);
+}
+
+.welcome-title {
+  color: #1f4e79;
+  margin: 0;
+  font-size: 20px;
+  font-weight: bold;
+}
+
+.welcome-subtitle {
+  margin: 5px 0 0 0;
+  color: var(--text-light);
+  font-size: 14px;
+}
+
+/* Authentication Forms */
+.auth-section {
+  margin-top: var(--spacing-xxl);
+  padding: var(--spacing-xxl);
+  background-color: var(--neutral-white);
+  border-radius: var(--radius-large);
+  box-shadow: 0 4px 12px var(--shadow-light);
+}
+
+.auth-divider {
+  margin: var(--spacing-xxl) 0;
+  border: none;
+  border-top: 1px solid var(--neutral-gray);
+}
+
+/* Navigation Cards */
+.nav-card {
+  background-color: var(--primary-lighter);
+  padding: var(--spacing-xxl);
+  border-radius: var(--radius-large);
+  border: 2px solid var(--primary-color);
+  transition: all var(--transition-medium);
+  cursor: pointer;
+  text-decoration: none;
+  display: block;
+}
+
+.nav-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 20px var(--shadow-medium);
+  background-color: var(--primary-light-hover);
+}
+
+.nav-card h3 {
+  color: var(--primary-darker);
+  margin-bottom: var(--spacing-sm);
+}
+
+.nav-card p {
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+/* ========================================================================== */
+/* 5. DASHBOARD COMPONENTS                                                    */
+/* ========================================================================== */
+
+/* Dashboard title styling */
+.dashboard-title,
+.title {
+  font-size: 32px;
+  font-weight: bold;
+  color: var(--text-on-primary);
+  background-color: var(--primary-color);
+  padding: var(--spacing-xl);
+  border-radius: var(--radius-large);
+  text-align: center;
+  box-shadow: 0px 5px 10px var(--shadow-light);
+  margin-bottom: 25px;
+}
+
+/* KPI Container Grid */
+.kpi-container,
+.kpi-hc-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--spacing-xxl);
+  margin-top: var(--spacing-xxl);
+  margin-bottom: 25px;
+}
+
+.kpi-hc-container {
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+}
+
+/* Individual KPI Box */
+.kpi-box {
+  background-color: var(--primary-lighter);
+  padding: var(--spacing-xxl);
+  border-radius: var(--radius-large);
+  text-align: center;
+  box-shadow: 0 4px 15px var(--shadow-light);
+  transition: transform var(--transition-medium), box-shadow var(--transition-medium), background-color var(--transition-medium);
+}
+
+.kpi-box:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 10px 20px var(--shadow-heavy);
+  background-color: var(--primary-light-hover);
+  cursor: default;
+}
+
+.kpi-box h4 {
+  font-size: 16px;
+  color: var(--primary-darker);
+  margin-bottom: var(--spacing-md);
+  font-weight: bold;
+}
+
+.kpi-box p {
+  font-size: 24px;
+  font-weight: bold;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.kpi-hc-container .kpi-box h4 {
+  font-size: 15px;
+}
+
+.kpi-hc-container .kpi-box p.subtext {
+  font-size: 14px;
+  font-weight: normal;
+  color: var(--text-tertiary);
+  margin-top: var(--spacing-xs);
+}
+
+/* Insight Box Component */
+.insight-box {
+  background-color: var(--neutral-white);
+  border-top: 4px solid var(--primary-color);
+  padding: var(--spacing-xxl);
+  border-radius: var(--radius-large);
+  box-shadow: 0px 10px 20px var(--shadow-light);
+  font-size: 16px;
+  color: var(--text-secondary);
+  transition: all var(--transition-medium);
+}
+
+.insight-box strong {
+  color: var(--primary-darker);
+}
+
+/* Dashboard Map Components */
+.map-container {
+  width: 100%;
+  height: 500px;
+  border-radius: var(--radius-medium);
+  overflow: hidden;
+  box-shadow: 0 4px 12px var(--shadow-medium);
+  margin: var(--spacing-lg) 0;
+}
+
+/* Map Marker Custom Styles */
+.custom-marker {
+  width: 250px;
+  padding: var(--spacing-sm);
+  background-color: var(--neutral-white);
+  border-radius: var(--radius-small);
+  box-shadow: 0 2px 8px var(--shadow-light);
+}
+
+.marker-title {
+  font-weight: bold;
+  color: var(--primary-darker);
+  margin-bottom: var(--spacing-xs);
+}
+
+.marker-content {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+/* ========================================================================== */
+/* 6. FORM CONTROLS & INPUTS                                                 */
+/* ========================================================================== */
+
+/* Text Input Styling */
+input[type="text"],
+input[type="text-area"] {
+  color: var(--text-primary) !important;
+  background-color: var(--neutral-white) !important;
+  border: 2px solid var(--neutral-white) !important;
+  border-radius: var(--radius-small);
+  padding: var(--spacing-xs);
+  transition: all var(--transition-fast);
+}
+
+input[type="text"]:focus,
+input[type="text-area"]:focus {
+  border-color: var(--secondary-color) !important;
+  outline: none;
+}
+
+/* Number Input Styling */
+input[type="number"] {
+  color: var(--text-primary) !important;
+  background-color: var(--neutral-white) !important;
+  border: 2px solid var(--secondary-color) !important;
+  border-radius: 7px;
+  padding: var(--spacing-xs);
+  transition: all var(--transition-fast);
+}
+
+input[type="number"]:hover {
+  background-color: var(--secondary-color) !important;
+  color: var(--neutral-white) !important;
+}
+
+/* Text Area Styling */
+textarea {
+  color: var(--text-primary) !important;
+  background-color: var(--secondary-light) !important;
+  border: 2px solid var(--neutral-white) !important;
+  border-radius: var(--radius-medium);
+  padding: var(--spacing-md);
+  font-family: "Arial", sans-serif;
+  font-size: 14px;
+  box-shadow: 0 4px 8px var(--shadow-medium);
+  transition: all var(--transition-medium);
+  resize: vertical;
+  min-height: 100px;
+}
+
+textarea:hover {
+  background-color: var(--secondary-lighter) !important;
+  border-color: var(--neutral-gray) !important;
+}
+
+textarea:focus {
+  background-color: var(--neutral-white) !important;
+  border-color: var(--secondary-light) !important;
+  outline: none;
+}
+
+textarea::placeholder {
+  color: var(--text-chat-user);
+  font-style: italic;
+}
+
+/* ========================================================================== */
+/* 7. CHAT INTERFACE                                                          */
+/* ========================================================================== */
+
+/* Chat Message Containers */
+[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) {
+  background-color: #d1e8ff !important;
+  color: var(--text-chat-user) !important;
+  border-radius: var(--radius-medium);
+  padding: var(--spacing-lg);
+  margin: var(--spacing-sm) 0;
+  box-shadow: 0 4px 8px var(--shadow-medium);
+}
+
+[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarAssistant"]) {
+  background-color: var(--neutral-light) !important;
+  color: var(--text-secondary) !important;
+  border-radius: var(--radius-medium);
+  padding: var(--spacing-lg);
+  margin: var(--spacing-sm) 0;
+  box-shadow: 0 4px 8px var(--shadow-medium);
+}
+
+/* Chat Avatars */
+[data-testid="stChatMessageAvatarUser"],
+[data-testid="stChatMessageAvatarAssistant"] {
+  background-color: var(--secondary-color) !important;
+  border-radius: var(--radius-round);
+  box-shadow: 0 2px 4px var(--shadow-medium);
+}
+
+/* Chat Input Submit Button */
+[data-testid="stChatInputSubmitButton"] {
+  color: var(--neutral-dark) !important;
+  padding: var(--spacing-md);
+  transition: all var(--transition-fast);
+}
+
+[data-testid="stChatInputSubmitButton"]:hover {
+  background-color: var(--primary-color) !important;
+  color: var(--text-on-primary) !important;
+}
+
+/* ========================================================================== */
+/* 8. FILE UPLOAD COMPONENTS                                                  */
+/* ========================================================================== */
+
+/* File Uploader Dropzone */
 [data-testid="stFileUploaderDropzone"] {
-  background-color: #42c2ff !important;
+  background-color: var(--secondary-color) !important;
+  border-radius: var(--radius-xlarge);
+  transition: all var(--transition-medium);
 }
 
-/* Gaya teks dalam file uploader */
-[data-testid="stBaseButton-secondary"] div {
-  font-size: 16px !important; /* Ukuran font */
-  font-weight: bold !important; /* Tebal */
-  color: black !important;
+[data-testid="stFileUploaderDropzone"]:hover {
+  background-color: var(--primary-color) !important;
+  transform: scale(1.02);
 }
 
-[data-testid="stBaseButton-secondary"]:active {
-  background-color: #78b4d2 !important; /* Latar belakang biru pastel saat diklik */
+[data-testid="stFileUploaderDropzoneInstructions"] {
+  background-color: var(--neutral-light) !important;
+  color: var(--text-primary) !important;
+  border-radius: var(--radius-xlarge) !important;
+  padding: var(--spacing-md);
 }
 
 [data-testid="stFileUploaderDropzoneInstructions"] div {
-  font-size: 16px !important; /* Ukuran font */
-  font-weight: bold !important; /* Tebal */
-  color: black !important;
+  font-size: 16px !important;
+  font-weight: bold !important;
+  color: var(--text-primary) !important;
 }
 
-/* Warna latar belakang untuk bg bubble */
-/* Pesan dari User */
-[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) {
-  background-color: #d1e8ff !important; /* Latar belakang biru muda */
-  color: #004085 !important; /* Teks biru gelap untuk kontras */
-  border-radius: 10px; /* Membuat sudut lebih lembut */
-  padding: 12px; /* Menambahkan jarak dalam */
-  margin: 8px 0; /* Memberikan jarak antar elemen */
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* Tambahkan efek bayangan lembut */
+/* File Upload Button Styling */
+[data-testid="stBaseButton-secondary"] div {
+  font-size: 16px !important;
+  font-weight: bold !important;
+  color: var(--text-primary) !important;
 }
 
-/* Pesan dari Assistant */
-[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarAssistant"]) {
-  background-color: #f5f5f5 !important; /* Latar belakang abu-abu terang */
-  color: #333333 !important; /* Teks abu-abu gelap untuk kontras */
-  border-radius: 10px; /* Membulatkan sudut */
-  padding: 12px; /* Tambahkan jarak dalam */
-  margin: 8px 0; /* Memberikan jarak antar elemen */
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* Tambahkan efek bayangan lembut */
+[data-testid="stBaseButton-secondary"]:active {
+  background-color: var(--secondary-pastel) !important;
 }
 
-/* AVATAR STYLING */
-/* Avatar untuk User */
-[data-testid="stChatMessageAvatarUser"] {
-  background-color: #42c2ff !important; /* Warna biru terang untuk avatar user */
-  border-radius: 50%; /* Membuat avatar bulat */
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); /* Efek bayangan untuk avatar */
+/* PDF Preview iframe */
+.pdf-preview-container {
+  border-radius: var(--radius-medium);
+  overflow: hidden;
+  box-shadow: 0 4px 12px var(--shadow-medium);
+  margin: var(--spacing-md) 0;
 }
 
-/* Avatar untuk Assistant */
-[data-testid="stChatMessageAvatarAssistant"] {
-  background-color: #42c2ff !important; /* Warna biru terang untuk avatar assistant */
-  border-radius: 50%; /* Membuat avatar bulat */
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); /* Efek bayangan untuk avatar */
+/* ========================================================================== */
+/* 9. EMAIL TEMPLATES                                                         */
+/* ========================================================================== */
+
+.email-container {
+  font-family: Arial, sans-serif;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  max-width: 600px;
+  margin: auto;
+  padding: var(--spacing-xxl);
+  border: 1px solid #ddd;
+  border-radius: var(--radius-medium);
+  background-color: var(--neutral-medium);
 }
 
-/* Gaya untuk input teks */
-input[type="text"] {
-  color: black !important;
-  background-color: white !important;
-  border: 2px solid #ffffff !important;
-  border-radius: 5px;
-  padding: 5px;
-}
-input[type="text-area"] {
-  color: black !important;
-  background-color: white !important;
-  border: 2px solid #ffffff !important;
-  border-radius: 5px;
-  padding: 5px;
+.email-header {
+  text-align: center;
+  padding-bottom: var(--spacing-xxl);
 }
 
-/* Gaya khusus untuk number input */
-input[type="number"] {
-  color: black !important;
-  background-color: white !important;
-  border: 2px solid #42c2ff !important;
-  border-radius: 7px;
-  padding: 5px;
+.email-header img {
+  max-width: 100px;
 }
 
-/* Hover efek untuk number input */
-input[type="number"]:hover {
-  background-color: #42c2ff !important;
+.email-body {
+  padding: var(--spacing-xxl);
+  background-color: var(--neutral-white);
+  border-radius: var(--radius-medium);
 }
 
-[data-testid="stChatInputSubmitButton"] {
-  color: #252121 !important;
-  padding: 10px;
+.email-footer {
+  text-align: center;
+  padding-top: var(--spacing-xxl);
+  font-size: 12px;
+  color: var(--text-light);
 }
 
-/* Gaya untuk text area */
-textarea {
-  color: black !important; /* Warna teks */
-  background-color: #7dcdf1 !important; /* Latar belakang biru muda */
-  border: 2px solid #ffffff !important; /* Border putih */
-  border-radius: 10px; /* Membulatkan sudut */
-  padding: 10px; /* Ruang internal */
-  font-family: "Arial", sans-serif; /* Font yang bersih */
-  font-size: 14px; /* Ukuran font */
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* Efek bayangan */
-  transition: all 0.3s ease; /* Animasi untuk hover dan fokus */
+.verify-button {
+  display: inline-block;
+  padding: var(--spacing-md) var(--spacing-xxl);
+  margin: var(--spacing-xxl) 0;
+  font-size: 16px;
+  color: var(--text-on-primary);
+  background-color: #b9c4c6;
+  text-decoration: none;
+  border-radius: var(--radius-small);
+  transition: background-color var(--transition-fast);
 }
 
-/* Hover Effect */
-textarea:hover {
-  background-color: #82d7f3 !important; /* Warna sedikit lebih cerah saat hover */
-  border-color: #cfd8dc !important; /* Border abu-abu lembut saat hover */
+.verify-button:hover {
+  background-color: #a0b0b2;
 }
 
-/* Fokus Effect */
-textarea:focus {
-  background-color: #ffffff !important; /* Latar belakang putih saat fokus */
-  border-color: #7dcdf1 !important; /* Border biru muda saat fokus */
-  outline: none; /* Hilangkan garis luar default */
+/* Email template styles for inline usage */
+.email-text-center {
+  text-align: center;
 }
 
-/* Styling untuk Indikator Placeholder */
-textarea::placeholder {
-  color: #004085; /* Hijau tua yang harmonis */
-  font-style: italic; /* Gaya miring untuk placeholder */
-}
+/* ========================================================================== */
+/* 10. RESPONSIVE DESIGN                                                      */
+/* ========================================================================== */
 
-/* Responsif untuk perangkat mobile */
+/* Mobile Responsive Design */
 @media (max-width: 768px) {
+  section[data-testid="stMain"] > div[data-testid="stMainBlockContainer"] {
+    max-width: 95%;
+  }
+
+  .dashboard-title,
+  .title {
+    font-size: 24px;
+    padding: var(--spacing-md);
+  }
+
+  .kpi-container,
+  .kpi-hc-container {
+    grid-template-columns: 1fr;
+    gap: var(--spacing-md);
+  }
+
+  .kpi-box {
+    padding: var(--spacing-md);
+  }
+
+  .main-header img {
+    max-width: 300px;
+  }
+
+  .main-subtitle {
+    font-size: 14px;
+  }
+
+  .welcome-container {
+    padding: var(--spacing-md);
+  }
+
+  .nav-card {
+    padding: var(--spacing-md);
+  }
+
   textarea {
-    font-size: 12px; /* Ukuran font lebih kecil untuk layar kecil */
-    padding: 8px; /* Kurangi ruang internal */
+    font-size: 12px;
+    padding: var(--spacing-sm);
+  }
+
+  [data-testid="stChatMessage"] {
+    padding: var(--spacing-sm);
+    margin: var(--spacing-xs) 0;
   }
 }
 
-/* Gaya khusus untuk number input */
-input[type="number"] {
-  color: black !important;
-  background-color: white !important;
-  border: 2px solid #42c2ff !important;
-  border-radius: 7px;
-  padding: 5px;
+/* Tablet Responsive Design */
+@media (max-width: 1024px) and (min-width: 769px) {
+  .kpi-container,
+  .kpi-hc-container {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+
+  .main-header img {
+    max-width: 350px;
+  }
 }
+
+/* ========================================================================== */
+/* 11. UTILITY CLASSES                                                       */
+/* ========================================================================== */
+
+/* Spacing utilities */
+.mt-sm {
+  margin-top: var(--spacing-sm);
+}
+.mt-md {
+  margin-top: var(--spacing-md);
+}
+.mt-lg {
+  margin-top: var(--spacing-lg);
+}
+.mt-xl {
+  margin-top: var(--spacing-xl);
+}
+
+.mb-sm {
+  margin-bottom: var(--spacing-sm);
+}
+.mb-md {
+  margin-bottom: var(--spacing-md);
+}
+.mb-lg {
+  margin-bottom: var(--spacing-lg);
+}
+.mb-xl {
+  margin-bottom: var(--spacing-xl);
+}
+
+.p-sm {
+  padding: var(--spacing-sm);
+}
+.p-md {
+  padding: var(--spacing-md);
+}
+.p-lg {
+  padding: var(--spacing-lg);
+}
+.p-xl {
+  padding: var(--spacing-xl);
+}
+
+/* Text utilities */
+.text-center {
+  text-align: center;
+}
+.text-left {
+  text-align: left;
+}
+.text-right {
+  text-align: right;
+}
+
+.text-primary {
+  color: var(--primary-color);
+}
+.text-secondary {
+  color: var(--text-secondary);
+}
+.text-light {
+  color: var(--text-light);
+}
+
+/* Background utilities */
+.bg-primary {
+  background-color: var(--primary-color);
+}
+.bg-secondary {
+  background-color: var(--secondary-color);
+}
+.bg-light {
+  background-color: var(--neutral-light);
+}
+.bg-white {
+  background-color: var(--neutral-white);
+}
+
+/* Shadow utilities */
+.shadow-light {
+  box-shadow: 0 2px 4px var(--shadow-light);
+}
+.shadow-medium {
+  box-shadow: 0 4px 8px var(--shadow-medium);
+}
+.shadow-heavy {
+  box-shadow: 0 8px 16px var(--shadow-heavy);
+}
+
+/* Border radius utilities */
+.rounded-sm {
+  border-radius: var(--radius-small);
+}
+.rounded-md {
+  border-radius: var(--radius-medium);
+}
+.rounded-lg {
+  border-radius: var(--radius-large);
+}
+.rounded-full {
+  border-radius: var(--radius-round);
+}
+
+/* Animation utilities */
+.transition-fast {
+  transition: all var(--transition-fast);
+}
+.transition-medium {
+  transition: all var(--transition-medium);
+}
+.transition-slow {
+  transition: all var(--transition-slow);
+}
+
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 12px var(--shadow-medium);
+}
+
+.hover-scale:hover {
+  transform: scale(1.05);
+}
+
+/* Display utilities */
+.d-flex {
+  display: flex;
+}
+.d-block {
+  display: block;
+}
+.d-inline {
+  display: inline;
+}
+.d-inline-block {
+  display: inline-block;
+}
+
+/* Flexbox utilities */
+.justify-center {
+  justify-content: center;
+}
+.justify-between {
+  justify-content: space-between;
+}
+.justify-around {
+  justify-content: space-around;
+}
+.align-center {
+  align-items: center;
+}
+.align-start {
+  align-items: flex-start;
+}
+.align-end {
+  align-items: flex-end;
+}
+
+/* Width utilities */
+.w-full {
+  width: 100%;
+}
+.w-auto {
+  width: auto;
+}
+.w-fit {
+  width: fit-content;
+}
+
+/* ========================================================================== */
+/* END OF ICONNET ASSISTANT CSS                                              */
+/* ========================================================================== */

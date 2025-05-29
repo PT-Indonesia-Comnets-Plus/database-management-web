@@ -22,18 +22,17 @@ def initialize_session_state() -> bool:
     try:
         # ALWAYS load cookies first (like in your old working code)
         if "username" not in st.session_state:
+            # Initialize Database and Storage
             load_cookie_to_session(st.session_state)
-
-        # Initialize Database and Storage
         if "db" not in st.session_state or "storage" not in st.session_state:
             try:
                 db_pool, storage = connect_db()
                 st.session_state.db = db_pool
                 st.session_state.storage = storage
-                if db_pool is None or storage is None:
-                    logger.error("Database or storage initialization failed")
-                    st.session_state.db = None
-                    st.session_state.storage = None
+                if db_pool is None:
+                    logger.warning("Database connection not available")
+                if storage is None:
+                    logger.warning("Storage connection not available")
             except Exception as e:
                 logger.error(f"Failed to connect to database: {e}")
                 st.session_state.db = None
@@ -47,7 +46,7 @@ def initialize_session_state() -> bool:
                 st.session_state.auth = auth
                 st.session_state.fs_config = config
                 if firestore is None:
-                    logger.error("Firebase initialization failed")
+                    logger.warning("Firebase not available")
             except Exception as e:
                 logger.error(f"Failed to initialize Firebase: {e}")
                 st.session_state.fs = None

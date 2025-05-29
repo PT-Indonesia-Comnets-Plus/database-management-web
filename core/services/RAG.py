@@ -313,7 +313,8 @@ class RAGService:
             try:
                 base64_pdf = base64.b64encode(
                     uploaded_file.getvalue()).decode('utf-8')
-                pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="600" type="application/pdf"></iframe>'
+                # PDF preview styling is now handled by external CSS
+                pdf_display = f'<div class="pdf-preview-container"><iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="600" type="application/pdf"></iframe></div>'
                 st.markdown(pdf_display, unsafe_allow_html=True)
             except Exception as e:
                 st.error(f"Failed to display PDF preview: {e}")

@@ -1,5 +1,6 @@
 import streamlit as st
 from core.services.UserDataService import UserDataService  # Import untuk type hinting
+import datetime  # Added for date input
 
 
 def app(user_data_service: UserDataService):
@@ -10,33 +11,101 @@ def app(user_data_service: UserDataService):
         user_data_service: An instance of UserDataService to fetch user activity data.
     """
     st.title("📊 Admin Dashboard")
-    st.markdown("Overview of user activity.")
+    st.markdown("Overview of user activity and system metrics.")
 
-    try:
-        # Calculate and plot daily login/logout totals
-        st.subheader("User Login/Logout Activity (Last 7 Days)")
-        daily_totals = user_data_service.calculate_daily_login_logout_totals()
-
-        if not daily_totals:
-            st.info("No login/logout data available for the last 7 days.")
-        else:
-            fig = user_data_service.plot_daily_login_logout_totals(
-                daily_totals)
-            st.plotly_chart(fig, use_container_width=True)
-
-    except AttributeError as e:
-        st.error(
-            f"Error accessing UserDataService method: {e}. Service might not be initialized correctly.")
-    except Exception as e:
-        st.error(f"An error occurred while displaying the dashboard: {e}")
-
-    # Anda bisa menambahkan metrik lain dari UserDataService di sini jika ada
-    # Misalnya: Jumlah pengguna pending, jumlah pengguna terverifikasi, dll.
+    # Key Metrics Section
+    st.subheader("Key Metrics")
+    col1, col2, col3 = st.columns(3)
     try:
         pending_users_df = user_data_service.get_users(status='Pending')
         verified_users_df = user_data_service.get_users(status='Verified')
-        col1, col2 = st.columns(2)
-        col1.metric("Users Pending Verification", len(pending_users_df))
-        col2.metric("Verified Users", len(verified_users_df))
+
+        # Get all employee users regardless of status
+        try:
+            all_users_df = user_data_service.get_all_employee_users()
+            col1.metric("Total Registered Users", len(all_users_df))
+        except Exception as e:
+            col1.metric("Total Registered Users", "Error")
+            st.sidebar.error(f"Could not display total user count: {e}")
+
+        col2.metric("Users Pending Verification", len(pending_users_df))
+        col3.metric("Verified Users", len(verified_users_df))
+
     except Exception as e:
         st.warning(f"Could not display user counts: {e}")
+        if 'col1' in locals():
+            col1.metric("Total Registered Users", "Error")
+        if 'col2' in locals():
+            col2.metric("Users Pending Verification", "Error")
+        if 'col3' in locals():
+            col3.metric("Verified Users", "Error")
+
+    st.divider()
+
+    # User Login/Logout Activity Section
+    st.subheader("User Login/Logout Activity")
+
+    # Date range selector
+    # Default to last 7 days
+    today = datetime.date.today()
+    default_start_date = today - datetime.timedelta(days=6)
+
+    col_date1, col_date2 = st.columns(2)
+    with col_date1:
+        start_date = st.date_input(
+            "Start Date", value=default_start_date, max_value=today)
+    with col_date2:
+        end_date = st.date_input(
+            "End Date", value=today, min_value=start_date, max_value=today)
+
+    if start_date > end_date:
+        st.error("Error: Start date must be before end date.")
+    else:
+        try:
+            # Modify calculate_daily_login_logout_totals to accept date range
+            # This assumes your UserDataService can be modified or already supports this
+            daily_totals = user_data_service.calculate_daily_login_logout_totals(
+                start_date=datetime.datetime.combine(
+                    start_date, datetime.datetime.min.time()),
+                end_date=datetime.datetime.combine(
+                    end_date, datetime.datetime.max.time())
+            )
+
+            if not daily_totals:
+                st.info(
+                    f"No login/logout data available between {start_date.strftime('%Y-%m-%d')} and {end_date.strftime('%Y-%m-%d')}.")
+            else:
+                # Pass the selected date range to the plotting function as well
+                fig = user_data_service.plot_daily_login_logout_totals(
+                    daily_totals,
+                    plot_start_date=datetime.datetime.combine(
+                        start_date, datetime.datetime.min.time()),
+                    plot_end_date=datetime.datetime.combine(
+                        end_date, datetime.datetime.max.time())
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+        except AttributeError as e:
+            st.error(
+                f"Error accessing UserDataService method: {e}. The service might not support date ranges or the method name is incorrect. Please ensure 'calculate_daily_login_logout_totals' accepts 'start_date' and 'end_date' arguments.")
+        except Exception as e:
+            st.error(
+                f"An error occurred while displaying the login/logout activity: {e}")
+
+    # Placeholder for more interactive elements or charts
+    st.divider()
+    st.subheader("Further Analysis (Placeholder)")
+    st.info("More interactive charts and data tables can be added here, e.g., user demographics, content engagement, etc.")
+
+    # Example: User table with search/filter (if UserDataService supports it)
+    # with st.expander("View All Users (Sample - Requires Data Fetching Logic)"):
+    #     try:
+    #         all_users_for_table = user_data_service.get_users_for_table_display() # Assuming such a method
+    #         if not all_users_for_table.empty:
+    #             st.dataframe(all_users_for_table)
+    #         else:
+    #             st.write("No user data to display in table.")
+    #     except AttributeError:
+    #         st.write("Functionality to display all users in a table is not yet implemented in UserDataService.")
+    #     except Exception as e:
+    #         st.error(f"Could not load user table: {e}")

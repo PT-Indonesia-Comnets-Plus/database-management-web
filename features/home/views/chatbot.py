@@ -271,7 +271,15 @@ def process_user_input(graph, config) -> None:
                                 )
                                 _render_message_content(
                                     msg_in_turn, st, is_streaming_final_output=is_final_animated, is_production=True)  # is_production=True
-
+                            # Tambahkan query SQL ke bubble chatbot jika ada
+                            if (
+                                'last_sql_query' in st.session_state and
+                                st.session_state['last_sql_query']
+                            ):
+                                st.markdown(
+                                    '**[DEBUG] SQL Query yang dijalankan:**')
+                                st.code(
+                                    st.session_state['last_sql_query'], language='sql')
             except Exception as e:
                 st.error(f"Terjadi error saat menjalankan agent graph: {e}")
                 print(f"❌ Error during graph execution: {e}")
