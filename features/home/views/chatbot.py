@@ -3,12 +3,30 @@ import warnings
 import os
 import time  # Tetap dibutuhkan untuk typing animation
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
+from langchain_ollama.chat_models import ChatOllama
 import plotly.graph_objects as go
 import json
 from core.services.agent_graph.build_graph import build_graph
 from typing import Any
-from core.utils.load_css import load_custom_css
+# from static.load_css import load_custom_css # Akan didefinisikan di sini jika tidak ada
+
 warnings.filterwarnings('ignore')
+
+
+def load_custom_css(path: str) -> None:
+    """
+    Memuat custom CSS dari file yang ditentukan.
+
+    Args:
+        path (str): Path ke file CSS.
+    """
+    if os.path.exists(path):
+        try:
+            with open(path) as f:
+                st.markdown(f"<style>{f.read()}</style>",
+                            unsafe_allow_html=True)
+        except Exception as e:
+            st.warning(f"Gagal memuat CSS: {e}")
 
 
 def display_message_with_typing_animation(placeholder, message: str, typing_speed: float = 0.02) -> None:
@@ -271,15 +289,7 @@ def process_user_input(graph, config) -> None:
                                 )
                                 _render_message_content(
                                     msg_in_turn, st, is_streaming_final_output=is_final_animated, is_production=True)  # is_production=True
-                            # Tambahkan query SQL ke bubble chatbot jika ada
-                            if (
-                                'last_sql_query' in st.session_state and
-                                st.session_state['last_sql_query']
-                            ):
-                                st.markdown(
-                                    '**[DEBUG] SQL Query yang dijalankan:**')
-                                st.code(
-                                    st.session_state['last_sql_query'], language='sql')
+
             except Exception as e:
                 st.error(f"Terjadi error saat menjalankan agent graph: {e}")
                 print(f"❌ Error during graph execution: {e}")

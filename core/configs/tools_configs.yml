@@ -1,12 +1,12 @@
 primary_agent:
-  llm: gemini-2.0-flash
+  llm: gemini-1.5-flash # More token efficient than gemini-2.0
   llm_temperature: 0.0
 
 rag_configs:
   unstructured_docs: "data/unstructured_docs/swiss_airline_policy"
   vectordb: "data/airline_policy_vectordb"
   collection_name: documnets.rag
-  llm: gemini-2.0-flash
+  llm: gemini-1.5-flash # More cost effective for RAG
   llm_temperature: 0.9
   embedding_model: models/embedding-001
   chunk_size: 1000
@@ -15,7 +15,7 @@ rag_configs:
 
 sqlagent_configs:
   sqldb_dir: "data/Chinook.db"
-  llm: "gemini-2.0-flash"
+  llm: "gemini-1.5-flash" # Much more token efficient for SQL generation
   llm_temperature: 0.0
 
 langsmith:

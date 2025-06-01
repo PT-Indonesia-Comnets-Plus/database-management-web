@@ -1835,7 +1835,6 @@ Contributors are recognized in:
 
 Current maintainers:
 
-- [@rizkyyanuark](https://github.com/rizkyyanuark) - Project Lead
 - Add your maintainer info here
 
 Maintainer duties:
@@ -1879,7 +1878,6 @@ This project uses open-source libraries with their respective licenses:
 
 ### Core Team
 
-- **Rizky Yanuar Kurniawan** ([@rizkyyanuark](https://github.com/rizkyyanuark)) - Project Lead & Architecture
 - **ICONNET Development Team** - Feature development and testing
 - **Community Contributors** - Bug reports, feature requests, and improvements
 

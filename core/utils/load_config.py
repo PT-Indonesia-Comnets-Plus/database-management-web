@@ -57,7 +57,6 @@ class LoadToolsConfig:
             config_path = here("core/configs/tools_configs.yml")
             with open(config_path, "r", encoding='utf-8') as cfg_file:
                 self.app_config = yaml.load(cfg_file, Loader=yaml.FullLoader)
-            logger.info(f"App config loaded from {config_path}")
         except FileNotFoundError:
             logger.warning(
                 f"Configuration file not found at {config_path}, using defaults")
@@ -81,26 +80,20 @@ class LoadToolsConfig:
             if tavily_key:
                 os.environ["TAVILY_API_KEY"] = tavily_key
                 self.tavily_api_key = tavily_key
-                logger.info("TAVILY_API_KEY environment variable set")
 
             if langchain_key:
                 os.environ["LANGCHAIN_API_KEY"] = langchain_key
                 self.langchain_api_key = langchain_key
-                logger.info("LANGCHAIN_API_KEY environment variable set")
 
             if self.gemini_api_key:
                 os.environ["GOOGLE_API_KEY"] = self.gemini_api_key
-                logger.info("GOOGLE_API_KEY environment variable set")
 
             # Set LangSmith environment variables
             if hasattr(self, 'langsmith_tracing') and self.langsmith_tracing:
                 os.environ["LANGCHAIN_TRACING_V2"] = "true"
-                logger.info("LANGCHAIN_TRACING_V2 enabled")
 
             if hasattr(self, 'langsmith_project_name') and self.langsmith_project_name:
                 os.environ["LANGCHAIN_PROJECT"] = self.langsmith_project_name
-                logger.info(
-                    f"LANGCHAIN_PROJECT set to '{self.langsmith_project_name}'")
 
         except Exception as e:
             logger.warning(f"Error setting environment variables: {e}")

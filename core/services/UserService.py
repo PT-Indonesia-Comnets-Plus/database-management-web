@@ -60,7 +60,6 @@ class UserService:
         self.auth = auth
         self.firebase_api = firebase_api
         self.email_service = email_service
-        logger.info("UserService initialized successfully")
 
     def _validate_login_input(self, email: str, password: str) -> None:
         """Validate login input parameters."""
@@ -98,8 +97,6 @@ class UserService:
             # Log activity
             self.save_login_logout(user.uid, "login")
 
-            logger.info(
-                f"Session created for user: {user.email} with role: {user_data['role']}")
         except Exception as e:
             logger.error(f"Failed to create session: {e}")
             raise UserServiceError(f"Session creation failed: {e}")

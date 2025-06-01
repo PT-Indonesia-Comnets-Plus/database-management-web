@@ -111,8 +111,7 @@ def app(asset_data_service: AssetDataService):
                 unsafe_allow_html=True)
 
     # --- Load Data (Tetap sama) ---
-    with st.spinner("Loading asset data..."):
-        df_raw = load_dashboard_data(asset_data_service)
+    df_raw = load_dashboard_data(asset_data_service)
 
     # --- Initial Data Check and Cleaning (Tetap sama) ---
     if df_raw is None:

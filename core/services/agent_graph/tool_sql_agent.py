@@ -1,11 +1,13 @@
 # core/services/agent_graph/tool_sql_agent.py
 import re
+import json
 import streamlit as st
 import psycopg2
 from typing import Optional, Tuple, List, Dict
 from psycopg2 import pool
 from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_ollama.chat_models import ChatOllama
 from ...utils.load_config import TOOLS_CFG
 
 # =====================
@@ -70,17 +72,27 @@ def _generate_sql_query_from_question(schema: Dict[str, List[str]], user_questio
             f"Tabel {t}:\n" + "\n".join([f" - {c}" for c in cs])
             for t, cs in schema.items()
         )
+
         if len(schema_str) > 5000:
             schema_str = schema_str[:5000] + "...\n(dipangkas)"
 
         mapping_hint = """
-Catatan penting:
-- Istilah 'HC' pada pertanyaan berarti 'home connected' dan data terkait terdapat pada tabel/kolom 'home_connecteds'.
-- Abaikan makna lain seperti 'human capital'.
-"""
+        Catatan penting:
+        - Istilah 'HC' pada pertanyaan berarti 'home connected' dan data terkait terdapat pada tabel/kolom 'home_connecteds'.
+        - Abaikan makna lain seperti 'human capital'.
+        """
 
         prompt = f"""
-        Anda adalah ahli SQL PostgreSQL. Buat SATU query SQL SELECT berdasarkan skema dan pertanyaan berikut.
+        Anda adalah ahli SQL PostgreSQL. Tugas Anda adalah membuat SATU query SQL SELECT berdasarkan skema database dan pertanyaan pengguna.
+        Pedoman:
+        1. Hanya buat query SELECT. JANGAN buat query INSERT, UPDATE, DELETE, atau DDL lainnya.
+        2. Gunakan LOWER() pada kolom dan nilai untuk perbandingan string agar tidak case-sensitive.
+        3. Jika pertanyaan ambigu, buat query yang paling mungkin.
+        4. Pastikan nama tabel dan kolom sesuai skema. Gunakan JOIN jika perlu. Kunci utama umum adalah 'fat_id'.
+        5. Hanya tampilkan query SQL mentah tanpa ```.
+        6. PENTING: Jika pertanyaan meminta data dari multiple lokasi/kota (misal "Surabaya dan Gresik"), 
+           SELALU gunakan GROUP BY untuk memisahkan data per lokasi. JANGAN menjumlahkan semuanya jadi satu angka.
+           Contoh: SELECT city, SUM(home_connecteds) FROM table WHERE city IN ('surabaya', 'gresik') GROUP BY city
 
         Skema:
         {schema_str}
@@ -100,7 +112,6 @@ Catatan penting:
         print(f"[DEBUG] Generated SQL Query: {query}")
         # Save to session for UI access
         st.session_state['last_sql_query'] = query
-        # st.write(f"[DEBUG] Generated SQL Query: {query}")  # Optional: keep or remove
 
         if not query.lower().startswith("select"):
             print(f"⚠️ Peringatan: Query bukan SELECT: {query}")
@@ -182,17 +193,46 @@ def _generate_natural_answer_from_results(question: str, results: List[Tuple], c
             if len(table_str) > 5000:
                 table_str = table_str[:5000] + "\n...(dipotong)"
 
-        prompt = f"""
-        Anda adalah asisten AI yang menjelaskan hasil query data ICONNET.
+        # Deteksi apakah pertanyaan meminta visualisasi
+        visualization_keywords = ['grafik', 'chart', 'plot',
+                                  'visualisasi', 'buat', 'tampilkan dalam grafik', 'gambarkan']
+        needs_visualization = any(keyword in question.lower()
+                                  for keyword in visualization_keywords)
 
-        Pertanyaan:
-        {question}
+        if needs_visualization and results:
+            # Tambahkan petunjuk untuk visualisasi dalam prompt
+            prompt = f"""
+            Anda adalah asisten AI yang menjelaskan hasil query data ICONNET. 
+            PENTING: Pertanyaan ini mengandung permintaan visualisasi, jadi berikan jawaban yang memuat data numerik yang jelas dan terstruktur.
 
-        Data:
-        {table_str}
+            Pertanyaan:
+            {question}
 
-        Jawaban:
-        """
+            Data:
+            {table_str}
+
+            Berikan jawaban yang:
+            1. Menjelaskan data dengan jelas
+            2. Menyebutkan angka-angka spesifik dalam format yang mudah dipahami
+            3. Menyiapkan data untuk visualisasi
+            
+            Format jawaban contoh: "Berdasarkan data yang ditemukan: Malang memiliki total 150 HC, dan Gresik memiliki total 200 HC. Data ini siap untuk divisualisasikan."
+
+            Jawaban:
+            """
+        else:
+            prompt = f"""
+            Anda adalah asisten AI yang menjelaskan hasil query data ICONNET.
+
+            Pertanyaan:
+            {question}
+
+            Data:
+            {table_str}
+
+            Jawaban:
+            """
+
         return model.invoke(prompt).content.strip()
 
     except Exception as e:
@@ -233,9 +273,6 @@ def query_asset_database(user_question: str) -> str:
         if not sql_query:
             return "Tidak dapat membuat query SQL dari pertanyaan."
 
-        # Tampilkan query SQL di UI utama
-        st.write(f"[DEBUG] Generated SQL Query (main): {sql_query}")
-
         results, columns, error = _execute_sql_query(sql_query, db_pool)
         if error:
             return f"Kesalahan saat menjalankan query: {error}"
@@ -245,3 +282,58 @@ def query_asset_database(user_question: str) -> str:
     except Exception as e:
         print(f"❌ Error: {e}")
         return "Kesalahan tidak terduga saat menjalankan query aset."
+
+# =====================
+# === Tool Definition for Structured Data ===
+# =====================
+
+
+@tool
+def sql_agent(user_question: str) -> str:
+    """
+    SQL Agent yang menghasilkan data terstruktur dalam format JSON dari database aset ICONNET.
+    Tool ini dapat digunakan untuk query data biasa maupun untuk keperluan visualisasi.
+
+    Args:
+        user_question (str): Pertanyaan terkait data aset ICONNET.
+
+    Returns:
+        str: Data dalam format JSON yang terstruktur, atau pesan error.
+    """
+    print(
+        f"\n🛠️ Running tool: sql_agent\nQuestion: {user_question}")
+
+    db_pool = st.session_state.get("db")
+    if not db_pool:
+        return "Error: Tidak ada koneksi ke database."
+
+    try:
+        schema = _get_db_schema(db_pool)
+        if schema is None:
+            return "Gagal mendapatkan skema database."
+
+        sql_query = _generate_sql_query_from_question(schema, user_question)
+        if not sql_query:
+            return "Tidak dapat membuat query SQL dari pertanyaan."
+
+        results, columns, error = _execute_sql_query(sql_query, db_pool)
+        if error:
+            return f"Kesalahan saat menjalankan query: {error}"
+
+        if not results:
+            return "Tidak ada data yang ditemukan untuk divisualisasikan."
+
+        # Convert results to JSON format for visualization
+        structured_data = []
+        for row in results:
+            row_dict = {}
+            for i, col_name in enumerate(columns):
+                row_dict[col_name] = row[i]
+            structured_data.append(row_dict)
+
+        # Return as JSON string
+        return json.dumps(structured_data, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return "Kesalahan tidak terduga saat menjalankan SQL agent."

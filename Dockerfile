@@ -7,8 +7,8 @@ WORKDIR /app
 
 # Install Poetry
 # Sebaiknya pin versi Poetry untuk build yang konsisten
-ENV POETRY_VERSION=1.8.3
-RUN pip install "poetry==${POETRY_VERSION}"
+ENV POETRY_VERSION=2.1.3
+RUN uv pip install "poetry==${POETRY_VERSION}"
 
 # Nonaktifkan pembuatan virtual environment oleh Poetry di dalam container,
 # karena container itu sendiri sudah merupakan lingkungan terisolasi.

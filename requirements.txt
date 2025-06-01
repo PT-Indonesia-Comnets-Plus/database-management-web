@@ -1,424 +1,161 @@
-aiofiles==23.2.1
-aiohappyeyeballs==2.4.4
-aiohttp==3.10.11
-aiosignal==1.3.1
-aiosqlite==0.20.0
-alembic==1.14.1
-altair==5.5.0
-amqp==5.3.1
-annotated-types==0.7.0
-anyio==4.5.2
-apache-airflow==2.10.5
-apache-airflow-providers-celery==3.8.2
-apache-airflow-providers-common-compat==1.2.0
-apache-airflow-providers-common-io==1.4.1
-apache-airflow-providers-common-sql==1.26.0
-apache-airflow-providers-fab==1.4.0
-apache-airflow-providers-ftp==3.11.1
-apache-airflow-providers-http==4.13.1
-apache-airflow-providers-imap==3.7.0
-apache-airflow-providers-postgres==6.1.3
-apache-airflow-providers-smtp==1.8.0
-apache-airflow-providers-sqlite==3.9.0
-apispec==6.6.1
-argcomplete==3.5.3
-asgiref==3.8.1
-asttokens==3.0.0
-asyncpg==0.30.0
-attrs==25.1.0
-babel==2.17.0
-backoff==2.2.1
-backports.tarfile==1.2.0
-banks==2.1.0
-bcrypt==4.3.0
-beautifulsoup4==4.13.3
-billiard==4.2.1
-blinker==1.8.2
-Bottleneck==1.4.2
-branca==0.8.1
-build==1.2.2.post1
-CacheControl==0.14.2
-cachelib==0.9.0
-cachetools==5.5.0
-celery==5.4.0
-certifi==2025.1.31
-cffi==1.17.1
-charset-normalizer==3.4.1
-chroma-hnswlib==0.7.6
-chromadb==0.6.3
-cleo==2.1.0
-click==8.1.8
-click-didyoumean==0.3.1
-click-plugins==1.1.1
-click-repl==0.3.0
-clickclick==20.10.2
-colorama==0.4.6
-coloredlogs==15.0.1
-colorlog==6.9.0
-comm==0.2.2
-ConfigUpdater==3.2
-connexion==2.14.2
-contourpy==1.3.1
-crashtest==0.4.1
-cron-descriptor==1.4.5
-croniter==6.0.0
-cryptography==42.0.8
-cycler==0.12.1
-dataclasses-json==0.6.7
-debugpy==1.8.13
-decorator==5.2.1
-Deprecated==1.2.18
-deprecation==2.1.0
-dill==0.3.1.1
-dirtyjson==1.0.8
-distlib==0.3.9
-distro==1.9.0
-dnspython==2.6.1
-dulwich==0.22.8
-durationpy==0.9
-email_validator==2.2.0
-et_xmlfile==2.0.0
-executing==2.2.0
-Faker==36.1.1
-fastapi==0.115.12
-fastjsonschema==2.21.1
-favicon==0.7.0
-ffmpy==0.5.0
-filelock==3.18.0
-filetype==1.2.0
-findpython==0.6.3
-firebase-admin==6.6.0
-Flask==2.2.5
-Flask-AppBuilder==4.5.0
-Flask-Babel==2.0.0
-Flask-Caching==2.3.0
-Flask-JWT-Extended==4.6.0
-Flask-Limiter==3.8.0
-Flask-Login==0.6.3
-Flask-Session==0.5.0
-Flask-SQLAlchemy==2.5.1
-Flask-WTF==1.2.1
-flatbuffers==25.2.10
-flower==2.0.1
-folium==0.14.0
-fonttools==4.56.0
-fpdf==1.7.2
-frozenlist==1.5.0
-fsspec==2024.10.0
-geopandas==1.0.1
-gitdb==4.0.12
-GitPython==3.1.44
-google-ai-generativelanguage==0.6.15
-google-api-core==2.24.0
-google-api-python-client==2.158.0
-google-auth==2.37.0
-google-auth-httplib2==0.2.0
-google-auth-oauthlib==1.2.1
-google-cloud-core==2.4.1
-google-cloud-firestore==2.19.0
-google-cloud-secret-manager==2.22.0
-google-cloud-storage==2.19.0
-google-crc32c==1.6.0
-google-generativeai==0.8.4
-google-re2==1.1.20240702
-google-resumable-media==2.7.2
-googleapis-common-protos==1.66.0
-gotrue==2.12.0
-gradio==5.8.0
-gradio_client==1.5.1
-greenlet==3.1.1
-griffe==1.7.1
-grpc-google-iam-v1==0.14.0
-grpcio==1.65.5
-grpcio-status==1.69.0
-gspread==6.2.0
-gunicorn==23.0.0
-h11==0.14.0
-h2==4.2.0
-hpack==4.1.0
-htbuilder==0.6.1
-htmlmin==0.1.12
-httpcore==1.0.7
-httplib2==0.22.0
-httptools==0.6.4
-httpx==0.27.0
-httpx-sse==0.4.0
-huggingface-hub==0.29.3
-humanfriendly==10.0
-humanize==4.10.0
-hyperframe==6.1.0
-ibm-cos-sdk==2.14.0
-ibm-cos-sdk-core==2.14.0
-ibm-cos-sdk-s3transfer==2.14.0
-ibm_watsonx_ai==1.3.3
-idna==3.10
-ImageHash==4.3.2
-importlib-metadata==6.11.0
-importlib_resources==6.4.5
-inflection==0.5.1
-iniconfig==2.1.0
-installer==0.7.0
-ipykernel==6.29.5
-ipython==9.0.1
-ipython_pygments_lexers==1.1.1
-itsdangerous==2.2.0
-jaraco.classes==3.4.0
-jaraco.context==6.0.1
-jaraco.functools==4.1.0
-jedi==0.19.2
-Jinja2==3.1.5
-jmespath==0.10.0
-joblib==1.4.2
-jsonpatch==1.33
-jsonpointer==3.0.0
-jsonschema==4.23.0
-jsonschema-specifications==2023.12.1
-jupyter_client==8.6.3
-jupyter_core==5.7.2
-keyring==25.6.0
-kiwisolver==1.4.8
-kombu==5.4.2
-kubernetes==32.0.1
-langchain==0.3.21
-langchain-chroma==0.2.3
-langchain-community==0.3.20
-langchain-core==0.3.54
-langchain-google-genai==2.1.2
-langchain-huggingface==0.1.2
-langchain-ibm==0.3.8
-langchain-pinecone==0.2.5
-langchain-tests==0.3.19
-langchain-text-splitters==0.3.7
-langgraph==0.3.34
-langgraph-checkpoint==2.0.25
-langgraph-prebuilt==0.1.8
-langgraph-sdk==0.1.63
-langsmith==0.3.19
-lazy-object-proxy==1.10.0
-limits==3.13.0
-linkify-it-py==2.0.3
-llama-index-core==0.12.27
-llama-index-llms-ibm==0.3.3
-lockfile==0.12.2
-lomond==0.3.3
-lxml==5.3.1
-Mako==1.3.8
-Markdown==3.7
-markdown-it-py==3.0.0
-markdownlit==0.0.7
-MarkupSafe==2.1.5
-marshmallow==3.22.0
-marshmallow-oneofschema==3.1.1
-marshmallow-sqlalchemy==0.28.2
-matplotlib==3.10.1
-matplotlib-inline==0.1.7
-mdit-py-plugins==0.4.2
-mdurl==0.1.2
-methodtools==0.4.7
-missingno==0.5.2
-mmh3==5.1.0
-monotonic==1.6
-more-itertools==10.5.0
-mpmath==1.3.0
-msgpack==1.1.0
-multidict==6.1.0
-multimethod==1.4
-mypy-extensions==1.0.0
-mysql-connector==2.2.9
-narwhals==1.22.0
-nest-asyncio==1.6.0
-networkx==3.4.2
-nltk==3.9.1
-numerize==0.12
-numpy==2.2.1
-oauth2client==4.1.3
-oauthlib==3.2.2
-onnxruntime==1.20.1
-openpyxl==3.1.2
-opentelemetry-api==1.27.0
-opentelemetry-exporter-otlp==1.27.0
-opentelemetry-exporter-otlp-proto-common==1.27.0
-opentelemetry-exporter-otlp-proto-grpc==1.27.0
-opentelemetry-exporter-otlp-proto-http==1.27.0
-opentelemetry-instrumentation==0.48b0
-opentelemetry-instrumentation-asgi==0.48b0
-opentelemetry-instrumentation-fastapi==0.48b0
-opentelemetry-proto==1.27.0
-opentelemetry-sdk==1.27.0
-opentelemetry-semantic-conventions==0.48b0
-opentelemetry-util-http==0.48b0
-ordered-set==4.1.0
-orjson==3.10.16
-ormsgpack==1.9.1
-overrides==7.7.0
-packaging==24.2
-pandas==2.2.3
-pandas-profiling==3.0.0
-parso==0.8.4
-pathspec==0.12.1
-patsy==1.0.1
-pbs-installer==2025.4.9
-pendulum==3.0.0
-phik==0.12.4
-pillow==11.1.0
-pinecone==6.0.2
-pinecone-client==6.0.0
-pinecone-plugin-interface==0.0.7
-pkginfo==1.12.1.2
-platformdirs==4.3.6
-plotly==5.14.1
-plotly-express==0.4.1
-pluggy==1.5.0
-poetry==2.1.3
-poetry-core==2.1.3
-postgrest==1.0.1
-posthog==3.23.0
-prison==0.2.1
-prometheus_client==0.21.1
-prompt_toolkit==3.0.50
-propcache==0.2.0
-proto-plus==1.25.0
-protobuf==4.25.6
-psutil==6.1.1
-psycopg2==2.9.10
-psycopg2-binary==2.9.10
-pure_eval==0.2.3
-pyarrow==18.1.0
-pyasn1==0.6.1
-pyasn1_modules==0.4.1
-pycparser==2.22
-pydantic==2.10.6
-pydantic-settings==2.8.1
-pydantic_core==2.27.2
-pydeck==0.9.1
-pydub==0.25.1
-Pygments==2.19.1
-PyJWT==2.9.0
-pymdown-extensions==10.14.3
-pyogrio==0.10.0
-pyparsing==3.2.1
-pypdf==5.4.0
-PyPDF2==3.0.1
-PyPika==0.48.9
-pyproj==3.7.1
-pyproject_hooks==1.2.0
-pyprojroot==0.3.0
-pyreadline3==3.5.4
-pytest==8.3.5
-pytest-asyncio==0.26.0
-pytest-mock==3.14.0
-pytest-socket==0.7.0
-python-daemon==3.1.2
-python-dateutil==2.9.0.post0
-python-decouple==3.8
-python-dotenv==1.0.1
-python-multipart==0.0.20
-python-nvd3==0.16.0
-python-slugify==8.0.4
-pytz==2025.1
-PyWavelets==1.8.0
-pywin32==308
-pywin32-ctypes==0.2.3
-PyYAML==6.0.2
-pyzmq==26.2.1
-RapidFuzz==3.13.0
-realtime==2.4.2
-redis==5.2.1
-referencing==0.35.1
-regex==2024.11.6
-requests==2.32.3
-requests-oauthlib==2.0.0
-requests-toolbelt==1.0.0
-rfc3339-validator==0.1.4
-rich==13.9.4
-rich-argparse==1.6.0
-rpds-py==0.20.1
-rsa==4.9
-ruff==0.11.2
-safehttpx==0.1.6
-safetensors==0.5.3
-scikit-learn==1.6.1
-scipy==1.15.2
-seaborn==0.13.2
-semantic-version==2.10.0
-sentence-transformers==4.0.1
-setproctitle==1.3.4
-shapely==2.1.0
-shellingham==1.5.4
-six==1.17.0
-smmap==5.0.2
-sniffio==1.3.1
-soupsieve==2.6
-SQLAlchemy==1.4.54
-SQLAlchemy-JSONField==1.0.2
-SQLAlchemy-Utils==0.41.2
-sqlparse==0.5.3
-st-annotated-text==4.0.2
-stack-data==0.6.3
-starlette==0.46.1
-statsmodels==0.14.4
-storage3==0.11.3
-streamlit==1.41.1
-streamlit-aggrid==1.1.2
-streamlit-apexjs==0.0.3
-streamlit-camera-input-live==0.2.0
-streamlit-card==0.0.4
-streamlit-cookies-manager==0.2.0
-streamlit-elements==0.1.0
-streamlit-embedcode==0.1.2
-streamlit-extras==0.2.7
-streamlit-faker==0.0.3
-streamlit-folium==0.15.0
-streamlit-image-coordinates==0.1.9
-streamlit-keyup==0.3.0
-streamlit-option-menu==0.3.2
-streamlit-pandas-profiling==0.1.3
-streamlit-toggle-switch==1.0.2
-streamlit-vertical-slider==2.5.5
-StrEnum==0.4.15
-supabase==2.15.0
-supafunc==0.9.4
-sympy==1.13.1
-syrupy==4.9.1
-tabulate==0.9.0
-tangled-up-in-unicode==0.1.0
-tenacity==8.5.0
-termcolor==2.4.0
-text-unidecode==1.3
-threadpoolctl==3.6.0
-tiktoken==0.9.0
-time-machine==2.15.0
-tokenizers==0.21.1
-toml==0.10.2
-tomlkit==0.13.2
-torch==2.6.0
-tornado==6.4.2
-tqdm==4.67.1
-traitlets==5.14.3
-transformers==4.50.3
-trove-classifiers==2025.5.9.12
-typer==0.15.2
-typing-inspect==0.9.0
-typing_extensions==4.12.2
-tzdata==2025.1
-uc-micro-py==1.0.3
-universal_pathlib==0.2.6
-uritemplate==4.1.1
-urllib3==1.26.20
-uvicorn==0.34.0
-vine==5.1.0
-virtualenv==20.31.2
-visions==0.7.1
-watchdog==6.0.0
-watchfiles==1.0.4
-wcwidth==0.2.13
-websocket-client==1.8.0
-websockets==14.2
-Werkzeug==2.2.3
-wirerope==1.0.0
-wrapt==1.17.2
-WTForms==3.1.2
-xxhash==3.5.0
-yarl==1.15.2
-zipp==3.20.2
-zstandard==0.23.0
+aiohappyeyeballs==2.6.1 ; python_full_version == "3.11.9"
+aiohttp==3.11.18 ; python_full_version == "3.11.9"
+aiosignal==1.3.2 ; python_full_version == "3.11.9"
+altair==5.5.0 ; python_full_version == "3.11.9"
+annotated-types==0.7.0 ; python_full_version == "3.11.9"
+anyio==4.9.0 ; python_full_version == "3.11.9"
+asttokens==3.0.0 ; python_full_version == "3.11.9"
+attrs==25.3.0 ; python_full_version == "3.11.9"
+blinker==1.9.0 ; python_full_version == "3.11.9"
+branca==0.8.1 ; python_full_version == "3.11.9"
+cachecontrol==0.14.3 ; python_full_version == "3.11.9"
+cachetools==5.5.2 ; python_full_version == "3.11.9"
+certifi==2025.4.26 ; python_full_version == "3.11.9"
+cffi==1.17.1 ; python_full_version == "3.11.9"
+charset-normalizer==3.4.2 ; python_full_version == "3.11.9"
+click==8.2.1 ; python_full_version == "3.11.9"
+colorama==0.4.6 ; (platform_system == "Windows" or sys_platform == "win32") and python_full_version == "3.11.9"
+cryptography==45.0.2 ; python_full_version == "3.11.9"
+dataclasses-json==0.6.7 ; python_full_version == "3.11.9"
+decorator==5.2.1 ; python_full_version == "3.11.9"
+deprecation==2.1.0 ; python_full_version == "3.11.9"
+executing==2.2.0 ; python_full_version == "3.11.9"
+filetype==1.2.0 ; python_full_version == "3.11.9"
+firebase-admin==6.6.0 ; python_full_version == "3.11.9"
+folium==0.14.0 ; python_full_version == "3.11.9"
+frozenlist==1.6.0 ; python_full_version == "3.11.9"
+geopandas==1.0.1 ; python_full_version == "3.11.9"
+gitdb==4.0.12 ; python_full_version == "3.11.9"
+gitpython==3.1.44 ; python_full_version == "3.11.9"
+google-ai-generativelanguage==0.6.18 ; python_full_version == "3.11.9"
+google-api-core==2.24.2 ; python_full_version == "3.11.9"
+google-api-python-client==2.169.0 ; python_full_version == "3.11.9"
+google-auth-httplib2==0.2.0 ; python_full_version == "3.11.9"
+google-auth-oauthlib==1.2.2 ; python_full_version == "3.11.9"
+google-auth==2.40.1 ; python_full_version == "3.11.9"
+google-cloud-core==2.4.3 ; python_full_version == "3.11.9"
+google-cloud-firestore==2.20.2 ; python_full_version == "3.11.9" and platform_python_implementation != "PyPy"
+google-cloud-storage==3.1.0 ; python_full_version == "3.11.9"
+google-crc32c==1.7.1 ; python_full_version == "3.11.9"
+google-resumable-media==2.7.2 ; python_full_version == "3.11.9"
+googleapis-common-protos==1.70.0 ; python_full_version == "3.11.9"
+gotrue==2.12.0 ; python_full_version == "3.11.9"
+greenlet==3.2.2 ; python_full_version == "3.11.9" and (platform_machine == "aarch64" or platform_machine == "ppc64le" or platform_machine == "x86_64" or platform_machine == "amd64" or platform_machine == "AMD64" or platform_machine == "win32" or platform_machine == "WIN32")
+grpcio-status==1.71.0 ; python_full_version == "3.11.9"
+grpcio==1.71.0 ; python_full_version == "3.11.9"
+gspread==6.2.0 ; python_full_version == "3.11.9"
+h11==0.16.0 ; python_full_version == "3.11.9"
+h2==4.2.0 ; python_full_version == "3.11.9"
+hpack==4.1.0 ; python_full_version == "3.11.9"
+httpcore==1.0.9 ; python_full_version == "3.11.9"
+httplib2==0.22.0 ; python_full_version == "3.11.9"
+httpx-sse==0.4.0 ; python_full_version == "3.11.9"
+httpx==0.28.1 ; python_full_version == "3.11.9"
+hyperframe==6.1.0 ; python_full_version == "3.11.9"
+idna==3.10 ; python_full_version == "3.11.9"
+iniconfig==2.1.0 ; python_full_version == "3.11.9"
+ipython-pygments-lexers==1.1.1 ; python_full_version == "3.11.9"
+ipython==9.0.1 ; python_full_version == "3.11.9"
+jedi==0.19.2 ; python_full_version == "3.11.9"
+jinja2==3.1.6 ; python_full_version == "3.11.9"
+jsonpatch==1.33 ; python_full_version == "3.11.9"
+jsonpointer==3.0.0 ; python_full_version == "3.11.9"
+jsonschema-specifications==2025.4.1 ; python_full_version == "3.11.9"
+jsonschema==4.23.0 ; python_full_version == "3.11.9"
+langchain-community==0.3.20 ; python_full_version == "3.11.9"
+langchain-core==0.3.60 ; python_full_version == "3.11.9"
+langchain-google-genai==2.1.4 ; python_full_version == "3.11.9"
+langchain-text-splitters==0.3.8 ; python_full_version == "3.11.9"
+langchain==0.3.21 ; python_full_version == "3.11.9"
+langgraph-checkpoint==2.0.26 ; python_full_version == "3.11.9"
+langgraph-prebuilt==0.1.8 ; python_full_version == "3.11.9"
+langgraph-sdk==0.1.69 ; python_full_version == "3.11.9"
+langgraph==0.3.34 ; python_full_version == "3.11.9"
+langsmith==0.3.42 ; python_full_version == "3.11.9"
+markdown-it-py==3.0.0 ; python_full_version == "3.11.9"
+markupsafe==3.0.2 ; python_full_version == "3.11.9"
+marshmallow==3.26.1 ; python_full_version == "3.11.9"
+matplotlib-inline==0.1.7 ; python_full_version == "3.11.9"
+mdurl==0.1.2 ; python_full_version == "3.11.9"
+msgpack==1.1.0 ; python_full_version == "3.11.9"
+multidict==6.4.4 ; python_full_version == "3.11.9"
+mypy-extensions==1.1.0 ; python_full_version == "3.11.9"
+narwhals==1.40.0 ; python_full_version == "3.11.9"
+numpy==2.2.6 ; python_full_version == "3.11.9"
+oauth2client==4.1.3 ; python_full_version == "3.11.9"
+oauthlib==3.2.2 ; python_full_version == "3.11.9"
+orjson==3.10.18 ; python_full_version == "3.11.9"
+ormsgpack==1.9.1 ; python_full_version == "3.11.9"
+packaging==24.2 ; python_full_version == "3.11.9"
+pandas==2.2.3 ; python_full_version == "3.11.9"
+parso==0.8.4 ; python_full_version == "3.11.9"
+pexpect==4.9.0 ; python_full_version == "3.11.9" and sys_platform != "win32" and sys_platform != "emscripten"
+pillow==11.2.1 ; python_full_version == "3.11.9"
+plotly==5.14.1 ; python_full_version == "3.11.9"
+pluggy==1.6.0 ; python_full_version == "3.11.9"
+postgrest==1.0.1 ; python_full_version == "3.11.9"
+prompt-toolkit==3.0.51 ; python_full_version == "3.11.9"
+propcache==0.3.1 ; python_full_version == "3.11.9"
+proto-plus==1.26.1 ; python_full_version == "3.11.9"
+protobuf==5.29.4 ; python_full_version == "3.11.9"
+psycopg2-binary==2.9.10 ; python_full_version == "3.11.9"
+ptyprocess==0.7.0 ; python_full_version == "3.11.9" and sys_platform != "win32" and sys_platform != "emscripten"
+pure-eval==0.2.3 ; python_full_version == "3.11.9"
+pyarrow==20.0.0 ; python_full_version == "3.11.9"
+pyasn1-modules==0.4.2 ; python_full_version == "3.11.9"
+pyasn1==0.6.1 ; python_full_version == "3.11.9"
+pycparser==2.22 ; python_full_version == "3.11.9"
+pydantic-core==2.27.2 ; python_full_version == "3.11.9"
+pydantic-settings==2.9.1 ; python_full_version == "3.11.9"
+pydantic==2.10.6 ; python_full_version == "3.11.9"
+pydeck==0.9.1 ; python_full_version == "3.11.9"
+pygments==2.19.1 ; python_full_version == "3.11.9"
+pyjwt==2.10.1 ; python_full_version == "3.11.9"
+pyogrio==0.11.0 ; python_full_version == "3.11.9"
+pyparsing==3.2.3 ; python_full_version == "3.11.9"
+pyproj==3.7.1 ; python_full_version == "3.11.9"
+pyprojroot==0.3.0 ; python_full_version == "3.11.9"
+pytest-mock==3.14.0 ; python_full_version == "3.11.9"
+pytest==8.3.5 ; python_full_version == "3.11.9"
+python-dateutil==2.9.0.post0 ; python_full_version == "3.11.9"
+python-dotenv==1.0.1 ; python_full_version == "3.11.9"
+pytz==2025.2 ; python_full_version == "3.11.9"
+pyyaml==6.0.2 ; python_full_version == "3.11.9"
+realtime==2.4.3 ; python_full_version == "3.11.9"
+referencing==0.36.2 ; python_full_version == "3.11.9"
+requests-oauthlib==2.0.0 ; python_full_version == "3.11.9"
+requests-toolbelt==1.0.0 ; python_full_version == "3.11.9"
+requests==2.32.3 ; python_full_version == "3.11.9"
+rich==13.9.4 ; python_full_version == "3.11.9"
+rpds-py==0.25.0 ; python_full_version == "3.11.9"
+rsa==4.9.1 ; python_full_version == "3.11.9"
+shapely==2.1.1 ; python_full_version == "3.11.9"
+six==1.17.0 ; python_full_version == "3.11.9"
+smmap==5.0.2 ; python_full_version == "3.11.9"
+sniffio==1.3.1 ; python_full_version == "3.11.9"
+sqlalchemy==1.4.54 ; python_full_version == "3.11.9"
+stack-data==0.6.3 ; python_full_version == "3.11.9"
+storage3==0.11.3 ; python_full_version == "3.11.9"
+streamlit-cookies-manager==0.2.0 ; python_full_version == "3.11.9"
+streamlit-folium==0.15.0 ; python_full_version == "3.11.9"
+streamlit-option-menu==0.3.2 ; python_full_version == "3.11.9"
+streamlit==1.41.1 ; python_full_version == "3.11.9"
+strenum==0.4.15 ; python_full_version == "3.11.9"
+supabase==2.15.0 ; python_full_version == "3.11.9"
+supafunc==0.9.4 ; python_full_version == "3.11.9"
+tenacity==9.1.2 ; python_full_version == "3.11.9"
+toml==0.10.2 ; python_full_version == "3.11.9"
+tornado==6.5 ; python_full_version == "3.11.9"
+traitlets==5.14.3 ; python_full_version == "3.11.9"
+typing-extensions==4.13.2 ; python_full_version == "3.11.9"
+typing-inspect==0.9.0 ; python_full_version == "3.11.9"
+typing-inspection==0.4.0 ; python_full_version == "3.11.9"
+tzdata==2025.2 ; python_full_version == "3.11.9"
+uritemplate==4.1.1 ; python_full_version == "3.11.9"
+urllib3==2.4.0 ; python_full_version == "3.11.9"
+watchdog==6.0.0 ; python_full_version == "3.11.9" and platform_system != "Darwin"
+wcwidth==0.2.13 ; python_full_version == "3.11.9"
+websockets==14.2 ; python_full_version == "3.11.9"
+xxhash==3.5.0 ; python_full_version == "3.11.9"
+yarl==1.20.0 ; python_full_version == "3.11.9"
+zstandard==0.23.0 ; python_full_version == "3.11.9"

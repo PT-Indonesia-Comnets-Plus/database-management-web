@@ -96,16 +96,3 @@ def app(user_data_service: UserDataService):
     st.divider()
     st.subheader("Further Analysis (Placeholder)")
     st.info("More interactive charts and data tables can be added here, e.g., user demographics, content engagement, etc.")
-
-    # Example: User table with search/filter (if UserDataService supports it)
-    # with st.expander("View All Users (Sample - Requires Data Fetching Logic)"):
-    #     try:
-    #         all_users_for_table = user_data_service.get_users_for_table_display() # Assuming such a method
-    #         if not all_users_for_table.empty:
-    #             st.dataframe(all_users_for_table)
-    #         else:
-    #             st.write("No user data to display in table.")
-    #     except AttributeError:
-    #         st.write("Functionality to display all users in a table is not yet implemented in UserDataService.")
-    #     except Exception as e:
-    #         st.error(f"Could not load user table: {e}")
