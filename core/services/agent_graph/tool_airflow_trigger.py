@@ -1,105 +1,117 @@
-# c:\Users\rizky\OneDrive\Dokumen\GitHub\intern-iconnet\core\services\agent_graph\tool_airflow_trigger.py
 import streamlit as st
 import time
 import json
-import requests  # Untuk berinteraksi dengan Airflow API
+import requests
 from typing import Dict, Optional
 from langchain_core.tools import tool
 import logging
 
 logger = logging.getLogger(__name__)
 
-# Konfigurasi Airflow API (sebaiknya disimpan di st.secrets atau config file)
-# Anda mungkin perlu mengaktifkan Basic Auth atau metode autentikasi lain di Airflow
-AIRFLOW_BASE_URL = st.secrets.get("airflow", {}).get(
-    "base_url", "http://localhost:8080")  # Contoh: http://your-airflow-webserver:8080
-AIRFLOW_USERNAME = st.secrets.get("airflow", {}).get("username", "airflow")
-AIRFLOW_PASSWORD = st.secrets.get("airflow", {}).get("password", "airflow")
+# Konfigurasi Airflow API dari secrets dengan fallback yang robust
 
-# Pastikan ini adalah ID DAG yang benar dan task ID serta key XCom yang mengirimkan hasil
-# DAG ID yang sudah dikonfirmasi ada di Airflow
+
+def _get_airflow_config():
+    """Get Airflow configuration with robust fallback handling"""
+    try:
+        # Try to get from streamlit secrets first
+        airflow_config = st.secrets.get("airflow", {})
+        return {
+            "base_url": airflow_config.get("base_url", "http://localhost:8080"),
+            "username": airflow_config.get("username", "admin"),
+            "password": airflow_config.get("password", "admin123")
+        }
+    except Exception as e:
+        # Fallback to default configuration if streamlit secrets not available
+        logger.warning(
+            f"Unable to load streamlit secrets, using fallback config: {e}")
+        return {
+            "base_url": "http://localhost:8080",
+            "username": "admin",
+            "password": "admin123"
+        }
+
+
+# Get configuration
+_config = _get_airflow_config()
+AIRFLOW_BASE_URL = _config["base_url"]
+AIRFLOW_USERNAME = _config["username"]
+AIRFLOW_PASSWORD = _config["password"]
+
+# DAG dan task configuration
 ETL_DAG_ID = "iconnet_data_pipeline"
-# Ganti dengan task_id yang mengirim XCom di DAG Anda (misalnya, 'load_and_report')
-XCOM_TASK_ID = "load_and_report"
+XCOM_TASK_ID = "load"
 XCOM_KEY = "new_data_count"
 
+# Cache untuk JWT token
+_jwt_token_cache = {"token": None, "expires_at": 0}
 
-def _get_airflow_token(retry_count=0, max_retries=2):
-    """Get JWT token for Airflow API authentication with retry logic."""
+
+def _get_jwt_token() -> Optional[str]:
+    """Mendapatkan JWT token dari Airflow untuk Bearer authentication."""
+    current_time = time.time()
+
+    # Gunakan cached token jika masih valid (dengan margin 60 detik)
+    if _jwt_token_cache["token"] and current_time < (_jwt_token_cache["expires_at"] - 60):
+        logger.info("Using cached JWT token")
+        return _jwt_token_cache["token"]
+
+    logger.info("Getting new JWT token from Airflow")
+
+    # Endpoint untuk mendapatkan JWT token di Airflow 3.0
     token_url = f"{AIRFLOW_BASE_URL}/auth/token"
+
     payload = {
         "username": AIRFLOW_USERNAME,
         "password": AIRFLOW_PASSWORD
     }
 
-    logger.info(
-        f"Requesting JWT token from: {token_url} (attempt {retry_count + 1}/{max_retries + 1})")
-    logger.info(f"Using username: {AIRFLOW_USERNAME}")
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+    }
 
     try:
-        response = requests.post(token_url, json=payload, timeout=15)
-        logger.info(f"Token request response status: {response.status_code}")
+        response = requests.post(
+            token_url, json=payload, headers=headers, timeout=30)
 
-        if response.status_code == 200 or response.status_code == 201:
+        logger.info(f"Token request status: {response.status_code}")
+
+        # Accept both 200 and 201 status codes
+        if response.status_code in [200, 201]:
             token_data = response.json()
-            access_token = token_data.get("access_token")
+            token = token_data.get("access_token")
 
-            if access_token:
-                logger.info(
-                    f"JWT token obtained successfully (length: {len(access_token)})")
-                # Log first 20 chars for debugging (safe portion)
-                logger.debug(f"Token starts with: {access_token[:20]}...")
-                return access_token
+            if token:
+                # Cache token dengan expiry time (biasanya 1 jam, kita set 50 menit untuk safety)
+                _jwt_token_cache["token"] = token
+                _jwt_token_cache["expires_at"] = current_time + \
+                    (50 * 60)  # 50 minutes
+                logger.info("Successfully obtained JWT token")
+                return token
             else:
                 logger.error("No access_token in response")
-                logger.error(f"Token response data: {token_data}")
+                return None
+        else:
+            logger.error(
+                f"Failed to get JWT token: {response.status_code} - {response.text}")
+            return None
 
-        # If we get here, the response was not successful
-        logger.error(
-            f"Token request failed with status {response.status_code}")
-        logger.error(f"Response text: {response.text}")
-
-        # Retry logic for certain errors
-        if retry_count < max_retries and response.status_code in [500, 502, 503, 504]:
-            logger.info(
-                f"Retrying token request due to server error (attempt {retry_count + 1})")
-            import time
-            time.sleep(2)  # Wait 2 seconds before retry
-            return _get_airflow_token(retry_count + 1, max_retries)
-
-        return None
-
-    except requests.exceptions.RequestException as req_err:
-        logger.error(f"Request exception getting Airflow token: {req_err}")
-
-        # Retry for network-related errors
-        if retry_count < max_retries:
-            logger.info(
-                f"Retrying token request due to network error (attempt {retry_count + 1})")
-            import time
-            time.sleep(2)
-            return _get_airflow_token(retry_count + 1, max_retries)
-
-        return None
-    except Exception as e:
-        logger.error(f"Unexpected error getting Airflow token: {e}")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error getting JWT token: {e}")
         return None
 
 
 def _make_airflow_api_request(method: str, endpoint: str, payload: Optional[Dict] = None) -> Optional[Dict]:
-    """Helper untuk membuat request ke Airflow API dengan JWT authentication."""
-    logger.info(f"Making Airflow API request: {method} {endpoint}")
-
-    # Get JWT token
-    token = _get_airflow_token()
+    """Helper untuk membuat request ke Airflow API dengan Bearer token authentication."""
+    logger.info(
+        f"Making Airflow API request: {method} {endpoint}")    # Dapatkan JWT token
+    token = _get_jwt_token()
     if not token:
-        logger.error(
-            "Cannot proceed with API request - no JWT token available")
-        return {"error": "Failed to authenticate with Airflow - could not get JWT token"}
-
-    logger.info("JWT token obtained for API request")
+        return {"error": "Failed to obtain JWT token for Airflow authentication"}
 
     url = f"{AIRFLOW_BASE_URL}/api/v2/{endpoint.lstrip('/')}"
+
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json",
@@ -107,8 +119,7 @@ def _make_airflow_api_request(method: str, endpoint: str, payload: Optional[Dict
     }
 
     logger.info(f"Airflow API Request: {method} {url}")
-    logger.debug(
-        f"Headers (auth redacted): {{'Content-Type': 'application/json', 'Accept': 'application/json', 'Authorization': 'Bearer [REDACTED]'}}")
+    logger.debug(f"Headers: {headers}")
     logger.debug(f"Payload: {payload}")
 
     try:
@@ -116,8 +127,10 @@ def _make_airflow_api_request(method: str, endpoint: str, payload: Optional[Dict
             response = requests.post(
                 url, headers=headers, json=payload, timeout=30)
         elif method.upper() == "GET":
-            response = requests.get(
-                url, headers=headers, timeout=30)
+            response = requests.get(url, headers=headers, timeout=30)
+        elif method.upper() == "PATCH":
+            response = requests.patch(
+                url, headers=headers, json=payload, timeout=30)
         else:
             logger.error(f"Unsupported HTTP method: {method}")
             return {"error": f"Unsupported HTTP method: {method}"}
@@ -129,8 +142,11 @@ def _make_airflow_api_request(method: str, endpoint: str, payload: Optional[Dict
                 "401 Unauthorized - JWT token may be invalid or expired")
             logger.error(f"Response headers: {dict(response.headers)}")
             logger.error(f"Response body: {response.text}")
+            # Clear cached token untuk retry
+            _jwt_token_cache["token"] = None
+            _jwt_token_cache["expires_at"] = 0
 
-        response.raise_for_status()  # Raise HTTPError untuk status 4xx/5xx
+        response.raise_for_status()
         return response.json()
 
     except requests.exceptions.HTTPError as http_err:
@@ -152,142 +168,340 @@ def _make_airflow_api_request(method: str, endpoint: str, payload: Optional[Dict
         return {"error": "Failed to decode JSON response from Airflow API."}
 
 
-@tool
-def trigger_spreadsheet_etl_and_get_summary() -> str:
-    """
-    Memicu pipeline ETL dan mengembalikan ringkasan. Utamanya untuk data spreadsheet,
-    tetapi juga merupakan tool utama untuk menjalankan permintaan ETL pipeline secara umum.
+def _diagnose_airflow_connection() -> Dict:
+    """Diagnostic function to test Airflow connection and provide detailed info"""
+    diagnosis = {
+        "airflow_server": "unknown",
+        "authentication": "unknown",
+        "api_version": "unknown",
+        "dags_available": 0,
+        "target_dag_exists": False,
+        "recommendations": []
+    }
 
-    Fungsi utama:
-    - Menjalankan pipeline ETL yang dikonfigurasi di Airflow.
-    - Memproses data (seringkali dari spreadsheet, tapi bisa juga sumber lain jika pipeline dikonfigurasi demikian).
-    - Mengembalikan ringkasan hasil, seperti jumlah data baru yang diproses.
+    # Test JWT authentication first (which also tests server connectivity)
+    token = _get_jwt_token()
+    if token:
+        diagnosis["authentication"] = "jwt_success"
+        diagnosis["airflow_server"] = "reachable"
+    else:
+        diagnosis["authentication"] = "jwt_failed"
+        diagnosis["airflow_server"] = "unreachable"
+        diagnosis["recommendations"].append(
+            "Check if Airflow server is running and accessible")
+        diagnosis["recommendations"].append(
+            "Check Airflow username/password credentials")    # Test API version and DAG availability
+    if token:
+        try:
+            # Get Airflow version
+            version_response = _make_airflow_api_request("GET", "version")
+            if version_response and "version" in version_response:
+                # List DAGs
+                diagnosis["api_version"] = version_response["version"]
+            dags_response = _make_airflow_api_request("GET", "dags")
+            if dags_response and "dags" in dags_response:
+                diagnosis["dags_available"] = len(dags_response["dags"])
 
-    GUNAKAN TOOL INI KETIKA USER MEMINTA:
-    ✅ Untuk "menjalankan ETL pipeline saya" atau "run my ETL pipeline".
-    ✅ Untuk "menjalankan ETL" atau "run ETL".
-    ✅ Untuk memproses data dari spreadsheet ("process spreadsheet", "update from excel").
-    ✅ Untuk mendapatkan ringkasan data baru dari spreadsheet ("new data from sheet").
-    ✅ Query umum terkait "ETL", "data pipeline" yang perlu dijalankan.
+            # Check for target DAG directly (more reliable than listing)
+            target_dag_response = _make_airflow_api_request(
+                "GET", f"dags/{ETL_DAG_ID}")
+            if target_dag_response and "dag_id" in target_dag_response:
+                diagnosis["target_dag_exists"] = True
+                # Check DAG status
+                if not target_dag_response.get("is_active", False):
+                    diagnosis["recommendations"].append(
+                        f"DAG '{ETL_DAG_ID}' found but not active - may need to be triggered first")
+                if target_dag_response.get("is_paused", True):
+                    diagnosis["recommendations"].append(
+                        f"DAG '{ETL_DAG_ID}' is paused - will auto-unpause during execution")
+            else:
+                diagnosis["target_dag_exists"] = False
+                diagnosis["recommendations"].append(
+                    f"Deploy DAG '{ETL_DAG_ID}' to Airflow")
 
-    JANGAN GUNAKAN UNTUK:
-    ❌ Query data yang sudah ada di database (gunakan `query_asset_database`).
-    ❌ Pencarian informasi umum (gunakan `search_internal_documents` atau `TavilySearchResults`).
-    ❌ Pembuatan visualisasi secara langsung tanpa menjalankan ETL (gunakan `create_visualization` setelah data ada).
+        except Exception as e:
+            diagnosis["recommendations"].append(f"API test failed: {str(e)}")
 
-    Tool ini akan berinteraksi dengan Airflow untuk menjalankan DAG yang relevan.
-    """
+    return diagnosis
+
+
+def _trigger_dag(dag_id: str, conf: Optional[Dict] = None) -> Dict:
+    """Trigger DAG dan return execution info."""
     logger.info(
-        f"Running tool: trigger_spreadsheet_etl_and_get_summary for DAG '{ETL_DAG_ID}'")    # 1. Memicu DAG
-    import datetime
-    # Generate unique DAG run ID with timestamp
-    dag_run_id = f"chatbot_trigger_{int(time.time())}"
-
-    # Create logical_date in ISO format (required by Airflow API v2)
-    logical_date = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        f"Attempting to trigger DAG: {dag_id}")    # Payload untuk trigger DAG with required logical_date
+    from datetime import datetime
 
     trigger_payload = {
-        "dag_run_id": dag_run_id,
-        "logical_date": logical_date,
-        # Konfigurasi opsional
-        "conf": {"source_trigger": "chatbot_request", "timestamp": time.time()}
+        "conf": conf or {},
+        "dag_run_id": f"manual__{int(time.time())}",
+        "logical_date": datetime.utcnow().isoformat() + "Z"
     }
-    trigger_response = _make_airflow_api_request(
-        "POST", f"dags/{ETL_DAG_ID}/dagRuns", payload=trigger_payload)
 
-    if not trigger_response or "error" in trigger_response:
-        logger.error(
-            f"Failed to trigger DAG '{ETL_DAG_ID}'. Response: {trigger_response}")
-        error_msg = trigger_response.get('details', {}).get('detail', trigger_response.get(
-            'error', 'Unknown error')) if trigger_response else "No response"        # Check if it's a connection or method error (Airflow not available)
-        if trigger_response and trigger_response.get('status_code') == 401:
-            error_msg = f"""🚫 **Authentication Error**: Pipeline ETL Airflow tidak dapat diakses karena masalah autentikasi (HTTP 401 - Unauthorized).
+    endpoint = f"dags/{dag_id}/dagRuns"
+    result = _make_airflow_api_request("POST", endpoint, trigger_payload)
 
-**Troubleshooting Steps:**
-1. ✅ Username/Password: Pastikan username dan password Airflow benar di konfigurasi `.streamlit/secrets.toml`
-2. ✅ Default Credentials: Username dan password default biasanya 'airflow'/'airflow' 
-3. ✅ Airflow Running: Pastikan Airflow berjalan di {AIRFLOW_BASE_URL}
-4. ✅ API Access: Coba akses {AIRFLOW_BASE_URL} di browser untuk memastikan Airflow aktif
+    if result and "error" not in result:
+        logger.info(f"Successfully triggered DAG {dag_id}")
+        return {
+            "success": True,
+            "dag_run_id": result.get("dag_run_id"),
+            "execution_date": result.get("execution_date"),
+            "state": result.get("state", "queued")
+        }
+    else:
+        logger.error(f"Failed to trigger DAG {dag_id}: {result}")
 
-**Current Config:**
-- URL: {AIRFLOW_BASE_URL}
-- Username: {AIRFLOW_USERNAME}
+        # Enhanced error reporting
+        error_details = {
+            "success": False,
+            "error": result.get("error", "Unknown error"),
+            "details": result
+        }
 
-Silakan periksa konfigurasi dan coba lagi."""
-            return json.dumps({"status": "airflow_auth_error", "message": error_msg})
-        elif trigger_response and trigger_response.get('status_code') == 405:
-            error_msg = f"Pipeline ETL Airflow tidak tersedia saat ini (HTTP 405 - Method Not Allowed). Ini bisa terjadi jika Airflow server tidak berjalan atau konfigurasi API berbeda. Silakan coba lagi nanti atau hubungi administrator."
-            return json.dumps({"status": "airflow_api_error", "message": error_msg})
-        elif trigger_response and 'Connection' in str(trigger_response.get('error', '')):
-            error_msg = "Pipeline ETL Airflow tidak dapat diakses saat ini (koneksi gagal). Pastikan Airflow server berjalan di http://localhost:8080 atau hubungi administrator."
-            # Berikan pesan yang lebih spesifik
-            return json.dumps({"status": "airflow_connection_error", "message": error_msg})
-        return json.dumps({"status": "airflow_error", "message": f"Gagal memicu pipeline ETL di Airflow. Detail: {error_msg}. Pastikan Airflow berjalan dan konfigurasi benar."})
+        # Add HTTP status code if available
+        if result and "status_code" in result:
+            error_details["status_code"] = result["status_code"]
 
-    dag_run_id = trigger_response.get("dag_run_id")
-    if not dag_run_id:
-        logger.error(
-            f"DAG '{ETL_DAG_ID}' triggered, but no DAG Run ID received. Response: {trigger_response}")
-        return json.dumps({"status": "dag_trigger_error", "message": f"Pipeline ETL berhasil dipicu, tetapi tidak mendapatkan DAG Run ID. Respons: {trigger_response}"})
-    logger.info(
-        f"DAG '{ETL_DAG_ID}' triggered successfully. DAG Run ID: {dag_run_id}")
+        return error_details
 
-    # 2. Memantau status DAG Run (dengan timeout)
-    max_wait_time_seconds = 300  # Tunggu maksimal 5 menit
-    check_interval_seconds = 15
+
+def _wait_for_dag_completion(dag_id: str, dag_run_id: str, max_wait_seconds: int = 300) -> Dict:
+    """Wait for DAG completion dan return status."""
+    logger.info(f"Waiting for DAG {dag_id} run {dag_run_id} to complete")
+
     start_time = time.time()
+    check_interval = 10  # Check setiap 10 detik
 
-    while time.time() - start_time < max_wait_time_seconds:
-        status_response = _make_airflow_api_request(
-            "GET", f"dags/{ETL_DAG_ID}/dagRuns/{dag_run_id}")
-        if not status_response or "error" in status_response:
-            logger.error(
-                f"Failed to get status for DAG run '{dag_run_id}'. Response: {status_response}")
-            error_msg = status_response.get('details', {}).get('detail', status_response.get(
-                'error', 'Unknown error')) if status_response else "No response"
-            return json.dumps({"status": "dag_status_error", "message": f"Gagal mendapatkan status DAG run '{dag_run_id}'. Detail: {error_msg}."})
+    while (time.time() - start_time) < max_wait_seconds:
+        # Get DAG run status
+        endpoint = f"dags/{dag_id}/dagRuns/{dag_run_id}"
+        status_result = _make_airflow_api_request("GET", endpoint)
 
-        current_state = status_response.get("state")
-        logger.info(f"Status for DAG Run '{dag_run_id}': {current_state}")
+        if status_result and "error" not in status_result:
+            state = status_result.get("state")
+            logger.info(f"DAG run state: {state}")
 
-        if current_state == "success":
-            logger.info(
-                f"DAG Run '{dag_run_id}' completed successfully. Attempting to retrieve XCom.")
-            # 3. (PENTING) Mengambil hasil dari XComs
-            xcom_endpoint = f"dags/{ETL_DAG_ID}/dagRuns/{dag_run_id}/taskInstances/{XCOM_TASK_ID}/xcomEntries/{XCOM_KEY}"
-            logger.debug(
-                f"Attempting to get XCom from endpoint: {xcom_endpoint}")
-            xcom_response = _make_airflow_api_request("GET", xcom_endpoint)
-
-            if xcom_response and "value" in xcom_response:
-                raw_xcom_value = xcom_response["value"]
+            if state in ["success", "failed"]:
+                return {
+                    "completed": True,
+                    "state": state,
+                    "end_date": status_result.get("end_date"),
+                    "duration": status_result.get("duration")
+                }
+            elif state == "running":
                 logger.info(
-                    f"Raw XCom value received for '{XCOM_KEY}' from task '{XCOM_TASK_ID}': {raw_xcom_value}")
-                try:
-                    # Jika XCom adalah integer yang dikirim dari PythonOperator,
-                    # nilainya biasanya berupa string dari integer tersebut.
-                    new_data_count = int(raw_xcom_value)
-                    logger.info(
-                        f"Successfully parsed XCom value to int: {new_data_count}")                    # json.JSONDecodeError tidak relevan jika langsung int()
-                    return json.dumps({"status": "success", "message": f"Pipeline ETL berhasil dijalankan. Jumlah data baru yang berhasil dimuat: {new_data_count}."})
-                except (ValueError, TypeError) as e:
-                    logger.error(
-                        f"Error parsing XCom value '{raw_xcom_value}' as int: {e}. Full XCom response: {xcom_response}")
-                    return json.dumps({"status": "xcom_parse_error", "message": f"Pipeline ETL berhasil, tetapi gagal memproses jumlah data baru dari XComs. Nilai mentah XCom: {str(raw_xcom_value)[:200]}. Error: {e}"})
+                    f"DAG still running, waiting {check_interval} seconds...")
+                time.sleep(check_interval)
             else:
-                logger.warning(
-                    f"Failed to retrieve XCom key '{XCOM_KEY}' from task '{XCOM_TASK_ID}'. Response: {xcom_response}")
-                error_detail = xcom_response.get('details', {}).get(
-                    'detail', xcom_response.get('error', '')) if xcom_response else 'No response'
-                return json.dumps({"status": "xcom_retrieve_error", "message": f"Pipeline ETL berhasil, tetapi tidak dapat mengambil ringkasan jumlah data baru. Pastikan task '{XCOM_TASK_ID}' mengirimkan XCom dengan key '{XCOM_KEY}'. Detail dari Airflow: {error_detail}"})
+                logger.info(f"DAG state: {state}, continuing to wait...")
+                time.sleep(check_interval)
+        else:
+            logger.error(f"Error checking DAG status: {status_result}")
+            return {
+                "completed": False,
+                "error": "Failed to check DAG status",
+                "details": status_result
+            }
 
-        elif current_state in ["failed", "upstream_failed", "skipped", "removed", "queued"]:
+    # Timeout reached
+    logger.warning(f"Timeout waiting for DAG {dag_id} to complete")
+    return {
+        "completed": False,
+        "error": "Timeout waiting for DAG completion",
+        "timeout_seconds": max_wait_seconds
+    }
+
+
+def _get_xcom_value(dag_id: str, dag_run_id: str, task_id: str, key: str) -> Optional[any]:
+    """Retrieve XCom value from completed task."""
+    logger.info(
+        f"Getting XCom value: dag_id={dag_id}, task_id={task_id}, key={key}")
+
+    endpoint = f"dags/{dag_id}/dagRuns/{dag_run_id}/taskInstances/{task_id}/xcomEntries/{key}"
+    result = _make_airflow_api_request("GET", endpoint)
+
+    if result and "error" not in result:
+        logger.info(
+            f"Successfully retrieved XCom value: {result.get('value')}")
+        return result.get("value")
+    else:
+        # Check if this is a 404 (not found) vs other error
+        if isinstance(result, dict) and result.get('status_code') == 404:
             logger.warning(
-                f"DAG Run '{dag_run_id}' finished with non-success state: {current_state}")
-            return json.dumps({"status": "dag_failed", "message": f"Pipeline ETL '{ETL_DAG_ID}' di Airflow selesai dengan status: {current_state}. Tidak ada data baru yang dapat dilaporkan."})
+                f"XCom value not found (404): task '{task_id}' might not set key '{key}' or task didn't run")
+        else:
+            logger.error(f"Failed to get XCom value: {result}")
+        return None
 
-        time.sleep(check_interval_seconds)
 
-    logger.warning(
-        f"Timeout waiting for DAG Run '{dag_run_id}' to complete after {max_wait_time_seconds // 60} minutes.")
-    return json.dumps({"status": "timeout", "message": f"Pipeline ETL '{ETL_DAG_ID}' masih berjalan di Airflow setelah {max_wait_time_seconds // 60} menit atau gagal merespons. Silakan periksa statusnya langsung di Airflow."})
+@tool
+def trigger_spreadsheet_etl_and_get_summary(question: str = "") -> str:
+    """
+    Trigger proses ETL untuk update data spreadsheet dan mendapatkan ringkasan data baru.
+
+    Tool ini akan:
+    1. Menjalankan pipeline ETL di Airflow
+    2. Menunggu hingga proses selesai
+    3. Mengambil informasi tentang data baru yang berhasil diproses
+
+    Args:
+        question: Pertanyaan dari user terkait ETL atau data baru (opsional)
+
+    Returns:
+        str: Ringkasan hasil ETL termasuk jumlah data baru yang diproses
+    """
+
+    logger.info(f"ETL tool called with question: {question}")
+
+    try:
+        # Step 1: Diagnose connection
+        logger.info("Step 1: Diagnosing Airflow connection...")
+        diagnosis = _diagnose_airflow_connection()
+
+        if diagnosis["authentication"] != "jwt_success":
+            return f"❌ Gagal terhubung atau autentikasi ke Airflow: {diagnosis['authentication']}\n\nRekomendasi: {', '.join(diagnosis['recommendations'])}"
+
+        if not diagnosis["target_dag_exists"]:
+            return f"❌ DAG '{ETL_DAG_ID}' tidak ditemukan di Airflow\n\nDAG tersedia: {diagnosis['dags_available']}\nRekomendasi: {', '.join(diagnosis['recommendations'])}"
+
+        # Step 1.5: Check if DAG is paused and auto-unpause if needed
+        logger.info("Step 1.5: Checking DAG status...")
+        dag_status = _make_airflow_api_request('GET', f'/dags/{ETL_DAG_ID}')
+        if dag_status and dag_status.get('is_paused', True):
+            logger.info("DAG is paused, attempting to unpause...")
+            unpause_result = _make_airflow_api_request(
+                'PATCH', f'/dags/{ETL_DAG_ID}', {"is_paused": False})
+            if unpause_result and 'dag_id' in unpause_result:
+                logger.info(
+                    f"Successfully unpaused DAG: {unpause_result['dag_id']}")
+            else:
+                logger.warning(f"Failed to unpause DAG: {unpause_result}")
+                # Step 2: Trigger DAG
+                return f"❌ DAG '{ETL_DAG_ID}' ditemukan tapi dalam status paused dan gagal di-unpause.\n\nSilakan unpause DAG secara manual di Airflow UI: {AIRFLOW_BASE_URL}"
+        logger.info("Step 2: Triggering ETL DAG...")
+        trigger_result = _trigger_dag(ETL_DAG_ID)
+
+        if not trigger_result["success"]:
+            # If trigger fails with 404, provide more detailed diagnosis
+            error_details = trigger_result.get('details', {})
+            if 'status_code' in error_details and error_details['status_code'] == 404:
+                # DAG might be broken or not properly parsed
+                logger.warning(
+                    "DAG not found during trigger - checking DAG health...")
+
+                # Try to get more detailed DAG information
+                dag_detail = _make_airflow_api_request(
+                    'GET', f'dags/{ETL_DAG_ID}')
+                if dag_detail:
+                    is_broken = dag_detail.get(
+                        'has_task_concurrency_limits', False)
+                    last_parsed = dag_detail.get('last_parsed_time')
+                    fileloc = dag_detail.get('fileloc', 'unknown')
+
+                    return f"""❌ DAG '{ETL_DAG_ID}' ditemukan tapi tidak dapat di-trigger.
+
+🔍 Detail DAG:
+- File lokasi: {fileloc}
+- Terakhir di-parse: {last_parsed}
+- Status: Mungkin broken atau import error
+
+💡 Kemungkinan solusi:
+1. Periksa logs DAG di Airflow UI untuk error parsing
+2. Pastikan semua dependencies tersedia di environment ETL
+3. Restart Airflow scheduler jika diperlukan
+
+🌐 Periksa di: {AIRFLOW_BASE_URL}/dags/{ETL_DAG_ID}"""
+
+            return f"❌ Gagal menjalankan ETL pipeline: {trigger_result.get('error', 'Unknown error')}"
+
+        dag_run_id = trigger_result["dag_run_id"]
+
+        # Step 3: Wait for completion
+        logger.info("Step 3: Waiting for ETL completion...")
+        completion_result = _wait_for_dag_completion(
+            ETL_DAG_ID, dag_run_id, max_wait_seconds=300)
+
+        if not completion_result["completed"]:
+            if "timeout" in completion_result.get("error", "").lower():
+                return f"⏳ ETL pipeline masih berjalan (timeout 5 menit tercapai).\n\nDAG Run ID: {dag_run_id}\nAnda dapat memeriksa status di Airflow UI: {AIRFLOW_BASE_URL}"
+            else:
+                return f"❌ Error menunggu completion ETL: {completion_result.get('error', 'Unknown error')}"
+
+        if completion_result["state"] != "success":
+            return f"❌ ETL pipeline gagal dengan status: {completion_result['state']}\n\nDAG Run ID: {dag_run_id}\nPeriksa logs di Airflow UI untuk detail error."
+
+        # Step 4: Get results from XCom
+        logger.info("Step 4: Getting ETL results...")
+        new_data_count = _get_xcom_value(
+            ETL_DAG_ID, dag_run_id, XCOM_TASK_ID, XCOM_KEY)
+
+        # Format response with better messaging for no data scenarios
+        duration = completion_result.get("duration", "unknown")
+
+        # Determine data message based on result
+        if new_data_count is not None:
+            if new_data_count == 0:
+                data_message = "📊 Tidak ada data baru yang ditemukan dalam periode ini"
+            else:
+                data_message = f"📊 Data baru yang berhasil diproses: {new_data_count} record"
+        else:
+            # XCom value not found - this might indicate the DAG doesn't set this value
+            data_message = "📊 ETL berhasil dijalankan, namun informasi jumlah data baru tidak tersedia"
+
+        response_parts = [
+            "✅ ETL Pipeline berhasil dijalankan!",
+            data_message,
+            f"⏱️ Durasi eksekusi: {duration}",
+            f"🔗 DAG Run ID: {dag_run_id}"
+        ]
+
+        if question and any(keyword in question.lower() for keyword in ["berapa", "jumlah", "count", "how many"]):
+            if new_data_count is not None:
+                if new_data_count == 0:
+                    response_parts.insert(
+                        1, f"Untuk menjawab pertanyaan '{question}': Tidak ada data baru yang ditemukan pada periode ini")
+                else:
+                    response_parts.insert(
+                        1, f"Untuk menjawab pertanyaan '{question}': {new_data_count} data baru")
+            else:
+                response_parts.insert(
+                    1, f"Untuk menjawab pertanyaan '{question}': Informasi jumlah data tidak tersedia dari ETL pipeline")
+
+        return "\n".join(response_parts)
+
+    except Exception as e:
+        logger.error(f"Unexpected error in ETL tool: {str(e)}")
+        return f"❌ Terjadi error tidak terduga: {str(e)}\n\nSilakan periksa logs atau coba lagi."
+
+
+# Test function untuk debugging
+def _test_airflow_connection():
+    """Test function untuk debugging koneksi Airflow"""
+    print("=== Testing Airflow Connection ===")
+
+    # Test 1: Basic connectivity
+    print(f"Testing connection to: {AIRFLOW_BASE_URL}")
+
+    # Test 2: JWT Token
+    print("Getting JWT token...")
+    token = _get_jwt_token()
+    if token:
+        print(f"✅ JWT token obtained: {token[:20]}...")
+    else:
+        print("❌ Failed to get JWT token")
+        return
+
+    # Test 3: API call
+    print("Testing API call...")
+    result = _make_airflow_api_request("GET", "version")
+    print(f"API result: {result}")
+
+    # Test 4: Full diagnosis
+    print("Running full diagnosis...")
+    diagnosis = _diagnose_airflow_connection()
+    print(f"Diagnosis: {json.dumps(diagnosis, indent=2)}")
+
+
+if __name__ == "__main__":
+    # Untuk testing
+    _test_airflow_connection()
