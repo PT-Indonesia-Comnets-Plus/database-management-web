@@ -2,17 +2,23 @@
 
 import pandas as pd
 import streamlit as st
-from psycopg2 import pool, Error as Psycopg2Error
+from psycopg2 import pool, Error as Psycopg2Error, OperationalError, InterfaceError
 from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
+import logging
 from etl_proces import AssetPipeline
 import asyncio
+from ..utils.database import get_robust_connection, execute_with_retry, is_connection_alive, cache_query_result, CACHE_CONFIG
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 
 class AssetDataService:
     """
     Service class for managing asset data interactions with the database.
     Handles loading, inserting, updating, deleting, and processing asset data.
+    Enhanced with intelligent caching for better performance.
     """
 
     def __init__(self, db_pool: pool.SimpleConnectionPool):
@@ -29,7 +35,7 @@ class AssetDataService:
 
     def _execute_query(self, query: str, params: Optional[tuple] = None, fetch: str = "all") -> Tuple[Optional[List[Tuple]], Optional[List[str]], Optional[str]]:
         """
-        Executes a SQL query using the connection pool.
+        Executes a SQL query using the connection pool with robust error handling.
 
         Args:
             query: The SQL query string.
@@ -42,9 +48,7 @@ class AssetDataService:
             column_names is None if error or no description.
             error_message is None if successful.
         """
-        conn = None
-        try:
-            conn = self.db_pool.getconn()
+        def _execute_operation(conn):
             with conn.cursor() as cur:
                 cur.execute(query, params)
                 if fetch == "all" and cur.description:
@@ -61,21 +65,21 @@ class AssetDataService:
                 else:
                     conn.commit()
                     return [], [], f"Non-SELECT query executed (rows affected: {cur.rowcount})"
+
+        try:
+            return execute_with_retry(self.db_pool, _execute_operation, max_retries=3)
+        except (OperationalError, InterfaceError) as e:
+            return None, None, f"Database Connection Error: {e}"
         except Psycopg2Error as db_err:
-            if conn:
-                conn.rollback()
             return None, None, f"Database Error: {db_err}"
         except Exception as e:
-            if conn:
-                conn.rollback()
             return None, None, f"Execution Error: {e}"
-        finally:
-            if conn:
-                self.db_pool.putconn(conn)
 
+    @cache_query_result(ttl_seconds=CACHE_CONFIG['asset_data_ttl'])
     def load_all_assets(self, limit: Optional[int] = None) -> Optional[pd.DataFrame]:
         """
         Loads essential asset data for the dashboard by joining relevant tables.
+        Results are cached for improved performance.
 
         Args:
             limit: Maximum number of rows to load. If None, loads all.
@@ -83,6 +87,8 @@ class AssetDataService:
         Returns:
             A pandas DataFrame containing the essential asset data, or None if an error occurs.
         """
+        logger.info(f"Loading asset data from database (limit: {limit})")
+
         # --- MODIFIKASI QUERY ---
         query = """
             SELECT
@@ -119,6 +125,104 @@ class AssetDataService:
         if data is None:
             st.warning("No asset data returned from query.")
             return pd.DataFrame(columns=columns or [])
+
+        df = pd.DataFrame(data, columns=columns)
+        logger.info(f"Loaded {len(df)} asset records")
+        return df
+
+    @cache_query_result(ttl_seconds=CACHE_CONFIG['aggregation_ttl'])
+    def get_asset_aggregations(self, group_by_column: str) -> Optional[pd.DataFrame]:
+        """
+        Get aggregated asset data for improved dashboard performance.
+        Results are cached for fast repeated access.
+
+        Args:
+            group_by_column: Column to group by (e.g., 'kota_kab', 'brand_olt')
+
+        Returns:
+            DataFrame with aggregated data
+        """
+        allowed_columns = ['kota_kab', 'brand_olt',
+                           'fat_filter_pemakaian', 'olt']
+        if group_by_column not in allowed_columns:
+            st.error(f"Invalid group by column: {group_by_column}")
+            return None
+
+        query = f"""
+            SELECT 
+                cl.{group_by_column},
+                COUNT(DISTINCT ut.fat_id) as total_assets,
+                COUNT(DISTINCT ut.olt) as total_olt,
+                COUNT(DISTINCT ut.fdt_id) as total_fdt,
+                COALESCE(SUM(hc.total_hc), 0) as total_hc,
+                COALESCE(AVG(hc.total_hc), 0) as avg_hc
+            FROM user_terminals ut
+            LEFT JOIN clusters cl ON ut.fat_id = cl.fat_id
+            LEFT JOIN home_connecteds hc ON ut.fat_id = hc.fat_id
+            WHERE cl.{group_by_column} IS NOT NULL
+            GROUP BY cl.{group_by_column}
+            ORDER BY total_hc DESC
+        """
+
+        data, columns, error = self._execute_query(query, fetch="all")
+
+        if error:
+            st.error(f"Failed to load aggregations: {error}")
+            return None
+
+        if data is None:
+            return pd.DataFrame(columns=columns or [])
+
+        return pd.DataFrame(data, columns=columns)    @ cache_query_result(ttl_seconds=CACHE_CONFIG['map_data_ttl'])
+
+    def get_map_data(self, kota_filter: Optional[str] = None, limit: Optional[int] = 1000) -> Optional[pd.DataFrame]:
+        """
+        Get optimized data specifically for map rendering with caching.
+
+        Args:
+            kota_filter: Filter by specific city/regency
+            limit: Maximum number of points to return (None for unlimited)
+
+        Returns:
+            DataFrame optimized for map visualization
+        """
+        base_query = """
+            SELECT 
+                ut.fat_id,
+                ut.latitude_fat,
+                ut.longitude_fat,
+                ut.olt,
+                cl.kota_kab,
+                COALESCE(hc.total_hc, 0) as total_hc
+            FROM user_terminals ut
+            LEFT JOIN clusters cl ON ut.fat_id = cl.fat_id
+            LEFT JOIN home_connecteds hc ON ut.fat_id = hc.fat_id
+            WHERE ut.latitude_fat IS NOT NULL 
+            AND ut.longitude_fat IS NOT NULL
+            AND ut.latitude_fat BETWEEN -11 AND 6
+            AND ut.longitude_fat BETWEEN 95 AND 141        """
+
+        params = []
+        if kota_filter and kota_filter != 'All':
+            base_query += " AND cl.kota_kab = %s"
+            params.append(kota_filter)
+
+        base_query += " ORDER BY hc.total_hc DESC NULLS LAST"
+
+        if limit is not None:
+            base_query += " LIMIT %s"
+            params.append(limit)
+
+        data, columns, error = self._execute_query(
+            base_query, tuple(params) if params else None, fetch="all")
+
+        if error:
+            st.error(f"Failed to load map data: {error}")
+            return None
+
+        if data is None:
+            return pd.DataFrame(columns=columns or [])
+
         return pd.DataFrame(data, columns=columns)
 
     def search_assets(self, column_name: str, value: Any) -> Optional[pd.DataFrame]:
@@ -287,9 +391,7 @@ class AssetDataService:
 
         if df_processed is None or df_processed.empty:
             st.warning("No processed data provided for insertion.")
-            return 0, 0
-
-        # --- Split the data just before insertion using the pipeline ---
+            return 0, 0        # --- Split the data just before insertion using the pipeline ---
         try:
             print("DEBUG: Splitting data before insertion...")
             pipeline = AssetPipeline()
@@ -303,9 +405,7 @@ class AssetDataService:
             return 0, len(df_processed)
         # -------------------------------------------------------------
 
-        conn = None
-        try:
-            conn = self.db_pool.getconn()
+        def _perform_insertion(conn):
             with conn.cursor() as cur:
                 for table_name, df_subset in split_dfs.items():
                     if df_subset.empty:
@@ -339,26 +439,30 @@ class AssetDataService:
 
                     try:
                         cur.executemany(insert_query, data_tuples)
+                        nonlocal attempted_count
                         attempted_count += len(data_tuples)
                     except Psycopg2Error as insert_err:
                         conn.rollback()  # Rollback this batch
                         st.error(
                             f"Error inserting into '{table_name}': {insert_err}")
                         # Assume all failed in batch
+                        nonlocal error_count
                         error_count += len(data_tuples)
                         continue  # Continue to next table
 
                 # Summary message
                 st.success(f"Attempted to process data for all tables.")
                 conn.commit()
+                return attempted_count, error_count
 
+        try:
+            return execute_with_retry(self.db_pool, _perform_insertion, max_retries=3)
+        except (OperationalError, InterfaceError) as e:
+            st.error(f"Database connection error during insertion: {e}")
+            return 0, len(df_processed)
         except Exception as e:
-            if conn:
-                conn.rollback()
             st.error(f"General error during DataFrame insertion: {e}")
-        finally:
-            if conn:
-                self.db_pool.putconn(conn)
+            return 0, len(df_processed)
 
         return attempted_count, error_count
 

@@ -4,11 +4,11 @@ import json
 import streamlit as st
 import psycopg2
 from typing import Optional, Tuple, List, Dict
-from psycopg2 import pool
+from psycopg2 import pool, OperationalError, InterfaceError
 from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_ollama.chat_models import ChatOllama
 from ...utils.load_config import TOOLS_CFG
+from ...utils.database import execute_with_retry
 
 # =====================
 # === Helper Functions ===
@@ -17,18 +17,10 @@ from ...utils.load_config import TOOLS_CFG
 
 def _get_db_schema(db_pool: pool.SimpleConnectionPool) -> Optional[Dict[str, List[str]]]:
     """
-    Retrieves the relevant schema (table names and columns) from the database.
-
-    Args:
-        db_pool (SimpleConnectionPool): Database connection pool.
-
-    Returns:
-        dict: Dictionary with table names as keys and list of column info as values.
-        None: If an error occurs.
+    Mengambil skema (nama tabel, kolom, tipe data, dan DESKRIPSI) dari database,
+    diperkaya dengan pengetahuan kontekstual.
     """
-    conn = None
-    try:
-        conn = db_pool.getconn()
+    def _fetch_schema(conn):
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT table_name, column_name, data_type
@@ -42,25 +34,64 @@ def _get_db_schema(db_pool: pool.SimpleConnectionPool) -> Optional[Dict[str, Lis
             """)
             rows = cur.fetchall()
 
+        table_descriptions = {
+            "pelanggans": "Menyimpan data unik untuk setiap pelanggan atau permohonan layanan. Setiap baris di tabel ini adalah SATU pelanggan.",
+            "user_terminals": "Data master untuk semua perangkat keras jaringan seperti OLT, FDT, dan FAT. Primary key-nya adalah fat_id.",
+            "clusters": "Informasi pengelompokan geografis (lokasi) untuk setiap FAT ID, termasuk kota, kecamatan, dll.",
+            "home_connecteds": "Berisi data jumlah pelanggan yang terhubung (Home Connected/HC) yang terkait dengan FAT tertentu.",
+            "dokumentasis": "Menyimpan link dan keterangan terkait dokumentasi teknis aset.",
+            "additional_informations": "Berisi informasi tambahan terkait aset seperti mitra, tanggal RFS, dan kategori."
+        }
+
+        column_descriptions = {
+            "pelanggans": {
+                "id_permohonan": "PRIMARY KEY unik untuk setiap pelanggan. GUNAKAN `COUNT(id_permohonan)` UNTUK MENGHITUNG JUMLAH TOTAL PELANGGAN.",
+                "fat_id": "FOREIGN KEY yang menghubungkan pelanggan ke perangkat FAT di tabel 'user_terminals'."
+            },
+            "user_terminals": {
+                "fat_id": "PRIMARY KEY unik untuk setiap perangkat Fiber Access Terminal (FAT).",
+                "brand_olt": "Merek atau vendor dari perangkat OLT (Optical Line Terminal).",
+                "keterangan_full": "Keterangan apakah kapasitas FAT sudah penuh. Bisa berisi kata 'full'."
+            },
+            "clusters": {
+                "kota_kab": "Nama kota atau kabupaten tempat aset berada. Gunakan untuk filter lokasi geografis.",
+                "fat_id": "FOREIGN KEY yang menghubungkan cluster ke FAT di tabel 'user_terminals'."
+            },
+            "home_connecteds": {
+                "total_hc": "Angka yang menunjukkan jumlah total Home Connected (pelanggan aktif) pada suatu FAT.",
+                "fat_id": "FOREIGN KEY yang menghubungkan data HC ke FAT di tabel 'user_terminals'."
+            }
+        }
+        # ===============================================
+
         schema = {}
         for table, column, dtype in rows:
-            schema.setdefault(table, []).append(f"{column} ({dtype})")
+            table_desc = table_descriptions.get(
+                table, "Tidak ada deskripsi tabel.")
+            col_desc = column_descriptions.get(table, {}).get(
+                column, "Tidak ada deskripsi kolom.")
+
+            if table not in schema:
+                schema[table] = {"description": table_desc, "columns": []}
+
+            schema[table]["columns"].append(f"{column} ({dtype}): {col_desc}")
 
         return schema
 
+    try:
+        # Gunakan retry logic Anda atau yang ada di atas
+        return execute_with_retry(db_pool, _fetch_schema, max_retries=3)
+    except (OperationalError, InterfaceError) as e:
+        print(f"❌ Database connection error getting schema: {e}")
+        return None
     except Exception as e:
         print(f"❌ Error getting DB schema: {e}")
         return None
 
-    finally:
-        if conn:
-            db_pool.putconn(conn)
 
-
-def _generate_sql_query_from_question(schema: Dict[str, List[str]], user_question: str) -> Optional[str]:
+def _generate_sql_query_from_question(schema: Dict[str, Dict[str, any]], user_question: str) -> Optional[str]:
     """
     Generates an SQL SELECT query from a natural language user question using Gemini model.
-    Returns the query string (and logs it).
     """
     try:
         sql_model = ChatGoogleGenerativeAI(
@@ -68,38 +99,51 @@ def _generate_sql_query_from_question(schema: Dict[str, List[str]], user_questio
             temperature=TOOLS_CFG.sql_agent_llm_temperature,
         )
 
-        schema_str = "\n".join(
-            f"Tabel {t}:\n" + "\n".join([f" - {c}" for c in cs])
-            for t, cs in schema.items()
-        )
+        schema_details_list = []
+        for table_name, table_info in schema.items():
+            table_description = table_info.get(
+                "description", f"Tabel {table_name}")
+            columns_details = "\n".join(
+                [f"  - {c}" for c in table_info.get("columns", [])])
+            schema_details_list.append(
+                f"Tabel '{table_name}': {table_description}\n  Kolom:\n{columns_details}")
+        schema_str = "\n\n".join(schema_details_list)
 
-        if len(schema_str) > 5000:
-            schema_str = schema_str[:5000] + "...\n(dipangkas)"
+        if len(schema_str) > 7000:
+            schema_str = schema_str[:7000] + \
+                "...\n(dipangkas karena terlalu panjang)"
 
-        mapping_hint = """
-        Catatan penting:
-        - Istilah 'HC' pada pertanyaan berarti 'home connected' dan data terkait terdapat pada tabel/kolom 'home_connecteds'.
-        - Abaikan makna lain seperti 'human capital'.
+        few_shot_examples = """
+        Contoh-contoh Pertanyaan dan Query SQL yang Benar:
+
+        Pertanyaan: "berapa total pelanggan di jember"
+        Query SQL: SELECT COUNT(T1.id_permohonan) FROM pelanggans AS T1 JOIN clusters AS T2 ON T1.fat_id = T2.fat_id WHERE LOWER(T2.kota_kab) = 'jember';
+
+        Pertanyaan: "Sebutkan semua brand OLT yang ada."
+        Query SQL: SELECT DISTINCT brand_olt FROM user_terminals WHERE brand_olt IS NOT NULL AND brand_olt != '';
+
+        Pertanyaan: "Berapa jumlah FAT yang keterangannya full di kota Surabaya?"
+        Query SQL: SELECT COUNT(ut.fat_id) FROM user_terminals ut JOIN clusters cl ON ut.fat_id = cl.fat_id WHERE LOWER(ut.keterangan_full) LIKE '%full%' AND LOWER(cl.kota_kab) = 'surabaya';
         """
 
         prompt = f"""
-        Anda adalah ahli SQL PostgreSQL. Tugas Anda adalah membuat SATU query SQL SELECT berdasarkan skema database dan pertanyaan pengguna.
-        Pedoman:
-        1. Hanya buat query SELECT. JANGAN buat query INSERT, UPDATE, DELETE, atau DDL lainnya.
-        2. Gunakan LOWER() pada kolom dan nilai untuk perbandingan string agar tidak case-sensitive.
-        3. Jika pertanyaan ambigu, buat query yang paling mungkin.
-        4. Pastikan nama tabel dan kolom sesuai skema. Gunakan JOIN jika perlu. Kunci utama umum adalah 'fat_id'.
-        5. Hanya tampilkan query SQL mentah tanpa ```.
-        6. PENTING: Jika pertanyaan meminta data dari multiple lokasi/kota (misal "Surabaya dan Gresik"), 
-           SELALU gunakan GROUP BY untuk memisahkan data per lokasi. JANGAN menjumlahkan semuanya jadi satu angka.
-           Contoh: SELECT city, SUM(home_connecteds) FROM table WHERE city IN ('surabaya', 'gresik') GROUP BY city
+        Anda adalah ahli SQL PostgreSQL yang sangat teliti. Tugas Anda adalah membuat SATU query SQL SELECT yang paling sesuai berdasarkan skema database yang detail dan pertanyaan pengguna.
 
-        Skema:
+        Pedoman Penting:
+        1. **Pahami Skema**: Gunakan deskripsi pada skema untuk memahami makna setiap tabel dan kolom. Ini adalah kunci untuk membuat query yang relevan.
+        3. **Hanya SELECT**: Hanya buat query SELECT. Jangan pernah membuat query INSERT, UPDATE, atau DELETE.
+        4. **Case-Insensitive**: Selalu gunakan `LOWER()` pada kolom teks dan nilai string di klausa `WHERE` (contoh: `LOWER(T2.kota_kab) = 'jember'`).
+        5. **Gunakan JOIN**: Gunakan `JOIN` antar tabel jika informasi yang diminta ada di beberapa tabel. Kunci utama untuk join adalah `fat_id`.
+        6. **Output Bersih**: Output HANYA berupa query SQL mentah tanpa penjelasan, tanpa ```sql, dan tanpa ```.
+        7. **GROUP BY**: Jika pertanyaan meminta data per-kategori (misal "total pelanggan di setiap kota"), gunakan `GROUP BY` untuk memisahkan hasilnya.
+
+        Berikut adalah Skema Database Detail (termasuk deskripsi fungsional):
         {schema_str}
 
-        {mapping_hint}
+        Berikut adalah contoh kasus untuk membantu Anda:
+        {few_shot_examples}
 
-        Pertanyaan:
+        Pertanyaan Pengguna:
         {user_question}
 
         Query SQL:
@@ -110,12 +154,11 @@ def _generate_sql_query_from_question(schema: Dict[str, List[str]], user_questio
                        response.content.strip(), flags=re.IGNORECASE)
 
         print(f"[DEBUG] Generated SQL Query: {query}")
-        # Save to session for UI access
         st.session_state['last_sql_query'] = query
 
         if not query.lower().startswith("select"):
             print(f"⚠️ Peringatan: Query bukan SELECT: {query}")
-            return None
+            return "Error: Gagal menghasilkan query SELECT yang valid."
 
         return query
 
@@ -127,20 +170,8 @@ def _generate_sql_query_from_question(schema: Dict[str, List[str]], user_questio
 def _execute_sql_query(query: str, db_pool: pool.SimpleConnectionPool) -> Tuple[Optional[List[Tuple]], Optional[List[str]], Optional[str]]:
     """
     Executes an SQL query and returns results and column names.
-
-    Args:
-        query (str): SQL query string to be executed.
-        db_pool (SimpleConnectionPool): Database connection pool.
-
-    Returns:
-        Tuple of:
-            - results (list of tuples): Fetched data rows.
-            - columns (list of str): Column names.
-            - error_msg (str): Error message, if any.
     """
-    conn = None
-    try:
-        conn = db_pool.getconn()
+    def _execute_operation(conn):
         with conn.cursor() as cur:
             cur.execute(query)
             if cur.description:
@@ -149,34 +180,20 @@ def _execute_sql_query(query: str, db_pool: pool.SimpleConnectionPool) -> Tuple[
                 conn.commit()
                 return [], [], f"Non-SELECT query executed (affected rows: {cur.rowcount})"
 
+    try:
+        return execute_with_retry(db_pool, _execute_operation, max_retries=3)
     except psycopg2.Error as db_err:
         print(f"❌ Database error: {db_err}")
-        if conn:
-            conn.rollback()
-        return None, None, str(db_err)
-
+        # Mengembalikan pesan error yang lebih spesifik ke LLM
+        return None, None, f"Query Gagal: {db_err}"
     except Exception as e:
         print(f"❌ General SQL execution error: {e}")
-        if conn:
-            conn.rollback()
         return None, None, str(e)
-
-    finally:
-        if conn:
-            db_pool.putconn(conn)
 
 
 def _generate_natural_answer_from_results(question: str, results: List[Tuple], colnames: List[str]) -> str:
     """
     Converts SQL results into a natural language response using Gemini.
-
-    Args:
-        question (str): Original user question.
-        results (list): Result set from the SQL query.
-        colnames (list): List of column names.
-
-    Returns:
-        str: Natural language summary or fallback.
     """
     try:
         model = ChatGoogleGenerativeAI(
@@ -193,45 +210,21 @@ def _generate_natural_answer_from_results(question: str, results: List[Tuple], c
             if len(table_str) > 5000:
                 table_str = table_str[:5000] + "\n...(dipotong)"
 
-        # Deteksi apakah pertanyaan meminta visualisasi
-        visualization_keywords = ['grafik', 'chart', 'plot',
-                                  'visualisasi', 'buat', 'tampilkan dalam grafik', 'gambarkan']
-        needs_visualization = any(keyword in question.lower()
-                                  for keyword in visualization_keywords)
+        prompt = f"""
+        Anda adalah asisten AI yang menjelaskan hasil query data ICONNET dalam bahasa Indonesia yang jelas dan ringkas.
 
-        if needs_visualization and results:
-            # Tambahkan petunjuk untuk visualisasi dalam prompt
-            prompt = f"""
-            Anda adalah asisten AI yang menjelaskan hasil query data ICONNET. 
-            PENTING: Pertanyaan ini mengandung permintaan visualisasi, jadi berikan jawaban yang memuat data numerik yang jelas dan terstruktur.
+        Pertanyaan Awal Pengguna:
+        {question}
 
-            Pertanyaan:
-            {question}
+        Data Hasil Query:
+        {table_str}
 
-            Data:
-            {table_str}
+        Tugas Anda adalah merangkum data di atas menjadi jawaban yang langsung dan mudah dimengerti untuk menjawab pertanyaan awal pengguna.
+        Jika data kosong, sampaikan bahwa tidak ada data yang ditemukan untuk permintaan tersebut.
+        Jika ada data, sebutkan hasilnya secara langsung. Contoh: 'Jumlah total pelanggan di Jember adalah 5.432 orang.'
 
-            Berikan jawaban yang:
-            1. Menjelaskan data dengan jelas
-            2. Menyebutkan angka-angka spesifik dalam format yang mudah dipahami
-            3. Menyiapkan data untuk visualisasi
-            
-            Format jawaban contoh: "Berdasarkan data yang ditemukan: Malang memiliki total 150 HC, dan Gresik memiliki total 200 HC. Data ini siap untuk divisualisasikan."
-
-            Jawaban:
-            """
-        else:
-            prompt = f"""
-            Anda adalah asisten AI yang menjelaskan hasil query data ICONNET.
-
-            Pertanyaan:
-            {question}
-
-            Data:
-            {table_str}
-
-            Jawaban:
-            """
+        Jawaban Anda:
+        """
 
         return model.invoke(prompt).content.strip()
 
@@ -239,7 +232,7 @@ def _generate_natural_answer_from_results(question: str, results: List[Tuple], c
         print(f"❌ Error merangkum hasil: {e}")
         fallback = f"Kolom: {' | '.join(colnames)}\nData:\n" + "\n".join(
             [" | ".join(map(str, row)) for row in results[:5]])
-        return f"Gagal merangkum. Contoh data:\n{fallback[:1000]}..."
+        return f"Gagal merangkum. Berikut adalah data mentahnya:\n{fallback[:1000]}..."
 
 # =====================
 # === Tool Definition ===
@@ -252,15 +245,24 @@ def query_asset_database(user_question: str) -> str:
     Menghasilkan jawaban alami berdasarkan data aset ICONNET dari database.
 
     Args:
-        user_question (str): Pertanyaan terkait data aset ICONNET.
-
-    Returns:
+        user_question (str): Pertanyaan terkait data aset ICONNET.    Returns:
         str: Ringkasan hasil atau pesan error.
     """
     print(
         f"\n🛠️ Running tool: query_asset_database\nQuestion: {user_question}")
 
-    db_pool = st.session_state.get("db")
+    # Try to get database pool from session state first
+    db_pool = None
+    if hasattr(st, 'session_state') and st.session_state.get("db"):
+        db_pool = st.session_state.get("db")
+    else:
+        # Fallback: Create connection pool directly
+        try:
+            from ...utils.database import connect_db
+            db_pool, _ = connect_db()
+        except Exception as e:
+            print(f"Failed to create database connection: {e}")
+
     if not db_pool:
         return "Error: Tidak ada koneksi ke database."
 
@@ -292,9 +294,7 @@ def query_asset_database(user_question: str) -> str:
 def sql_agent(user_question: str) -> str:
     """
     SQL Agent yang menghasilkan data terstruktur dalam format JSON dari database aset ICONNET.
-    Tool ini dapat digunakan untuk query data biasa maupun untuk keperluan visualisasi.
-
-    Args:
+    Tool ini dapat digunakan untuk query data biasa maupun untuk keperluan visualisasi.    Args:
         user_question (str): Pertanyaan terkait data aset ICONNET.
 
     Returns:
@@ -303,7 +303,18 @@ def sql_agent(user_question: str) -> str:
     print(
         f"\n🛠️ Running tool: sql_agent\nQuestion: {user_question}")
 
-    db_pool = st.session_state.get("db")
+    # Try to get database pool from session state first
+    db_pool = None
+    if hasattr(st, 'session_state') and st.session_state.get("db"):
+        db_pool = st.session_state.get("db")
+    else:
+        # Fallback: Create connection pool directly
+        try:
+            from ...utils.database import connect_db
+            db_pool, _ = connect_db()
+        except Exception as e:
+            print(f"Failed to create database connection: {e}")
+
     if not db_pool:
         return "Error: Tidak ada koneksi ke database."
 

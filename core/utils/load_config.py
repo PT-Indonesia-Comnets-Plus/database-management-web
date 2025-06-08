@@ -5,7 +5,6 @@ import yaml
 import streamlit as st
 from dotenv import load_dotenv
 from pyprojroot import here
-from typing import Dict, Any, Optional
 import logging
 
 # Configure logging
@@ -26,7 +25,7 @@ class LoadToolsConfig:
 
     This class loads and manages all configuration settings including:
     - Primary agent settings
-    - Tavily search configuration  
+    - Tavily search configuration
     - RAG (Retrieval Augmented Generation) settings
     - SQL agent configuration
     - LangSmith tracking settings
@@ -38,7 +37,6 @@ class LoadToolsConfig:
         try:
             self._load_app_config()
             self._load_primary_agent_config()
-            self._load_tavily_search_config()
             self._load_rag_config()
             self._load_sqlagent_config()
             self._load_langsmith_config()
@@ -71,15 +69,8 @@ class LoadToolsConfig:
             # Get API keys with fallback to Streamlit secrets
             self.gemini_api_key = os.getenv(
                 "GEMINI_API_KEY") or st.secrets.get("gemini", {}).get("api_key")
-            tavily_key = os.getenv("TAVILY_API_KEY") or st.secrets.get(
-                "tavily", {}).get("api_key")
             langchain_key = os.getenv("LANGCHAIN_API_KEY") or st.secrets.get(
                 "langsmith", {}).get("api_key")
-
-            # Set environment variables
-            if tavily_key:
-                os.environ["TAVILY_API_KEY"] = tavily_key
-                self.tavily_api_key = tavily_key
 
             if langchain_key:
                 os.environ["LANGCHAIN_API_KEY"] = langchain_key
@@ -105,11 +96,25 @@ class LoadToolsConfig:
         self.primary_agent_llm_temperature = primary_agent.get(
             "llm_temperature", 0.1)
 
-    def _load_tavily_search_config(self) -> None:
-        """Load internet search (Tavily) configuration."""
-        tavily_config = self.app_config.get("tavily_search_api", {})
-        self.tavily_search_max_results = int(
-            tavily_config.get("tavily_search_max_results", 5))
+    def _load_web_search_config(self) -> None:
+        """Load web search configuration."""
+        web_search_config = self.app_config.get("web_search_configs", {})
+        self.web_search_enabled = web_search_config.get("enabled", True)
+        self.query_generator_model = web_search_config.get(
+            "llm_query_generator_model")
+        self.llm_reflection_model = web_search_config.get(
+            "llm_reflection_model")
+        self.llm_answer_model = web_search_config.get(
+            "llm_answer_model")
+        self.llm_temperature = float(
+            web_search_config.get("llm_temperature"))
+        self.max_results = web_search_config.get("max_results")
+
+        self.number_of_initial_queries = web_search_config.get(
+            "number_of_initial_queries")
+        self.max_research_loops = web_search_config.get(
+            "max_research_loops")
+        self.max_retries = web_search_config.get("max_retries")
 
     def _load_rag_config(self) -> None:
         """Load Retrieval Augmented Generation (RAG) configuration."""

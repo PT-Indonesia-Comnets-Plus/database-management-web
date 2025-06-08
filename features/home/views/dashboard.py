@@ -4,85 +4,194 @@ import pandas as pd
 import plotly.express as px
 import folium
 from core.services.AssetDataService import AssetDataService
+from core.utils.database import CACHE_CONFIG
 from typing import Optional
 from folium.plugins import MarkerCluster
 from streamlit_folium import folium_static
 
 
-@st.cache_data(ttl="1h")
-def load_dashboard_data(_service: AssetDataService) -> Optional[pd.DataFrame]:
-    """Loads asset data specifically for the dashboard, using caching."""
-    print("CACHE MISS: Loading data from database...")
+# --- Caching and Optimization Functions ---
+
+@st.cache_data(ttl=CACHE_CONFIG['asset_data_ttl'], show_spinner="Loading dashboard data...")
+def load_dashboard_data_cached(_service: AssetDataService) -> Optional[pd.DataFrame]:
+    """
+    Enhanced cached data loading with multiple optimization strategies.
+    Uses both Streamlit cache and service-level caching.
+    """
+    print("CACHE MISS: Loading data from database with enhanced caching...")
+
+    # Use the cached service method
     df = _service.load_all_assets(limit=None)
+
+    if df is not None and not df.empty:
+        # Optimize data types for memory efficiency
+        df = optimize_dataframe_memory(df)
+        print(f"Loaded and optimized {len(df)} records for dashboard")
+
     return df
 
 
-@st.cache_data(ttl="2h")
-def prepare_map_data(_df: pd.DataFrame, max_markers: int = 1000) -> pd.DataFrame:
-    """Prepare and sample map data for better performance."""
-    df_map = _df.copy()
+@st.cache_data(ttl=CACHE_CONFIG['aggregation_ttl'])
+def get_cached_aggregations(_service: AssetDataService, group_by: str) -> Optional[pd.DataFrame]:
+    """Get cached aggregated data for visualizations."""
+    return _service.get_asset_aggregations(group_by)
 
-    # Clean and validate coordinates
-    df_map['latitude_fat'] = pd.to_numeric(
-        df_map['latitude_fat'], errors='coerce')
-    df_map['longitude_fat'] = pd.to_numeric(
-        df_map['longitude_fat'], errors='coerce')
-    df_map.dropna(subset=['latitude_fat', 'longitude_fat'], inplace=True)
 
-    # Remove invalid coordinates (outside reasonable bounds for Indonesia)
-    df_map = df_map[
+@st.cache_data(ttl=CACHE_CONFIG['map_data_ttl'], show_spinner="Preparing map data...")
+def prepare_map_data_enhanced(df: pd.DataFrame, max_markers: int = 1000, kota_filter: str = 'All') -> pd.DataFrame:
+    """
+    Enhanced map data preparation with intelligent caching and optimization.
+    """
+    print(f"Processing map data for {len(df)} records (filter: {kota_filter})")
+
+    if df.empty:
+        return pd.DataFrame()
+
+    df_map = df.copy()
+
+    # Efficient coordinate validation
+    numeric_columns = ['latitude_fat', 'longitude_fat']
+    for col in numeric_columns:
+        if col in df_map.columns:
+            df_map[col] = pd.to_numeric(df_map[col], errors='coerce')
+
+    # Remove invalid coordinates
+    valid_coords_mask = (
+        df_map['latitude_fat'].notna() &
+        df_map['longitude_fat'].notna() &
         (df_map['latitude_fat'] >= -11) & (df_map['latitude_fat'] <= 6) &
         (df_map['longitude_fat'] >= 95) & (df_map['longitude_fat'] <= 141)
-    ]
+    )
+    # Intelligent sampling based on importance
+    df_map = df_map[valid_coords_mask]
+    if max_markers is not None and len(df_map) > max_markers:
+        # Multi-criteria sampling: HC value + geographical distribution
+        if 'total_hc' in df_map.columns:
+            # Primary: High HC values
+            high_hc = df_map.nlargest(max_markers // 2, 'total_hc')
 
-    # If too many markers, sample the most important ones
-    if len(df_map) > max_markers:
-        # Prioritize assets with higher HC values
-        df_map = df_map.nlargest(max_markers, 'total_hc')
-        print(f"Map data sampled to {max_markers} markers for performance")
+            # Secondary: Geographical diversity (sample remaining)
+            remaining = df_map[~df_map.index.isin(high_hc.index)]
+            if not remaining.empty:
+                geo_sample = remaining.sample(
+                    min(max_markers // 2, len(remaining)))
+                df_map = pd.concat([high_hc, geo_sample])
+            else:
+                df_map = high_hc
+        else:
+            df_map = df_map.head(max_markers)
+
+        print(f"Map data intelligently sampled to {len(df_map)} markers")
+    elif max_markers is None:
+        print(f"Map data showing all {len(df_map)} markers (no limit)")
 
     return df_map
+
+
+def optimize_dataframe_memory(df: pd.DataFrame) -> pd.DataFrame:
+    """Optimize DataFrame memory usage by converting data types."""
+    if df.empty:
+        return df
+
+    df_optimized = df.copy()
+
+    # Optimize numeric columns
+    for col in df_optimized.select_dtypes(include=['int64']).columns:
+        if df_optimized[col].min() >= 0:
+            if df_optimized[col].max() < 255:
+                df_optimized[col] = df_optimized[col].astype('uint8')
+            elif df_optimized[col].max() < 65535:
+                df_optimized[col] = df_optimized[col].astype('uint16')
+            else:
+                df_optimized[col] = df_optimized[col].astype('uint32')
+        else:
+            if df_optimized[col].min() > -128 and df_optimized[col].max() < 127:
+                df_optimized[col] = df_optimized[col].astype('int8')
+            elif df_optimized[col].min() > -32768 and df_optimized[col].max() < 32767:
+                df_optimized[col] = df_optimized[col].astype('int16')
+            else:
+                df_optimized[col] = df_optimized[col].astype('int32')
+
+    # Optimize string columns to categories where beneficial
+    for col in df_optimized.select_dtypes(include=['object']).columns:
+        # Less than 50% unique values
+        if df_optimized[col].nunique() / len(df_optimized) < 0.5:
+            df_optimized[col] = df_optimized[col].astype('category')
+
+    return df_optimized
+
 # ----------------------------------------------------
 
 
-def _add_markers_to_map_helper(map_object, df_assets, current_filter_context, use_cluster=True):
+def _add_markers_to_map_helper(map_object, df_assets, current_filter_context, use_cluster=True, performance_limit=None):
     """
     Helper function to add asset markers to a Folium map or MarkerCluster.
-    Ensures coordinates are valid and creates informative popups.
-    Optimized for performance with minimal data processing.
+    Markers use check/cross icons based on fat_id_x field:
+    - Green check: fat_id_x is empty/null (good status)
+    - Red cross: fat_id_x has value (issue detected)
+
+    Args:
+        performance_limit: Maximum number of markers to render (None = unlimited)
     """
     if df_assets.empty:
         return
 
-    # Limit markers for performance - already handled in prepare_map_data but double-check
-    if len(df_assets) > 500:
-        df_assets = df_assets.head(500)
+    # Apply performance limit if specified
+    if performance_limit is not None and len(df_assets) > performance_limit:
+        df_assets = df_assets.head(performance_limit)
         print(
-            f"Limited markers to 500 for performance in {current_filter_context}")
+            f"Limited markers to {performance_limit} for performance in {current_filter_context}")
+    elif performance_limit is None:
+        print(f"Rendering all {len(df_assets)} markers (no performance limit)")
 
     target_map = map_object
 
-    for idx, asset_row in df_assets.iterrows():        # Simplified popup for better performance
+    for idx, asset_row in df_assets.iterrows():
+        lat = asset_row['latitude_fat']
+        lon = asset_row['longitude_fat']
+        fat_id = asset_row.get('fat_id', 'N/A')
+        kota = asset_row.get('kota_kab', 'N/A')
+        olt = asset_row.get('olt', 'N/A')
+        total_hc = asset_row.get('total_hc', 'N/A')
+        link = asset_row.get('link_dokumen_feeder', '#')
+
+        # Check fat_id_x to determine marker icon
+        fat_id_x = asset_row.get('fat_id_x', None)
+        if pd.isna(fat_id_x) or str(fat_id_x).strip().lower() in ['', 'none', 'nan']:
+            icon_color = 'green'
+            icon_shape = 'ok'  # checkmark
+            status_text = "Status: Normal"
+        else:
+            icon_color = 'red'
+            icon_shape = 'remove'  # cross/X
+            status_text = f"Status: Issue - {fat_id_x}"
+
+        # Enhanced popup with check/cross status
         popup_html = f"""
-        <div class="custom-marker">
-        <div class="marker-title">FAT: {asset_row.get('fat_id', 'N/A')}</div>
-        <div class="marker-content">
-        <b>Kota:</b> {asset_row.get('kota_kab', 'N/A')}<br>
-        <b>HC:</b> {asset_row.get('total_hc', 'N/A')}<br>
-        <b>OLT:</b> {asset_row.get('olt', 'N/A')}
-        </div>
+        <div style="font-family: Arial, sans-serif; min-width: 200px;">
+            <div style="background-color: {'#d4edda' if icon_color == 'green' else '#f8d7da'}; 
+                        padding: 8px; border-radius: 5px; margin-bottom: 10px;">
+                <h4 style="margin: 0; color: {'#155724' if icon_color == 'green' else '#721c24'};">
+                    FAT ID: {fat_id}
+                </h4>
+            </div>
+            <div style="padding: 5px 0;">
+                <b>Kota/Kab:</b> {kota}<br>
+                <b>OLT:</b> {olt}<br>
+                <b>Total HC:</b> {total_hc}<br>
+                <b>Link Dokumen:</b> <a href="{link}" target="_blank" style="color: #007bff;">Lihat Dokumen</a><br>
+                <b>{status_text}</b>
+            </div>
         </div>
         """
 
-        # Use simpler marker icon for better performance
-        folium.CircleMarker(
-            location=[asset_row['latitude_fat'], asset_row['longitude_fat']],
-            radius=5,
-            popup=folium.Popup(popup_html, max_width=250),
-            tooltip=f"FAT: {asset_row.get('fat_id', 'N/A')}",
-            color='blue',
-            fillColor='lightblue',
-            fillOpacity=0.7
+        # Use Folium Marker with check/cross icon
+        folium.Marker(
+            location=[lat, lon],
+            popup=folium.Popup(popup_html, max_width=300),
+            tooltip=f"FAT ID: {fat_id} | {status_text}",
+            icon=folium.Icon(color=icon_color,
+                             icon=icon_shape, prefix='glyphicon')
         ).add_to(target_map)
 
 
@@ -92,7 +201,9 @@ def app(asset_data_service: AssetDataService):
 
     Args:
         asset_data_service: An instance of AssetDataService to load data.
-    """    # CSS styles are now centralized in static/css/style.css
+    """
+
+    # CSS styles are now centralized in static/css/style.css
     # ------------------------------------------------------
 
     # Apply dashboard-specific styling by injecting CSS that targets the current page
@@ -108,10 +219,8 @@ def app(asset_data_service: AssetDataService):
 
     # --- Judul Utama ---
     st.markdown('<div class="title">DASHBOARD DATA ASET ALL</div>',
-                unsafe_allow_html=True)
-
-    # --- Load Data (Tetap sama) ---
-    df_raw = load_dashboard_data(asset_data_service)
+                unsafe_allow_html=True)    # --- Load Data with Enhanced Caching ---
+    df_raw = load_dashboard_data_cached(asset_data_service)
 
     # --- Initial Data Check and Cleaning (Tetap sama) ---
     if df_raw is None:
@@ -124,7 +233,7 @@ def app(asset_data_service: AssetDataService):
     df = df_raw.copy()
     df.columns = df.columns.str.strip().str.lower()
 
-    # --- Data Preprocessing & Filtering (Tetap sama) ---
+    # --- Data Preprocessing & Filtering (Enhanced) ---
     required_cols = ['kota_kab', 'total_hc', 'brand_olt',
                      'fat_filter_pemakaian', 'fat_id', 'fdt_id', 'olt']
     missing_cols = [col for col in required_cols if col not in df.columns]
@@ -132,13 +241,59 @@ def app(asset_data_service: AssetDataService):
         st.error(
             f"Missing required columns in the data: {', '.join(missing_cols)}. Dashboard cannot be fully rendered.")
         st.stop()
-    df['total_hc'] = pd.to_numeric(df['total_hc'], errors='coerce')
-    invalid_kota = ['local operator', 'none', '']
-    df_filtered_global = df[~df['kota_kab'].str.lower().isin(
+
+    # Clean and normalize data
+    df['total_hc'] = pd.to_numeric(df['total_hc'], errors='coerce').fillna(0)
+
+    # Normalize kota_kab names (fix case sensitivity issues like surabaya vs Surabaya)
+    df['kota_kab'] = df['kota_kab'].astype(str).str.strip().str.title()
+
+    # Clean fat_filter_pemakaian data (remove anomalies)
+    invalid_fat_filter = ['#N/A', '#REF!',
+                          'BISA DIPAKAI FAT LOSS', 'NAN', 'NONE', '']
+    df['fat_filter_pemakaian'] = df['fat_filter_pemakaian'].astype(
+        str).str.upper().str.strip()
+    df.loc[df['fat_filter_pemakaian'].isin(
+        invalid_fat_filter), 'fat_filter_pemakaian'] = 'UNKNOWN'
+
+    # Clean brand_olt data (normalize and remove anomalies)
+    df['brand_olt'] = df['brand_olt'].astype(str).str.strip()
+    # Normalize brand names - fix common variations
+    brand_mapping = {
+        'Fiber Home': 'Fiberhome',
+        'FIBER HOME': 'Fiberhome',
+        'fiberhome': 'Fiberhome',
+        'FIBERHOME': 'Fiberhome',
+        'fiber home': 'Fiberhome',
+        'ZTE': 'Zte',
+        'zte': 'Zte',
+        'HUAWEI': 'Huawei',
+        'huawei': 'Huawei',
+        'BDCOM': 'Bdcom',
+        'bdcom': 'Bdcom',
+        'RAISECOM': 'Raisecom',
+        'raisecom': 'Raisecom',
+        '#N/A': 'Unknown',
+        '#REF!': 'Unknown',
+        'NAN': 'Unknown',
+        'NONE': 'Unknown',
+        '': 'Unknown',
+        'nan': 'Unknown'
+    }
+    df['brand_olt'] = df['brand_olt'].replace(brand_mapping)
+
+    # Enhanced kota filtering (more comprehensive)
+    invalid_kota = ['LOCAL OPERATOR', 'NONE',
+                    '', 'NAN', '#N/A', '#REF!', 'UNKNOWN']
+    df_filtered_global = df[~df['kota_kab'].str.upper().isin(
         invalid_kota)].copy()
     df_filtered_global.dropna(subset=['kota_kab'], inplace=True)
+
+    # Remove rows with negative HC values (anomalies)
+    df_filtered_global = df_filtered_global[df_filtered_global['total_hc'] >= 0]
+
     if df_filtered_global.empty:
-        st.warning("No valid data remaining after initial filtering.")
+        st.warning("No valid data remaining after enhanced filtering.")
         st.stop()
 
     # --- Global KPIs (HTML Tetap sama, styling dari CSS) ---
@@ -171,14 +326,22 @@ def app(asset_data_service: AssetDataService):
         """
         st.markdown(kpi_html_1, unsafe_allow_html=True)
 
+        # Enhanced KPI calculations with proper data filtering
         hc_per_kota_global = df_filtered_global.groupby(
             'kota_kab')['total_hc'].sum().reset_index()
-        hc_per_kota_global = hc_per_kota_global[hc_per_kota_global['total_hc'] >= 0]
+
+        # Remove kota with zero or negative HC values for KPI calculations
+        hc_per_kota_global = hc_per_kota_global[hc_per_kota_global['total_hc'] > 0]
 
         if not hc_per_kota_global.empty:
+            # Correct calculation: Average HC per kota (total HC of each kota / number of kotas)
             avg_hc_per_kota = hc_per_kota_global['total_hc'].mean()
+
+            # Highest HC kota
             max_hc_row = hc_per_kota_global.loc[hc_per_kota_global['total_hc'].idxmax(
             )]
+
+            # Lowest HC kota (but still > 0 to avoid anomalies)
             min_hc_row = hc_per_kota_global.loc[hc_per_kota_global['total_hc'].idxmin(
             )]
 
@@ -187,6 +350,7 @@ def app(asset_data_service: AssetDataService):
                 <div class="kpi-box">
                     <h4>📊 Avg HC / Kota</h4>
                     <p>{int(avg_hc_per_kota):,} HC</p>
+                    <p class="subtext">Rata-rata dari {len(hc_per_kota_global)} kota</p>
                 </div>
                 <div class="kpi-box">
                     <h4>🚀 Highest HC</h4>
@@ -211,22 +375,26 @@ def app(asset_data_service: AssetDataService):
 
     st.divider()
 
-    # --- Interactive Filtering (Tetap sama) ---
+    # --- Interactive Filtering (Enhanced) ---
     st.subheader("🔍 Filtered Analysis")
     unique_cities = sorted(df_filtered_global['kota_kab'].unique().tolist())
-    invalid_strings_for_select = ['local operator', 'none', '', ' ',  '#n/a']
+    # Enhanced filtering for city selection (remove anomalies)
+    invalid_strings_for_select = ['local operator',
+                                  'none', '', ' ', '#n/a', 'unknown', 'nan']
     unique_cities = [city for city in unique_cities if city.lower(
     ) not in invalid_strings_for_select]
+
     kota_filter = st.selectbox(
         "Select Kota/Kabupaten for detailed view:",
         ['All'] + unique_cities,
         key="kota_filter_selectbox"
     )
+
+    # FIXED: Proper filtering logic
     if kota_filter != 'All':
         df_filtered_selection = df_filtered_global[df_filtered_global['kota_kab'] == kota_filter].copy(
         )
     else:
-        # Jika 'All', gunakan data global yang sudah bersih
         df_filtered_selection = df_filtered_global.copy()
 
     # Cek jika hasil filter (untuk kota spesifik) kosong
@@ -281,48 +449,72 @@ def app(asset_data_service: AssetDataService):
     with vis_cols[1]:
         st.markdown("##### OLT Brand Distribution")
         if 'brand_olt' in df_filtered_selection.columns and not df_filtered_selection.empty:
-            brand_counts = df_filtered_selection['brand_olt'].value_counts(
-            ).reset_index()
-            brand_counts.columns = ['brand_olt', 'count']
-            if not brand_counts.empty:
-                fig = px.pie(brand_counts, names='brand_olt', values='count', title=f"OLT Brand Distribution in {kota_filter}",
-                             hole=0.3)
-                fig.update_traces(textposition='inside',
-                                  textinfo='percent+label')
-                st.plotly_chart(fig, use_container_width=True)
+            # Enhanced data cleaning for brand OLT
+            df_brand_clean = df_filtered_selection.copy()
+
+            # Remove anomalies and normalize values
+            invalid_brand_values = ['Unknown',
+                                    '#N/A', '#REF!', 'NAN', 'NONE', '']
+            df_brand_clean = df_brand_clean[~df_brand_clean['brand_olt'].isin(
+                invalid_brand_values)]
+
+            if not df_brand_clean.empty:
+                brand_counts = df_brand_clean['brand_olt'].value_counts(
+                ).reset_index()
+                brand_counts.columns = ['brand_olt', 'count']
+
+                if not brand_counts.empty:
+                    fig = px.pie(brand_counts, names='brand_olt', values='count', title=f"OLT Brand Distribution in {kota_filter}",
+                                 hole=0.3)
+                    fig.update_traces(textposition='inside',
+                                      textinfo='percent+label')
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info(
+                        f"No valid OLT brand data to display for {kota_filter}.")
             else:
-                st.info(f"No OLT brand data to display for {kota_filter}.")
+                st.info(
+                    f"No valid OLT brand data after cleaning anomalies for {kota_filter}.")
         else:
-            st.info(
-                f"OLT Brand data not available or no data for {kota_filter}.")
+            st.info(f"OLT Brand data not available for {kota_filter}.")
 
     # Plot 3: FAT Filter Pemakaian Distribution
     with vis_cols[2]:
         st.markdown("##### FAT Filter Status Distribution")
         if 'fat_filter_pemakaian' in df_filtered_selection.columns and not df_filtered_selection.empty:
-            # Clean data: replace None or empty strings
-            df_filtered_selection['fat_filter_cleaned'] = df_filtered_selection['fat_filter_pemakaian'].fillna(
-                'Unknown').replace('', 'Unknown')
-            pemakaian_counts = df_filtered_selection['fat_filter_cleaned'].value_counts(
-            ).reset_index()
-            pemakaian_counts.columns = ['fat_filter_pemakaian', 'count']
-            if not pemakaian_counts.empty:
-                fig = px.bar(pemakaian_counts, x='fat_filter_pemakaian', y='count',
-                             title=f"Status Pemakaian FAT di {kota_filter}",
-                             labels={
-                                 'fat_filter_pemakaian': 'Status Pemakaian', 'count': 'Jumlah FAT'},
-                             color='fat_filter_pemakaian')
-                fig.update_layout(xaxis_title=None,
-                                  yaxis_title="Jumlah FAT", showlegend=False)
-                st.plotly_chart(fig, use_container_width=True)
+            # Enhanced data cleaning for FAT filter status
+            df_filter_clean = df_filtered_selection.copy()
+
+            # Remove anomalies and normalize values
+            invalid_filter_values = [
+                'UNKNOWN', '#N/A', '#REF!', 'BISA DIPAKAI FAT LOSS', 'NAN', 'NONE', '']
+            df_filter_clean = df_filter_clean[~df_filter_clean['fat_filter_pemakaian'].isin(
+                invalid_filter_values)]
+
+            if not df_filter_clean.empty:
+                pemakaian_counts = df_filter_clean['fat_filter_pemakaian'].value_counts(
+                ).reset_index()
+                pemakaian_counts.columns = ['fat_filter_pemakaian', 'count']
+
+                if not pemakaian_counts.empty:
+                    fig = px.bar(pemakaian_counts, x='fat_filter_pemakaian', y='count',
+                                 title=f"Status Pemakaian FAT di {kota_filter}",
+                                 labels={
+                                     'fat_filter_pemakaian': 'Status Pemakaian', 'count': 'Jumlah FAT'},
+                                 color='fat_filter_pemakaian')
+                    fig.update_layout(xaxis_title=None,
+                                      yaxis_title="Jumlah FAT", showlegend=False)
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info(
+                        f"No valid FAT filter data to display for {kota_filter}.")
             else:
                 st.info(
-                    f"Tidak ada data Status Pemakaian FAT untuk ditampilkan di {kota_filter}.")
+                    f"No valid FAT filter data after cleaning anomalies for {kota_filter}.")
         else:
-            st.info(
-                f"Kolom 'fat_filter_pemakaian' tidak tersedia atau tidak ada data untuk {kota_filter}.")
+            st.info(f"FAT filter data not available for {kota_filter}.")
 
-    # --- Plot 5: Bump Chart (di kolom kedua yang lebih lebar) ---
+    # --- Additional Charts ---
     vis_cols2 = st.columns([1, 2])
 
     # Plot 4: Progress Bar HC (di kolom pertama)
@@ -366,7 +558,7 @@ def app(asset_data_service: AssetDataService):
             st.info(
                 f"Tidak ada data tersedia untuk visualisasi Distribusi HC Teratas di {kota_filter}.")
 
-    # --- Plot 5: Bump Chart (di kolom kedua yang lebih lebar) ---
+    # Plot 5: Trend Chart
     with vis_cols2[1]:
         st.markdown(f"##### Peringkat HC per Tahun (Top 10 Kota/Kab)")
         df_bump_chart_base = df_filtered_selection.copy()
@@ -428,34 +620,79 @@ def app(asset_data_service: AssetDataService):
                             f"Tidak ada data HC tahunan untuk {kota_filter}.")
 
     st.divider()
-    st.subheader("🗺️ Peta Lokasi Aset")
+    st.subheader(f"🗺️ Peta Lokasi Aset - {kota_filter}")
+
+    # Show filtering info with debug details
+    if kota_filter != 'All':
+        unique_cities_in_filtered = df_filtered_selection['kota_kab'].unique(
+        ) if not df_filtered_selection.empty else []
+        st.info(
+            f"📍 Menampilkan peta untuk kota: **{kota_filter}** | Total aset: {len(df_filtered_selection):,}")
+        if len(unique_cities_in_filtered) > 1:
+            st.warning(
+                f"⚠️ Debug: Data masih mengandung {len(unique_cities_in_filtered)} kota: {', '.join(unique_cities_in_filtered[:5])}")
+        elif len(unique_cities_in_filtered) == 1:
+            st.success(
+                f"✅ Data berhasil difilter untuk kota: {unique_cities_in_filtered[0]}")
+    else:
+        unique_cities_in_filtered = df_filtered_selection['kota_kab'].unique(
+        ) if not df_filtered_selection.empty else []
+        st.info(
+            f"📍 Menampilkan peta untuk semua kota | Total aset: {len(df_filtered_selection):,} | Kota ditemukan: {len(unique_cities_in_filtered)}")
 
     # Performance toggle
-    col_map1, col_map2 = st.columns([3, 1])
+    col_map1, col_map2, col_map3 = st.columns([2, 1, 1])
     with col_map1:
         fat_id_search = st.text_input(
             "Cari FAT ID (kosongkan untuk melihat peta regional/kota):", key="map_fat_id_search").strip()
     with col_map2:
         show_map = st.checkbox("Tampilkan Peta", value=True,
                                help="Uncheck to skip map loading for faster page load")
+    with col_map3:
+        show_all_data = st.checkbox("Tampilkan Semua Data", value=False,
+                                    help="⚠️ PERINGATAN: Menampilkan semua data dapat memperlambat loading")
 
     if not show_map:
         st.info("🚀 Peta dinonaktifkan untuk performa yang lebih cepat. Centang kotak 'Tampilkan Peta' untuk melihat peta.")
         return
 
-    # Prepare map data with caching and sampling
-    with st.spinner("Mempersiapkan data peta..."):
-        df_map_ready = prepare_map_data(
-            df_filtered_selection, max_markers=800 if kota_filter == 'All' else 200)
+    # Dynamic marker limits based on user choice
+    if show_all_data:
+        st.warning(
+            "⚠️ **Mode Semua Data Aktif**: Rendering mungkin membutuhkan waktu lebih lama untuk dataset besar (>10,000 markers)")
+        max_markers_limit = None  # No limit
+        performance_limit = None  # No limit in helper function
+    else:
+        max_markers_limit = 1000 if kota_filter == 'All' else 300
+        performance_limit = 500
+
+    # FIXED: Double-check filtering before preparing map data
+    if kota_filter != 'All':
+        # Ensure data is properly filtered for the selected city
+        df_for_map = df_filtered_selection[df_filtered_selection['kota_kab'] == kota_filter].copy(
+        )
+        if df_for_map.empty:
+            st.error(
+                f"❌ Tidak ada data untuk kota {kota_filter} setelah filtering ulang.")
+            return
+        st.success(
+            f"✅ Verifikasi filtering: {len(df_for_map)} aset ditemukan untuk {kota_filter}")
+    else:
+        # Prepare map data with enhanced caching and sampling
+        df_for_map = df_filtered_selection.copy()
+    with st.spinner("Preparing optimized map data..."):
+        df_map_ready = prepare_map_data_enhanced(
+            df_for_map,
+            max_markers=max_markers_limit,
+            kota_filter=kota_filter
+        )
 
     if df_map_ready.empty:
         st.info(
             f"Tidak ada data aset dengan koordinat valid untuk peta ({kota_filter}).")
-        return
-
-    # Cek kolom penting untuk peta
+        return    # Cek kolom penting untuk peta
     required_map_cols_search = [
-        'latitude_fat', 'longitude_fat', 'fat_id', 'kota_kab', 'total_hc', 'olt']
+        'latitude_fat', 'longitude_fat', 'fat_id', 'kota_kab', 'total_hc', 'olt', 'fat_id_x', 'link_dokumen_feeder']
 
     if not all(col in df_map_ready.columns for col in required_map_cols_search):
         missing_map_cols = [
@@ -468,13 +705,24 @@ def app(asset_data_service: AssetDataService):
     map_center_default = [-7.5, 112.7]  # East Java
     map_zoom_default = 8
 
-    # Calculate optimal center based on data
-    if not df_map_ready.empty and kota_filter != 'All':
-        map_center_default = [
-            df_map_ready['latitude_fat'].mean(), df_map_ready['longitude_fat'].mean()]
-        map_zoom_default = 10
+    # Calculate optimal center based on data and selected filter
+    if not df_map_ready.empty:
+        if kota_filter != 'All':
+            # For specific city, center on that city's data
+            map_center_default = [
+                df_map_ready['latitude_fat'].mean(),
+                df_map_ready['longitude_fat'].mean()
+            ]
+            map_zoom_default = 12  # Zoom closer for specific city        else:
+            # For 'All', use broader view but still center on data
+            map_center_default = [
+                df_map_ready['latitude_fat'].mean(),
+                df_map_ready['longitude_fat'].mean()
+            ]
+            map_zoom_default = 8
 
     with st.spinner("Memuat peta..."):
+
         m = folium.Map(
             location=map_center_default,
             zoom_start=map_zoom_default,
@@ -501,7 +749,7 @@ def app(asset_data_service: AssetDataService):
 
                 # Add search result markers (no clustering for search results)
                 _add_markers_to_map_helper(m, df_search_result.head(
-                    50), f"search: {fat_id_search}", use_cluster=False)
+                    50), f"search: {fat_id_search}", use_cluster=False, performance_limit=50)
             else:
                 st.warning(
                     f"FAT ID '{fat_id_search}' tidak ditemukan. Menampilkan peta umum.")
@@ -512,7 +760,7 @@ def app(asset_data_service: AssetDataService):
                              'spiderfyOnMaxZoom': False}
                 ).add_to(m)
                 _add_markers_to_map_helper(
-                    marker_cluster, df_map_ready, kota_filter)
+                    marker_cluster, df_map_ready, kota_filter, performance_limit=performance_limit)
         else:
             # General view with clustering for performance
             if len(df_map_ready) > 100:
@@ -522,14 +770,57 @@ def app(asset_data_service: AssetDataService):
                              'spiderfyOnMaxZoom': False}
                 ).add_to(m)
                 _add_markers_to_map_helper(
-                    marker_cluster, df_map_ready, kota_filter)
-                st.info(
-                    f"Menampilkan {len(df_map_ready)} aset dengan clustering untuk performa optimal.")
+                    marker_cluster, df_map_ready, kota_filter, performance_limit=performance_limit)
+
+                # Enhanced success message with city verification
+                if kota_filter != 'All':
+                    cities_in_map = df_map_ready['kota_kab'].unique(
+                    ) if 'kota_kab' in df_map_ready.columns else ['Unknown']
+                    if len(cities_in_map) == 1 and cities_in_map[0] == kota_filter:
+                        st.success(
+                            f"✅ Peta {kota_filter} berhasil dimuat dengan {len(df_map_ready)} aset (dengan clustering)")
+                    else:
+                        st.warning(
+                            f"⚠️ Peta dimuat dengan {len(df_map_ready)} aset, tetapi mengandung kota: {', '.join(cities_in_map[:3])}")
+                else:
+                    cities_in_map = df_map_ready['kota_kab'].unique(
+                    ) if 'kota_kab' in df_map_ready.columns else ['Unknown']
+                    st.success(
+                        f"✅ Peta semua kota berhasil dimuat dengan {len(df_map_ready)} aset dari {len(cities_in_map)} kota (dengan clustering)")
             else:
                 # Few markers, no need for clustering
                 _add_markers_to_map_helper(
-                    m, df_map_ready, kota_filter, use_cluster=False)
-                # Display map
-                st.info(f"Menampilkan {len(df_map_ready)} aset.")
+                    m, df_map_ready, kota_filter, use_cluster=False, performance_limit=performance_limit)
+
+                # Enhanced success message with city verification
+                if kota_filter != 'All':
+                    cities_in_map = df_map_ready['kota_kab'].unique(
+                    ) if 'kota_kab' in df_map_ready.columns else ['Unknown']
+                    if len(cities_in_map) == 1 and cities_in_map[0] == kota_filter:
+                        st.success(
+                            f"✅ Peta {kota_filter} berhasil dimuat dengan {len(df_map_ready)} aset")
+                    else:
+                        st.warning(
+                            f"⚠️ Peta dimuat dengan {len(df_map_ready)} aset, tetapi mengandung kota: {', '.join(cities_in_map[:3])}")
+                else:
+                    cities_in_map = df_map_ready['kota_kab'].unique(
+                    ) if 'kota_kab' in df_map_ready.columns else ['Unknown']
+                    st.success(
+                        f"✅ Peta semua kota berhasil dimuat dengan {len(df_map_ready)} aset dari {len(cities_in_map)} kota")
+
         # Reduced height for better performance
         folium_static(m, width=None, height=500)
+
+        # Add marker status summary after the map
+        if 'fat_id_x' in df_map_ready.columns:
+            normal_count = df_map_ready['fat_id_x'].isna().sum(
+            ) + (df_map_ready['fat_id_x'].astype(str).str.strip().str.lower().isin(['', 'none', 'nan'])).sum()
+            issue_count = len(df_map_ready) - normal_count
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("🟢 FAT Normal", normal_count,
+                          help="FAT dengan kondisi masih bisa diisi (fat_id_x kosong)")
+            with col2:
+                st.metric("🔴 FAT Full", issue_count,
+                          help="FAT sudah terisi penuh (fat_id_x terisi)")

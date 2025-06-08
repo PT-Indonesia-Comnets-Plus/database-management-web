@@ -1,6 +1,17 @@
 primary_agent:
-  llm: gemini-1.5-flash # More token efficient than gemini-2.0
+  llm: gemini-1.5-flash
   llm_temperature: 0.0
+
+web_search_configs:
+  llm_query_generator_model: gemini-1.5-flash
+  llm_reflection_model: gemini-2.0-flash
+  llm_answer_model: gemini-2.5-pro-preview-05-06
+  llm_temperature: 0.0
+  max_results: 2
+  number_of_initial_queries: 2
+  max_research_loops: 1
+  temperature: 1.0
+  max_retries: 2
 
 rag_configs:
   unstructured_docs: "data/unstructured_docs/swiss_airline_policy"
