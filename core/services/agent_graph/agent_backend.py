@@ -258,11 +258,12 @@ def reflection_node(state: State) -> dict:
         db_keywords = ['berapa', 'total', 'jumlah', 'bandingkan', 'hitung', 'cari data', 'data',
                        'pelanggan', 'brand', 'kota', 'cluster', 'lokasi', 'aset']
         if any(kw in q for kw in db_keywords):
+            # PRIORITAS 4: DOKUMENTASI TEKNIS - Hanya untuk definisi murni
             return 'query_asset_database', 'DATA DATABASE'
-
-        # PRIORITAS 4: DOKUMENTASI TEKNIS - Hanya untuk definisi murni
-        doc_pure_keywords = ['apa itu fat', 'apa itu fdt', 'perbedaan fat fdt', 'hubungan fat',
-                             'cara instalasi', 'panduan', 'sop', 'dokumentasi', 'konfigurasi']
+        doc_pure_keywords = ['apa itu fat', 'apa itu fdt', 'apa itu iconnet', 'apa itu icon plus',
+                             'apa itu pln', 'perbedaan fat fdt', 'hubungan fat',
+                             'cara instalasi', 'panduan', 'sop', 'dokumentasi', 'konfigurasi',
+                             'jelaskan', 'definisi', 'pengertian']
         if any(kw in q for kw in doc_pure_keywords):
             return 'search_internal_documents', 'DOKUMENTASI TEKNIS'
 

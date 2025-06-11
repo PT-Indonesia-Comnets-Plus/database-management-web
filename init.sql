@@ -87,7 +87,30 @@ CREATE TABLE pelanggans (
     cust_name VARCHAR(255), 
     telpn VARCHAR(255), 
     latitude_pelanggan FLOAT, 
-    longitude_pelanggan FLOAT, 
-    fat_id VARCHAR(255) NOT NULL REFERENCES user_terminals(fat_id) ON DELETE CASCADE, -- Relasi ke fiber_network
+    longitude_pelanggan FLOAT,    fat_id VARCHAR(255) NOT NULL REFERENCES user_terminals(fat_id) ON DELETE CASCADE, -- Relasi ke fiber_network
     notes TEXT 
 );
+
+-- Tabel documents untuk RAG system (PDF embeddings)
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE TABLE documents (
+    id SERIAL PRIMARY KEY,
+    content TEXT NOT NULL,
+    metadata TEXT, -- JSON string containing file metadata
+    embedding vector(1536) -- Google embedding model dimensions
+);
+
+-- Index untuk faster similarity search
+CREATE INDEX ON documents USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+
+-- Tabel documents untuk RAG system (PDF embeddings)
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE TABLE documents (
+    id SERIAL PRIMARY KEY,
+    content TEXT NOT NULL,
+    metadata TEXT, -- JSON string containing file metadata
+    embedding vector(1536) -- Google embedding model dimensions
+);
+
+-- Index untuk faster similarity search
+CREATE INDEX ON documents USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);

@@ -133,14 +133,13 @@ Intent Analysis Results:
 - User Expectations: {intent_analysis.user_expectations}
 
 Available Tools:
-1. tools_web_search - For advanced internet research with iterative refinement (RECOMMENDED)
-1. tools_web_search - For comprehensive internet research with advanced features (primary)
-2. enhanced_web_research - For basic internet research (legacy fallback)
-3. query_asset_database - For database queries about assets, counts, totals, locations
-3. search_internal_documents - For internal documentation, guides, SOPs, technical terms (FAT, FDT, etc)
-4. create_visualization - For creating charts, graphs, visual representations
-5. trigger_spreadsheet_etl_and_get_summary - For spreadsheet processing and ETL
-6. sql_agent - For complex SQL database operations
+1. search_internal_documents - For internal documentation, guides, SOPs, technical terms, COMPANY INFORMATION (FAT, FDT, ICONNET, ICON Plus, PLN, Telkom)
+2. query_asset_database - For database queries about assets, counts, totals, locations
+3. tools_web_search - For comprehensive internet research with advanced features (for external information only)
+4. enhanced_web_research - For basic internet research (legacy fallback)
+5. create_visualization - For creating charts, graphs, visual representations
+6. trigger_spreadsheet_etl_and_get_summary - For spreadsheet processing and ETL
+7. sql_agent - For complex SQL database operations
 
 STRATEGIC PLANNING RULES:
 1. For spreadsheet operations (ambil data, upload, file processing, data terbaru dari spreadsheet) → trigger_spreadsheet_etl_and_get_summary
@@ -170,19 +169,17 @@ Consider tool dependencies (e.g., visualization often needs data first).
         print(f"Error in tool selection planning: {e}")
 
         # Improved fallback plan with better logic
-        query_lower = user_query.lower()
-
-        # Smart fallback based on query content
+        query_lower = user_query.lower()        # Smart fallback based on query content
         if any(term in query_lower for term in ['spreadsheet', 'excel', 'ambil data', 'upload', 'etl', 'file', 'data terbaru']):
             # Spreadsheet operations
             fallback_tool = "trigger_spreadsheet_etl_and_get_summary"
             fallback_rationale = "Query involves spreadsheet or file operations"
             alternative_approaches = [
                 "Check file format compatibility", "Verify data structure"]
-        elif any(term in query_lower for term in ['fat', 'fdt', 'ont', 'olt', 'home connected', 'fiber', 'konfigurasi']):
-            # Technical terms - try internal docs first
+        elif any(term in query_lower for term in ['fat', 'fdt', 'ont', 'olt', 'home connected', 'fiber', 'konfigurasi', 'iconnet', 'icon plus', 'pln', 'apa itu', 'jelaskan', 'pengertian', 'definisi']):
+            # Technical terms or definition requests - try internal docs first
             fallback_tool = "search_internal_documents"
-            fallback_rationale = "Query contains technical terms - checking internal documentation first"
+            fallback_rationale = "Query contains technical terms or definition requests - checking internal documentation first"
             alternative_approaches = [
                 "Enhanced web research if internal docs insufficient", "Contact technical support"]
         else:
@@ -226,11 +223,10 @@ Planned Tools: {planned_tools}
 {execution_context}
 
 Available Tools for Context:
-- tools_web_search: Advanced web research with iterative refinement and citation handling
-- tools_web_search: Comprehensive web research with citations and iterative refinement (primary)
-- enhanced_web_research: Basic web research (legacy)
+- search_internal_documents: Internal documentation, guides, SOPs, technical terms, COMPANY INFORMATION (FAT, FDT, ICONNET, ICON Plus, PLN, Telkom)
 - query_asset_database: Database queries for assets, counts, statistics
-- search_internal_documents: Internal documentation and guides (for FAT, FDT, technical terms)
+- tools_web_search: Advanced web research with iterative refinement and citation handling (for external information only)
+- enhanced_web_research: Basic web research (legacy)
 - create_visualization: Charts, graphs, visual representations
 - trigger_spreadsheet_etl_and_get_summary: Spreadsheet processing
 - sql_agent: Complex SQL database operations

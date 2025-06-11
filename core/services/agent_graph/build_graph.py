@@ -159,9 +159,8 @@ Tugas Anda: Buat respons final yang menjawab pertanyaan pengguna berdasarkan has
                 # Regular tool execution flow
                 # Smart guidance logic - only use reflection guidance if context hasn't changed
                 guidance_prompt = ""
-                current_query = last_message.content.lower() if last_message else ""
-
                 # Only provide guidance if:
+                current_query = last_message.content.lower() if last_message else ""
                 # 1. We have reflection and it's a retry situation
                 # 2. Context hasn't changed (same type of request)
                 # 3. The suggested tool is still relevant to current query
@@ -170,7 +169,7 @@ Tugas Anda: Buat respons final yang menjawab pertanyaan pengguna berdasarkan has
                     tool_relevance_map = {
                         'query_asset_database': ['berapa', 'total', 'jumlah', 'pelanggan', 'brand', 'data', 'kota'],
                         'create_visualization': ['grafik', 'chart', 'visualisasi', 'pie', 'bar', 'diagram'],
-                        'search_internal_documents': ['panduan', 'dokumentasi', 'sop', 'cara'],
+                        'search_internal_documents': ['panduan', 'dokumentasi', 'sop', 'cara', 'apa itu', 'iconnet', 'icon', 'plus', 'pln', 'telkom', 'perusahaan', 'profil', 'fat', 'fdt', 'ont', 'olt', 'definisi', 'jelaskan', 'adalah'],
                         'enhanced_web_research': ['informasi', 'berita', 'terbaru', 'internet', 'siapa', 'apa', 'kapan', 'dimana', 'mengapa', 'bagaimana', 'pemenang', 'juara', 'terbaru', 'update', 'news'],
                         'enhanced_intent_analysis': ['analisis', 'strategi', 'pendekatan', 'kompleks', 'multi-step', 'rencana', 'optimal']
                     }
@@ -211,41 +210,49 @@ CRITICAL INSTRUCTIONS:
 2. For COMPLEX queries or when unsure about tool selection, FIRST use 'enhanced_intent_analysis' to understand user intent deeply
 3. For SIMPLE, clear queries, proceed directly to the appropriate tool
 
-MULTI-PHASE APPROACH (like enhanced web research):
-- PHASE 1: If query intent is unclear → Use 'enhanced_intent_analysis' first
-- PHASE 2: Based on analysis results → Select and execute the optimal tool(s)
-- PHASE 3: Reflection and refinement happens automatically
+MANDATORY TOOL SELECTION RULES (HIGHEST PRIORITY):
+- ANY query about ICONNET, ICON Plus, PLN, Telkom, company info → ALWAYS use 'search_internal_documents' FIRST
+- Queries starting with "apa itu" about company products → ALWAYS use 'search_internal_documents' FIRST
+- Company profile, product information, technical terms → ALWAYS use 'search_internal_documents' FIRST
 
 Available tools:
 1. enhanced_intent_analysis - For deep analysis of user intent and optimal tool selection planning (use FIRST for complex/unclear queries)
-2. tools_web_search - For comprehensive web research with advanced citation handling (PRIMARY web research tool)
+2. tools_web_search - For comprehensive web research with advanced citation handling (ONLY for external information)
 3. enhanced_web_research - For basic web research (FALLBACK if tools_web_search fails due to quota)
 4. query_asset_database - For database queries about assets, data counts, totals
-5. search_internal_documents - For documentation and guides, technical terms (FAT, FDT, ONT, OLT)
+5. search_internal_documents - For documentation and guides, technical terms (FAT, FDT, ONT, OLT), COMPANY INFORMATION
 6. create_visualization - For creating charts and graphs  
 7. trigger_spreadsheet_etl_and_get_summary - For spreadsheet processing
 8. sql_agent - For SQL database operations
 
 SMART TOOL SELECTION STRATEGY:
 - Simple data queries → query_asset_database directly
+- Company information (iconnet, icon plus, pln, telkom) → search_internal_documents FIRST
 - Technical terms (fat, fdt, ont, olt, home connected) → search_internal_documents first
 - Complex/multi-step requests → enhanced_intent_analysis first, then follow recommendations
 - Visualization requests → May need data tool first, then create_visualization
 - Internet research → tools_web_search (primary), enhanced_web_research (fallback)
 - Documentation → search_internal_documents directly
-- UNCLEAR/UNKNOWN queries → tools_web_search as reliable first choice, enhanced_web_research as backup
+- COMPANY/PRODUCT queries (apa itu iconnet, icon plus, profil perusahaan) → search_internal_documents MANDATORY
 
-FALLBACK HIERARCHY:
-1. Primary: Most specific tool for query type
-2. Secondary: search_internal_documents for technical terms
-3. Tertiary: tools_web_search for web research (with enhanced_web_research fallback if quota exceeded)
+PRIORITY HIERARCHY:
+1. PRIMARY: Company/Product information → search_internal_documents (ICONNET, ICON Plus, PLN, company profiles)
+2. SECONDARY: Technical documentation → search_internal_documents for technical terms
+3. TERTIARY: External research → tools_web_search for general internet research
+4. FALLBACK: enhanced_web_research if quota exceeded
 
 QUOTA AWARENESS: If tools_web_search returns quota exceeded messages, automatically suggest enhanced_web_research as alternative.
+
+CRITICAL FOR ICONNET QUERIES:
+For any query about ICONNET, ICON Plus, company profile, or "apa itu" questions about company products/services:
+- ALWAYS use search_internal_documents FIRST
+- These queries should NEVER go to web search initially
+- Internal documentation contains authoritative company information
 
 NEVER give direct LLM responses without using tools!
 
 Current Query: "{current_query}"
-Analysis: Determine if this is a simple direct query or needs sophisticated intent analysis first."""
+Analysis: For ICONNET/company queries → search_internal_documents. For data queries → query_asset_database. For complex analysis → enhanced_intent_analysis first."""
 
                 # Create messages with system prompt
                 from langchain_core.messages import SystemMessage
