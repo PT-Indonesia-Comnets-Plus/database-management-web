@@ -293,7 +293,6 @@ flowchart TD
 
 ### 🛠️ Available Tools:
 
-- **query_asset_database**: Query langsung ke database asset
 - **search_internal_documents**: Pencarian dalam dokumen internal (RAG)
 - **create_visualization**: Membuat grafik dan visualisasi data
 - **sql_agent**: Agent khusus untuk query SQL kompleks
