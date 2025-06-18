@@ -5,38 +5,13 @@ import requests
 from typing import Dict, Optional
 from langchain_core.tools import tool
 import logging
+from ....utils.load_config import TOOLS_CFG
 
 logger = logging.getLogger(__name__)
 
-# Konfigurasi Airflow API dari secrets dengan fallback yang robust
-
-
-def _get_airflow_config():
-    """Get Airflow configuration with robust fallback handling"""
-    try:
-        # Try to get from streamlit secrets first
-        airflow_config = st.secrets.get("airflow", {})
-        return {
-            "base_url": airflow_config.get("base_url", "http://localhost:8080"),
-            "username": airflow_config.get("username", "admin"),
-            "password": airflow_config.get("password", "admin123")
-        }
-    except Exception as e:
-        # Fallback to default configuration if streamlit secrets not available
-        logger.warning(
-            f"Unable to load streamlit secrets, using fallback config: {e}")
-        return {
-            "base_url": "http://localhost:8080",
-            "username": "admin",
-            "password": "admin123"
-        }
-
-
-# Get configuration
-_config = _get_airflow_config()
-AIRFLOW_BASE_URL = _config["base_url"]
-AIRFLOW_USERNAME = _config["username"]
-AIRFLOW_PASSWORD = _config["password"]
+AIRFLOW_BASE_URL = TOOLS_CFG.airflow_url
+AIRFLOW_USERNAME = TOOLS_CFG.airflow_username
+AIRFLOW_PASSWORD = TOOLS_CFG.airflow_password
 
 # DAG dan task configuration
 ETL_DAG_ID = "iconnet_data_pipeline"

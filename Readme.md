@@ -31,8 +31,6 @@
 
 ## 🏗️ Architecture
 
-The ICONNET platform integrates seamlessly with external ETL systems through the Airflow Trigger Agent Tool, providing a comprehensive data processing workflow that spans both internal and external pipeline systems.
-
 ```mermaid
 ---
 config:
@@ -215,24 +213,15 @@ flowchart TD
 
 ```
 
-## Prasyarat
-
-- Sudah install [`uv`](https://docs.astral.sh/uv/getting-started/installation/)
-- PostgreSQL database (local atau cloud)
-- Firebase project untuk authentication
-- Google AI API key untuk LLM
-- (Opsional) Apache Airflow untuk ETL pipeline
-
 ## Instalasi & Setup (Local)
 
 ```powershell
 # Clone repository
-git clone https://github.com/rizkyyanuark/intern-iconnet.git
+git clone https://github.com/PT-Indonesia-Comnets-Plus/database-management-web.git
 cd intern-iconnet
 
 # Setup Python (opsional, untuk development)
 uv venv
-.venv\Scripts\activate
 uv sync
 
 # Copy dan edit file .secret

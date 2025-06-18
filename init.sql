@@ -87,7 +87,8 @@ CREATE TABLE pelanggans (
     cust_name VARCHAR(255), 
     telpn VARCHAR(255), 
     latitude_pelanggan FLOAT, 
-    longitude_pelanggan FLOAT,    fat_id VARCHAR(255) NOT NULL REFERENCES user_terminals(fat_id) ON DELETE CASCADE, -- Relasi ke fiber_network
+    longitude_pelanggan FLOAT,
+    fat_id VARCHAR(255) NOT NULL REFERENCES user_terminals(fat_id) ON DELETE CASCADE, -- Relasi ke fiber_network
     notes TEXT 
 );
 
@@ -114,3 +115,63 @@ CREATE TABLE documents (
 
 -- Index untuk faster similarity search
 CREATE INDEX ON documents USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+
+-- ============================================
+-- DYNAMIC COLUMNS METADATA SYSTEM
+-- ============================================
+
+-- Table untuk menyimpan metadata kolom dinamis
+CREATE TABLE IF NOT EXISTS dynamic_columns (
+    id SERIAL PRIMARY KEY,
+    table_name VARCHAR(255) NOT NULL,
+    column_name VARCHAR(255) NOT NULL,
+    column_type VARCHAR(50) NOT NULL DEFAULT 'TEXT',
+    display_name VARCHAR(255) NOT NULL,
+    description TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
+    is_searchable BOOLEAN DEFAULT TRUE,
+    default_value TEXT,
+    validation_rules JSONB DEFAULT '{}',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(255),
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(table_name, column_name)
+);
+
+-- Table untuk menyimpan data kolom dinamis
+CREATE TABLE IF NOT EXISTS dynamic_column_data (
+    id SERIAL PRIMARY KEY,
+    record_id VARCHAR(255) NOT NULL, -- Reference ke fat_id atau primary key lain
+    column_id INTEGER REFERENCES dynamic_columns(id) ON DELETE CASCADE,
+    column_value TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(record_id, column_id)
+);
+
+-- Index untuk performa
+CREATE INDEX IF NOT EXISTS idx_dynamic_column_data_record_id ON dynamic_column_data(record_id);
+CREATE INDEX IF NOT EXISTS idx_dynamic_column_data_column_id ON dynamic_column_data(column_id);
+CREATE INDEX IF NOT EXISTS idx_dynamic_columns_table_active ON dynamic_columns(table_name, is_active);
+
+-- Trigger untuk update timestamp
+CREATE OR REPLACE FUNCTION update_dynamic_column_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_dynamic_column_data_updated_at
+    BEFORE UPDATE ON dynamic_column_data
+    FOR EACH ROW
+    EXECUTE FUNCTION update_dynamic_column_timestamp();
+
+-- Sample data untuk testing
+INSERT INTO dynamic_columns (table_name, column_name, display_name, description, column_type, is_searchable) 
+VALUES 
+    ('user_terminals', 'custom_status', 'Status Khusus', 'Status khusus untuk monitoring', 'TEXT', true),
+    ('user_terminals', 'maintenance_date', 'Tanggal Maintenance', 'Tanggal maintenance terakhir', 'DATE', true),
+    ('user_terminals', 'priority_level', 'Level Prioritas', 'Level prioritas untuk maintenance', 'INTEGER', true)
+ON CONFLICT (table_name, column_name) DO NOTHING;

@@ -7,6 +7,9 @@ from langchain_ollama.chat_models import ChatOllama
 import plotly.graph_objects as go
 import json
 from core.services.agent_graph.build_graph import build_graph
+from core.services.agent_graph.prompts.system_prompts import get_chatbot_ui_system_prompt
+from core.services.agent_graph.debug_logger import debug_logger
+from core.services.agent_graph.debug_ui import display_agent_debug_panel
 from typing import Any
 # from static.load_css import load_custom_css # Akan didefinisikan di sini jika tidak ada
 
@@ -180,33 +183,10 @@ def process_user_input(graph, config) -> None:
     prompt = st.chat_input(
         "Tanyakan tentang aset, dokumen, atau informasi umum...",
         disabled=st.session_state.get("processing_turn", False),
-        key="chat_input_main"
-    )    # Define the system prompt
-    system_prompt_text = """
-Anda adalah ICONNET Assistant, sebuah AI yang membantu pengguna mencari informasi terkait data aset ICONNET, dokumen internal, dan informasi umum dari internet.
+        key="chat_input_main")
 
-ANDA MEMILIKI AKSES KE TOOLS BERIKUT DAN HARUS MENGGUNAKANNYA:
-
-1. `query_asset_database`: WAJIB gunakan untuk pertanyaan tentang data aset di database seperti:
-   - "berapa total pelanggan di kota X"
-   - "ada apa saja brand OLT"  
-   - "jumlah aset di probolinggo"
-   - "show me all assets"
-   
-2. `search_internal_documents`: Untuk mencari dokumen internal perusahaan (SOP, panduan, laporan)
-
-3. `tavily_search_results_json`: Untuk informasi umum dari internet
-
-4. `create_visualization`: Untuk membuat grafik (setelah mendapat data dari query_asset_database)
-
-5. `trigger_spreadsheet_etl_and_get_summary`: Untuk menjalankan ETL pipeline
-
-PENTING: ANDA TIDAK BOLEH MENGATAKAN "TIDAK MEMILIKI AKSES KE DATABASE" KARENA ANDA MEMILIKI TOOL query_asset_database!
-
-UNTUK PERTANYAAN DATABASE SEPERTI "berapa total pelanggan", "ada apa saja brand OLT", GUNAKAN tool query_asset_database TERLEBIH DAHULU.
-
-Jangan pernah menjawab tanpa menggunakan tools yang sesuai!
-    """
+    # Gunakan system prompt yang konsisten dari agent_graph
+    system_prompt_text = get_chatbot_ui_system_prompt()
 
     if prompt and not st.session_state.get("processing_turn", False):
         user_message = HumanMessage(content=prompt)
@@ -233,6 +213,12 @@ Jangan pernah menjawab tanpa menggunakan tools yang sesuai!
                     st.rerun()
                     return
 
+                # 🔍 DEBUG: Start debug session
+                session_id = debug_logger.start_session(
+                    user_query=last_human_message.content,
+                    username=st.session_state.get('username', 'Anonymous')
+                )
+
                 messages_for_graph_invocation = []
                 # Cek apakah ini interaksi pertama pengguna setelah sapaan AI
                 # (yaitu, hanya ada 1 HumanMessage sejauh ini)
@@ -247,10 +233,25 @@ Jangan pernah menjawab tanpa menggunakan tools yang sesuai!
                     with assistant_turn_placeholder.container():
                         st.markdown("🤔 Memproses permintaan Anda...")
 
+                # 🔍 DEBUG: Log graph invocation start
+                debug_logger.log_step(
+                    node_name="chatbot_ui",
+                    step_type="GRAPH_INVOCATION",
+                    description="Starting agent graph execution",
+                    data={
+                        "session_id": session_id,
+                        "user_query": last_human_message.content[:100] + "..." if len(last_human_message.content) > 100 else last_human_message.content,
+                        "thread_id": st.session_state.get("thread_id", "unknown"),
+                        "messages_count": len(messages_for_graph_invocation)
+                    }
+                )
+
                 # Streaming dari graph
                 # `st.session_state.messages` adalah history UI kita.
                 # `event.get("messages")` adalah history dari state graph.
                 count_history_ui_before_stream = len(st.session_state.messages)
+
+                graph_start_time = time.time()
 
                 events = graph.stream(
                     {"messages": messages_for_graph_invocation},
@@ -273,9 +274,7 @@ Jangan pernah menjawab tanpa menggunakan tools yang sesuai!
                         st.session_state.current_turn_messages.extend(
                             new_agent_messages_from_event)
                         count_history_ui_before_stream = len(
-                            st.session_state.messages)  # Update count
-
-                        # Re-render seluruh konten giliran asisten saat ini
+                            st.session_state.messages)  # Update count                        # Re-render seluruh konten giliran asisten saat ini
                         with assistant_turn_placeholder.container():
                             for i, msg_in_turn in enumerate(st.session_state.current_turn_messages):
                                 is_final_animated = (
@@ -284,9 +283,53 @@ Jangan pernah menjawab tanpa menggunakan tools yang sesuai!
                                     not getattr(msg_in_turn, 'tool_calls', [])
                                 )
                                 _render_message_content(
-                                    msg_in_turn, st, is_streaming_final_output=is_final_animated, is_production=True)  # is_production=True
+                                    msg_in_turn, st, is_streaming_final_output=is_final_animated, is_production=True)  # is_production=True                # 🔍 DEBUG: Log successful completion
+                graph_duration = (time.time() - graph_start_time) * 1000
+                final_response = ""
+
+                # Extract final AI response for logging
+                if st.session_state.current_turn_messages:
+                    last_ai_msg = None
+                    for msg in reversed(st.session_state.current_turn_messages):
+                        if isinstance(msg, AIMessage) and msg.content and not getattr(msg, 'tool_calls', []):
+                            last_ai_msg = msg
+                            break
+                    if last_ai_msg:
+                        final_response = last_ai_msg.content[:200] + "..." if len(
+                            last_ai_msg.content) > 200 else last_ai_msg.content
+
+                # Log completion step BEFORE ending session
+                debug_logger.log_step(
+                    node_name="chatbot_ui",
+                    step_type="GRAPH_COMPLETION",
+                    description="Agent graph execution completed successfully",
+                    data={
+                        "total_execution_time_ms": graph_duration,
+                        "messages_generated": len(st.session_state.current_turn_messages),
+                        "final_response_preview": final_response
+                    },
+                    execution_time_ms=graph_duration
+                )
+
+                # End session AFTER all logging is complete
+                debug_logger.end_session(
+                    final_result=final_response,
+                    success=True
+                )
 
             except Exception as e:
+                # 🔍 DEBUG: Log error
+                debug_logger.log_error("chatbot_ui", e, {
+                    "user_query": last_human_message.content if 'last_human_message' in locals() else "unknown",
+                    "thread_id": st.session_state.get("thread_id", "unknown"),
+                    "error_type": type(e).__name__
+                })
+
+                debug_logger.end_session(
+                    final_result=f"Error: {str(e)}",
+                    success=False
+                )
+
                 st.error(f"Terjadi error saat menjalankan agent graph: {e}")
                 print(f"❌ Error during graph execution: {e}")
                 error_ai_msg = AIMessage(
@@ -317,15 +360,17 @@ def app() -> None:
     # Load custom CSS
     load_custom_css(os.path.join("static", "css", "style.css"))
 
+    # Display debug panel in sidebar
+    display_agent_debug_panel()
+
     # Cek database pool
     db_pool = st.session_state.get("db")
     if not db_pool:
         st.error(
-            "Koneksi Database Pool tidak tersedia. Fitur RAG dan SQL tidak akan berfungsi.")
+            "Koneksi Database Pool tidak tersedia. Fitur RAG dan SQL tidak akan berfungsi.")  # Build atau load agent graph dengan cache version baru untuk visualization fix
 
-    # Build atau load agent graph (gunakan cache resource)
     @st.cache_resource
-    def get_graph():
+    def get_graph(_graph_version="v2.3"):
         return build_graph()
 
     try:

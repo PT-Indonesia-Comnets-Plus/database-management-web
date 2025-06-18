@@ -7,8 +7,8 @@ from typing import Optional, Tuple, List, Dict
 from psycopg2 import pool, OperationalError, InterfaceError
 from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
-from ...utils.load_config import TOOLS_CFG
-from ...utils.database import execute_with_retry
+from ....utils.load_config import TOOLS_CFG
+from ....utils.database import execute_with_retry
 
 # =====================
 # === Helper Functions ===
@@ -22,14 +22,14 @@ def _get_db_schema(db_pool: pool.SimpleConnectionPool) -> Optional[Dict[str, Lis
     """
     def _fetch_schema(conn):
         with conn.cursor() as cur:
+            # Query yang lebih ringkas - hanya kolom essential
             cur.execute("""
                 SELECT table_name, column_name, data_type
                 FROM information_schema.columns
                 WHERE table_schema = 'public'
-                AND table_name IN (
-                    'user_terminals', 'clusters', 'home_connecteds',
-                    'dokumentasis', 'additional_informations', 'pelanggans'
-                )
+                AND table_name IN ('user_terminals', 'clusters', 'home_connecteds', 'pelanggans')
+                AND column_name IN ('id_permohonan', 'fat_id', 'brand_olt', 'keterangan_full', 
+                                    'kota_kab', 'total_hc')
                 ORDER BY table_name, ordinal_position;
             """)
             rows = cur.fetchall()
@@ -45,17 +45,17 @@ def _get_db_schema(db_pool: pool.SimpleConnectionPool) -> Optional[Dict[str, Lis
 
         column_descriptions = {
             "pelanggans": {
-                "id_permohonan": "PRIMARY KEY unik untuk setiap pelanggan. GUNAKAN `COUNT(id_permohonan)` UNTUK MENGHITUNG JUMLAH TOTAL PELANGGAN.",
-                "fat_id": "FOREIGN KEY yang menghubungkan pelanggan ke perangkat FAT di tabel 'user_terminals'."
+                "description": "Data pelanggan. id_permohonan=PK, fat_id=FK",
+                "columns": ["id_permohonan (text): PK pelanggan", "fat_id (text): FK ke user_terminals"]
             },
             "user_terminals": {
-                "fat_id": "PRIMARY KEY unik untuk setiap perangkat Fiber Access Terminal (FAT).",
-                "brand_olt": "Merek atau vendor dari perangkat OLT (Optical Line Terminal).",
-                "keterangan_full": "Keterangan apakah kapasitas FAT sudah penuh. Bisa berisi kata 'full'."
+                "description": "Perangkat FAT/OLT. fat_id=PK",
+                "columns": ["fat_id (text): PK perangkat", "brand_olt (text): merek OLT",
+                            "keterangan_full (text): status kapasitas"]
             },
             "clusters": {
-                "kota_kab": "Nama kota atau kabupaten tempat aset berada. Gunakan untuk filter lokasi geografis.",
-                "fat_id": "FOREIGN KEY yang menghubungkan cluster ke FAT di tabel 'user_terminals'."
+                "description": "Lokasi geografis per FAT",
+                "columns": ["fat_id (text): FK ke user_terminals", "kota_kab (text): nama kota/kabupaten"]
             },
             "home_connecteds": {
                 "total_hc": "Angka yang menunjukkan jumlah total Home Connected (pelanggan aktif) pada suatu FAT.",
@@ -80,7 +80,7 @@ def _get_db_schema(db_pool: pool.SimpleConnectionPool) -> Optional[Dict[str, Lis
 
     try:
         # Gunakan retry logic Anda atau yang ada di atas
-        return execute_with_retry(db_pool, _fetch_schema, max_retries=3)
+        return execute_with_retry(db_pool, _fetch_schema, max_retries=2)
     except (OperationalError, InterfaceError) as e:
         print(f"❌ Database connection error getting schema: {e}")
         return None
@@ -109,8 +109,8 @@ def _generate_sql_query_from_question(schema: Dict[str, Dict[str, any]], user_qu
                 f"Tabel '{table_name}': {table_description}\n  Kolom:\n{columns_details}")
         schema_str = "\n\n".join(schema_details_list)
 
-        if len(schema_str) > 7000:
-            schema_str = schema_str[:7000] + \
+        if len(schema_str) > 1000:
+            schema_str = schema_str[:1000] + \
                 "...\n(dipangkas karena terlalu panjang)"
 
         few_shot_examples = """
@@ -153,17 +153,16 @@ def _generate_sql_query_from_question(schema: Dict[str, Dict[str, any]], user_qu
         query = re.sub(r"```sql\s*|\s*```", "",
                        response.content.strip(), flags=re.IGNORECASE)
 
-        print(f"[DEBUG] Generated SQL Query: {query}")
+        print(f"[DEBUG] Generated SQL: {query}")
         st.session_state['last_sql_query'] = query
 
         if not query.lower().startswith("select"):
-            print(f"⚠️ Peringatan: Query bukan SELECT: {query}")
-            return "Error: Gagal menghasilkan query SELECT yang valid."
+            return "Error: Query bukan SELECT yang valid."
 
         return query
 
     except Exception as e:
-        print(f"❌ Error Gemini saat generate SQL: {e}")
+        print(f"❌ Error generate SQL: {e}")
         return None
 
 
@@ -181,58 +180,40 @@ def _execute_sql_query(query: str, db_pool: pool.SimpleConnectionPool) -> Tuple[
                 return [], [], f"Non-SELECT query executed (affected rows: {cur.rowcount})"
 
     try:
-        return execute_with_retry(db_pool, _execute_operation, max_retries=3)
+        return execute_with_retry(db_pool, _execute_operation, max_retries=2)
     except psycopg2.Error as db_err:
         print(f"❌ Database error: {db_err}")
-        # Mengembalikan pesan error yang lebih spesifik ke LLM
         return None, None, f"Query Gagal: {db_err}"
     except Exception as e:
         print(f"❌ General SQL execution error: {e}")
         return None, None, str(e)
 
 
-def _generate_natural_answer_from_results(question: str, results: List[Tuple], colnames: List[str]) -> str:
+def _format_raw_results(query: str, results: List[Tuple], colnames: List[str]) -> str:
     """
-    Converts SQL results into a natural language response using Gemini.
+    Format raw SQL results untuk dikirim ke final response generator.
+    Tidak melakukan natural language generation di sini untuk menghindari redundansi.
     """
-    try:
-        model = ChatGoogleGenerativeAI(
-            model=TOOLS_CFG.primary_agent_llm,
-            temperature=TOOLS_CFG.primary_agent_llm_temperature,
-        )
+    if not results:
+        return f"Query: {query}\nHasil: Tidak ada data yang ditemukan."
 
-        if not results:
-            table_str = "Tidak ada data yang ditemukan."
-        else:
-            table_str = f"Kolom: {' | '.join(colnames)}\nData:\n" + "\n".join(
-                [" | ".join(map(str, row)) for row in results]
-            )
-            if len(table_str) > 5000:
-                table_str = table_str[:5000] + "\n...(dipotong)"
+    # Format hasil dalam bentuk structured text yang mudah diparse
+    result_lines = [f"Query: {query}"]
+    result_lines.append(f"Kolom: {' | '.join(colnames)}")
+    result_lines.append("Data:")
 
-        prompt = f"""
-        Anda adalah asisten AI yang menjelaskan hasil query data ICONNET dalam bahasa Indonesia yang jelas dan ringkas.
+    # Batasi hasil untuk efisiensi, tapi tetap informatif
+    limited_results = results[:20] if len(results) > 20 else results
 
-        Pertanyaan Awal Pengguna:
-        {question}
+    for row in limited_results:
+        result_lines.append(" | ".join(str(val) for val in row))
 
-        Data Hasil Query:
-        {table_str}
+    if len(results) > 20:
+        result_lines.append(f"... dan {len(results) - 20} baris lainnya")
 
-        Tugas Anda adalah merangkum data di atas menjadi jawaban yang langsung dan mudah dimengerti untuk menjawab pertanyaan awal pengguna.
-        Jika data kosong, sampaikan bahwa tidak ada data yang ditemukan untuk permintaan tersebut.
-        Jika ada data, sebutkan hasilnya secara langsung. Contoh: 'Jumlah total pelanggan di Jember adalah 5.432 orang.'
+    result_lines.append(f"Total baris: {len(results)}")
 
-        Jawaban Anda:
-        """
-
-        return model.invoke(prompt).content.strip()
-
-    except Exception as e:
-        print(f"❌ Error merangkum hasil: {e}")
-        fallback = f"Kolom: {' | '.join(colnames)}\nData:\n" + "\n".join(
-            [" | ".join(map(str, row)) for row in results[:5]])
-        return f"Gagal merangkum. Berikut adalah data mentahnya:\n{fallback[:1000]}..."
+    return "\n".join(result_lines)
 
 # =====================
 # === Tool Definition ===
@@ -242,11 +223,17 @@ def _generate_natural_answer_from_results(question: str, results: List[Tuple], c
 @tool
 def query_asset_database(user_question: str) -> str:
     """
-    Menghasilkan jawaban alami berdasarkan data aset ICONNET dari database.
+    Mengambil data aset ICONNET dari database berdasarkan pertanyaan user.
+    Mengembalikan raw structured data untuk diproses oleh final response generator.
+
+    OPTIMIZED: Tidak melakukan natural language generation di tool level untuk menghindari
+    redundansi dengan final response generator.
 
     Args:
-        user_question (str): Pertanyaan terkait data aset ICONNET.    Returns:
-        str: Ringkasan hasil atau pesan error.
+        user_question (str): Pertanyaan terkait data aset ICONNET.
+
+    Returns:
+        str: Raw structured data atau pesan error.
     """
     print(
         f"\n🛠️ Running tool: query_asset_database\nQuestion: {user_question}")
@@ -258,7 +245,7 @@ def query_asset_database(user_question: str) -> str:
     else:
         # Fallback: Create connection pool directly
         try:
-            from ...utils.database import connect_db
+            from ....utils.database import connect_db
             db_pool, _ = connect_db()
         except Exception as e:
             print(f"Failed to create database connection: {e}")
@@ -279,29 +266,26 @@ def query_asset_database(user_question: str) -> str:
         if error:
             return f"Kesalahan saat menjalankan query: {error}"
 
-        return _generate_natural_answer_from_results(user_question, results, columns)
+        return _format_raw_results(sql_query, results, columns)
 
     except Exception as e:
         print(f"❌ Error: {e}")
         return "Kesalahan tidak terduga saat menjalankan query aset."
-
-# =====================
-# === Tool Definition for Structured Data ===
-# =====================
 
 
 @tool
 def sql_agent(user_question: str) -> str:
     """
     SQL Agent yang menghasilkan data terstruktur dalam format JSON dari database aset ICONNET.
-    Tool ini dapat digunakan untuk query data biasa maupun untuk keperluan visualisasi.    Args:
+    Tool ini dapat digunakan untuk query data biasa maupun untuk keperluan visualisasi.
+
+    Args:
         user_question (str): Pertanyaan terkait data aset ICONNET.
 
     Returns:
         str: Data dalam format JSON yang terstruktur, atau pesan error.
     """
-    print(
-        f"\n🛠️ Running tool: sql_agent\nQuestion: {user_question}")
+    print(f"\n🛠️ Running tool: sql_agent\nQuestion: {user_question}")
 
     # Try to get database pool from session state first
     db_pool = None
@@ -310,7 +294,7 @@ def sql_agent(user_question: str) -> str:
     else:
         # Fallback: Create connection pool directly
         try:
-            from ...utils.database import connect_db
+            from ....utils.database import connect_db
             db_pool, _ = connect_db()
         except Exception as e:
             print(f"Failed to create database connection: {e}")

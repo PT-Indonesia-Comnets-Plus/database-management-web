@@ -1,7 +1,13 @@
 # pages/1 Home Page.py
-import streamlit as st
-from features.home.controller import HomePage
 from core import initialize_session_state
+from features.home.controller import HomePage
+import streamlit as st
+import sys
+import os
+
+# Add the parent directory to the Python path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 
 # Panggil inisialisasi di awal untuk memastikan semua service ada
 initialize_session_state()

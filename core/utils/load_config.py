@@ -39,6 +39,7 @@ class LoadToolsConfig:
             self._load_primary_agent_config()
             self._load_rag_config()
             self._load_sqlagent_config()
+            self._load_web_search_config()
             self._load_langsmith_config()
             self._load_memory_config()
             self._load_graph_config()
@@ -71,6 +72,13 @@ class LoadToolsConfig:
                 "GEMINI_API_KEY") or st.secrets.get("gemini", {}).get("api_key")
             langchain_key = os.getenv("LANGCHAIN_API_KEY") or st.secrets.get(
                 "langsmith", {}).get("api_key")
+            self.airflow_config = st.secrets.get("airflow", {})
+            self.airflow_url = self.airflow_config.get(
+                "url", "http://localhost:8080")
+            self.airflow_username = self.airflow_config.get(
+                "username", "admin")
+            self.airflow_password = self.airflow_config.get(
+                "password", "admin123")
 
             if langchain_key:
                 os.environ["LANGCHAIN_API_KEY"] = langchain_key

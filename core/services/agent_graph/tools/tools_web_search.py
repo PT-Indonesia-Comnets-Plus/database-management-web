@@ -398,7 +398,7 @@ def tools_web_search(query: str) -> str:
         print("📊 Finalizing research results...")
 
         if not state["web_research_result"]:
-            return f"⚠️ Unable to complete research due to API limitations. Please try 'enhanced_web_research' as fallback for: {query}"
+            return f"⚠️ Unable to complete research due to API limitations. Please try again later for: {query}"
 
         # Format results with backend-style comprehensive output
         final_content = f"# Research Results: {query}\n\n"
@@ -444,6 +444,6 @@ def tools_web_search(query: str) -> str:
         print(f"❌ {error_msg}")
 
         if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-            return f"⚠️ API quota exceeded during research for '{query}'. Please try again later or use 'enhanced_web_research' as fallback."
+            return f"⚠️ API quota exceeded during research for '{query}'. Please try again later."
 
         return f"I encountered an error during research for '{query}': {error_msg}"

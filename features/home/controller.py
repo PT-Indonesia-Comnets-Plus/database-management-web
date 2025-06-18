@@ -5,7 +5,7 @@ import os
 from PIL import Image, ImageOps
 from streamlit_option_menu import option_menu
 # Import views
-from .views import dashboard, search, update_data, chatbot, update
+from .views import dashboard, search, update_data, chatbot, update, add_column
 # Import services dan init function
 from core.services.AssetDataService import AssetDataService
 from psycopg2 import pool
@@ -45,9 +45,9 @@ class HomePage:
             selected_option = option_menu(
                 menu_title="Main Menu",
                 options=["Dashboard", "Search Assets", "Upload Assets", "Chatbot",
-                         "Edit/Delete Assets"],
+                         "Edit/Delete Assets", "add_column"],
                 icons=["speedometer2", "search", "cloud-upload", "chat-dots",
-                       "pencil-square", "database"],  # Sesuaikan ikon
+                       "pencil-square", "database", "database"],  # Sesuaikan ikon
                 menu_icon="house-door-fill",  # Ikon menu utama
                 default_index=0,
                 orientation="vertical",
@@ -74,6 +74,8 @@ class HomePage:
             chatbot.app()
         elif selected_option == 'Edit/Delete Assets':
             update.app(self.asset_data_service)
+        elif selected_option == 'add_column':
+            add_column.app()
 
     def render(self):
         """Renders the complete Home Page."""
