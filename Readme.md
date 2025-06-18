@@ -213,6 +213,94 @@ flowchart TD
 
 ```
 
+## 🤖 Agent Graph Flow (v2.3)
+
+Sistem AI agent menggunakan LangGraph dengan workflow yang telah dioptimasi untuk menangani berbagai jenis query dan tools secara efisien.
+
+```mermaid
+---
+config:
+  layout: dagre
+---
+flowchart TD
+    START(["🚀 START"]) --> CHATBOT["🤖 Chatbot Node"]
+    CHATBOT --> ROUTE_TOOLS{"🔀 Route Tools"}
+    ROUTE_TOOLS -- Has Tool Calls --> TOOLS["⚙️ Tools Node"]
+    ROUTE_TOOLS -- No Tools --> END_NO_TOOLS(["📝 Direct End"])
+    TOOLS --> TOOL_EXECUTION["🎯 Tool Execution"]
+    TOOL_EXECUTION -- Internal Docs --> SEARCH_DOCS["📚 search_internal_documents"]
+    TOOL_EXECUTION -- Visualization --> CREATE_VIZ["📊 create_visualization"]
+    TOOL_EXECUTION -- Complex SQL --> SQL_AGENT["💾 sql_agent"]
+    TOOL_EXECUTION -- Web Search --> WEB_SEARCH["🌐 tools_web_search"]
+    TOOL_EXECUTION -- ETL Pipeline --> ETL_TRIGGER["🔄 trigger_spreadsheet_etl"]
+    SEARCH_DOCS --> FINAL_RESPONSE_GEN["📝 Final Response Generator"]
+    CREATE_VIZ --> FINAL_RESPONSE_GEN
+    SQL_AGENT --> FINAL_RESPONSE_GEN
+    WEB_SEARCH --> FINAL_RESPONSE_GEN
+    ETL_TRIGGER --> FINAL_RESPONSE_GEN
+    FINAL_RESPONSE_GEN --> FINAL_RESPONSE_CHECKER["🔍 Final Response Checker"]
+    FINAL_RESPONSE_CHECKER --> ROUTE_RESPONSE{"📊 Evaluate Result"}
+    ROUTE_RESPONSE -- Sufficient Quality --> END_SUFFICIENT(["✅ End - Response Ready"])
+    ROUTE_RESPONSE -- Needs Reflection --> REFLECTION["🔄 Reflection Node"]
+    REFLECTION L_REFLECTION_SHOULD_RETRY_0@--> SHOULD_RETRY{"🤔 Should Retry or Finish"}
+    SHOULD_RETRY L_SHOULD_RETRY_CHATBOT_0@-- RETRY --> CHATBOT
+    SHOULD_RETRY -- FINISH --> END_REFLECTION(["✅ End After Reflection"])
+    USER_INFO["USER_INFO"] -.-> FINAL_RESPONSE_GEN
+    END_SUFFICIENT --> MEMORY["💾 MemorySaver Checkpointer"]
+    END_NO_TOOLS --> MEMORY
+    END_REFLECTION --> MEMORY
+    MEMORY --> READY["✅ Ready for Next Input"]
+     START:::entryClass
+     CHATBOT:::processClass
+     ROUTE_TOOLS:::processClass
+     TOOLS:::toolClass
+     END_NO_TOOLS:::endClass
+     TOOL_EXECUTION:::toolClass
+     SEARCH_DOCS:::toolClass
+     CREATE_VIZ:::toolClass
+     SQL_AGENT:::toolClass
+     WEB_SEARCH:::toolClass
+     ETL_TRIGGER:::toolClass
+     FINAL_RESPONSE_GEN:::responseClass
+     FINAL_RESPONSE_CHECKER:::responseClass
+     ROUTE_RESPONSE:::processClass
+     END_SUFFICIENT:::endClass
+     REFLECTION:::reflectionClass
+     SHOULD_RETRY:::processClass
+     END_REFLECTION:::endClass
+     USER_INFO:::enhancedClass
+     MEMORY:::endClass
+     READY:::entryClass
+    classDef entryClass fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    classDef processClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef toolClass fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
+    classDef responseClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef reflectionClass fill:#ffebee,stroke:#d32f2f,stroke-width:2px
+    classDef endClass fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+    classDef enhancedClass fill:#f1f8e9,stroke:#689f38,stroke-width:2px,stroke-dasharray: 5 5
+    L_REFLECTION_SHOULD_RETRY_0@{ animation: fast }
+    L_SHOULD_RETRY_CHATBOT_0@{ animation: fast }
+```
+
+### 🎯 Key Features Agent Graph v2.3:
+
+1. **Context Change Detection**: Otomatis mendeteksi perubahan konteks percakapan
+2. **Ultra Strict Reflection**: Memaksa penggunaan tool yang tepat berdasarkan analisis kebutuhan
+3. **Final Response Quality Check**: Memastikan kualitas response sebelum dikirim ke user
+4. **User-Aware Response Generation**: Response yang dipersonalisasi berdasarkan username dan role
+5. **Enhanced Tool Routing**: Routing yang lebih cerdas untuk pemilihan tool yang tepat
+6. **Memory Management**: Checkpoint otomatis untuk menjaga state conversation
+
+### 🛠️ Available Tools:
+
+- **query_asset_database**: Query langsung ke database asset
+- **search_internal_documents**: Pencarian dalam dokumen internal (RAG)
+- **create_visualization**: Membuat grafik dan visualisasi data
+- **sql_agent**: Agent khusus untuk query SQL kompleks
+- **tools_web_search**: Pencarian web menggunakan Tavily API
+- **trigger_spreadsheet_etl_and_get_summary**: Trigger ETL pipeline untuk data spreadsheet
+
+````
 ## Instalasi & Setup (Local)
 
 ```powershell
@@ -230,7 +318,7 @@ cp .secret_example.toml
 
 uv run streamlit run Main_Page.py
 
-```
+````
 
 ### Fitur Utama
 
