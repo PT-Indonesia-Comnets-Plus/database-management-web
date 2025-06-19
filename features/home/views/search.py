@@ -10,10 +10,160 @@ from core.services.dynamic_search_helper import get_unified_search_service
 logger = logging.getLogger(__name__)
 
 
+def _get_dynamic_column_type(field_name: str, asset_data_service: AssetDataService) -> str:
+    """
+    Get the column type for a dynamic column field.
+
+    Args:
+        field_name: Display name of the field
+        asset_data_service: AssetDataService instance
+
+    Returns:
+        Column type string ('TEXT', 'INTEGER', 'DECIMAL', 'DATE', 'BOOLEAN', 'URL')
+    """
+    try:
+        dynamic_columns = asset_data_service.column_manager.get_dynamic_columns(
+            'user_terminals', active_only=True)
+
+        for col in dynamic_columns:
+            if col.get('display_name') == field_name or col.get('column_name') == field_name:
+                return col.get('column_type', 'TEXT')
+
+        # Default to TEXT for static columns or unknown fields
+        return 'TEXT'
+
+    except Exception as e:
+        logger.warning(
+            f"Error getting dynamic column type for {field_name}: {e}")
+        return 'TEXT'
+
+
+def _render_appropriate_input_widget(field_name: str, current_value: str, input_key: str,
+                                     asset_data_service: AssetDataService, disabled: bool = False):
+    """
+    Render the appropriate input widget based on field type.
+
+    Args:
+        field_name: Display name of the field
+        current_value: Current value to display
+        input_key: Streamlit session state key for the input
+        asset_data_service: AssetDataService instance
+        disabled: Whether the input should be disabled
+    """
+    try:
+        # Get column type for dynamic columns
+        column_type = _get_dynamic_column_type(field_name, asset_data_service)
+
+        # Handle different input types based on column_type
+        if column_type == 'INTEGER':
+            try:
+                int_value = int(
+                    float(current_value)) if current_value and current_value != '-' else 0
+            except (ValueError, TypeError):
+                int_value = 0
+            st.number_input(
+                label=f"Edit {field_name}",
+                value=int_value,
+                step=1,
+                key=input_key,
+                disabled=disabled,
+                label_visibility="collapsed"
+            )
+
+        elif column_type == 'DECIMAL':
+            try:
+                float_value = float(
+                    current_value) if current_value and current_value != '-' else 0.0
+            except (ValueError, TypeError):
+                float_value = 0.0
+            st.number_input(
+                label=f"Edit {field_name}",
+                value=float_value,
+                step=0.01,
+                format="%.2f",
+                key=input_key,
+                disabled=disabled,
+                label_visibility="collapsed"
+            )
+
+        elif column_type == 'DATE':
+            try:
+                from datetime import datetime, date
+                if current_value and current_value != '-':
+                    if isinstance(current_value, str):
+                        # Try to parse date string
+                        try:
+                            date_value = datetime.strptime(
+                                current_value, '%Y-%m-%d').date()
+                        except ValueError:
+                            try:
+                                date_value = datetime.strptime(
+                                    current_value, '%d/%m/%Y').date()
+                            except ValueError:
+                                date_value = date.today()
+                    else:
+                        date_value = current_value if isinstance(
+                            current_value, date) else date.today()
+                else:
+                    date_value = date.today()
+            except Exception:
+                date_value = date.today()
+
+            st.date_input(
+                label=f"Edit {field_name}",
+                value=date_value,
+                key=input_key,
+                disabled=disabled,
+                label_visibility="collapsed"
+            )
+
+        elif column_type == 'BOOLEAN':
+            bool_value = str(current_value).lower() in (
+                'true', '1', 'yes', 'ya', 'aktif') if current_value and current_value != '-' else False
+            st.checkbox(
+                label=f"Edit {field_name}",
+                value=bool_value,
+                key=input_key,
+                disabled=disabled,
+                label_visibility="collapsed"
+            )
+
+        elif column_type == 'URL':
+            st.text_input(
+                label=f"Edit {field_name} (URL)",
+                value=current_value,
+                placeholder="https://example.com",
+                key=input_key,
+                disabled=disabled,
+                label_visibility="collapsed"
+            )
+
+        else:  # Default to TEXT
+            st.text_input(
+                label=f"Edit {field_name}",
+                value=current_value,
+                key=input_key,
+                disabled=disabled,
+                label_visibility="collapsed"
+            )
+
+    except Exception as e:
+        logger.error(f"Error rendering input widget for {field_name}: {e}")
+        # Fallback to text input
+        st.text_input(
+            label=f"Edit {field_name}",
+            value=current_value,
+            key=input_key,
+            disabled=disabled,
+            label_visibility="collapsed"
+        )
+
+
 def get_complete_column_mapping(asset_data_service: AssetDataService) -> dict:
     """
     Get complete column mapping including static and dynamic columns.
     Returns comprehensive mapping to ensure consistency across all search functions.
+    Auto-detects all columns from database without hardcoding.
 
     Args:
         asset_data_service: AssetDataService instance
@@ -47,48 +197,74 @@ def get_complete_column_mapping(asset_data_service: AssetDataService) -> dict:
         # Auto-generate display name from database column
         return db_column.replace('_', ' ').title()
 
-    # Get all columns from comprehensive data to build mapping dynamically
+    # Initialize mapping dictionary
+    column_mapping = {}
+
+    # First, get dynamic columns with their configured display names
+    # These take priority over auto-generated names
+    dynamic_columns_map = {}
+    try:
+        dynamic_columns = asset_data_service.column_manager.get_dynamic_columns(
+            'user_terminals', active_only=True)
+        for col in dynamic_columns:
+            column_name = col.get('column_name', '')
+            display_name = col.get('display_name', column_name)
+            if column_name and display_name:
+                dynamic_columns_map[column_name] = display_name
+                logger.info(
+                    f"Dynamic column detected: {column_name} -> {display_name}")
+    except Exception as e:
+        logger.warning(f"Could not load dynamic columns for mapping: {e}")
+
+    # Get all actual columns from database by loading sample data
     try:
         sample_data = asset_data_service.load_comprehensive_asset_data(limit=1)
         if sample_data is not None and not sample_data.empty:
-            static_mapping = {col: _generate_display_name(
-                col) for col in sample_data.columns}
+            logger.info(
+                f"Auto-detecting columns from database. Found {len(sample_data.columns)} columns.")
+
+            for col in sample_data.columns:
+                if col in dynamic_columns_map:
+                    # Use configured display name for dynamic columns
+                    column_mapping[col] = dynamic_columns_map[col]
+                    logger.info(
+                        f"Using dynamic column name: {col} -> {dynamic_columns_map[col]}")
+                else:
+                    # Auto-generate display name for regular columns
+                    display_name = _generate_display_name(col)
+                    column_mapping[col] = display_name
+
+            logger.info(
+                f"Generated {len(column_mapping)} column mappings automatically")
+
         else:
+            logger.warning("No sample data available, using fallback mappings")
             # Fallback to essential mappings only
-            static_mapping = {
+            column_mapping = {
                 'fat_id': 'FATID',
                 'olt': 'OLT',
                 'fdt_id': 'FDT ID',
                 'tanggal_rfs': 'Tanggal RFS',
                 'kota_kab': 'Kota/Kab'
             }
+            # Add dynamic columns to fallback
+            column_mapping.update(dynamic_columns_map)
+
     except Exception as e:
-        logger.warning(f"Could not generate dynamic mapping: {e}")
+        logger.error(f"Error generating dynamic column mapping: {e}")
         # Fallback to essential mappings
-        static_mapping = {
+        column_mapping = {
             'fat_id': 'FATID',
             'olt': 'OLT',
             'fdt_id': 'FDT ID',
             'tanggal_rfs': 'Tanggal RFS',
             'kota_kab': 'Kota/Kab'
         }
+        # Add dynamic columns to fallback
+        column_mapping.update(dynamic_columns_map)
 
-    # Add dynamic columns mapping (keep their display names as configured)
-    try:
-        dynamic_columns = asset_data_service.column_manager.get_dynamic_columns(
-            'user_terminals', active_only=True)
-        for col in dynamic_columns:
-            # Map database column name to display name
-            column_name = col.get('column_name', '')
-            display_name = col.get('display_name', column_name)
-            if column_name and display_name:
-                static_mapping[column_name] = display_name
-                logger.info(
-                    f"Added dynamic column mapping: {column_name} -> {display_name}")
-    except Exception as e:
-        logger.warning(f"Could not load dynamic columns for mapping: {e}")
-
-    return static_mapping
+    logger.info(f"Final column mapping contains {len(column_mapping)} entries")
+    return column_mapping
 
 
 def render_editable_grid(filtered_items, table, pk_col, pk_val, asset_data_service, tab_context="main"):
@@ -148,12 +324,10 @@ def render_editable_grid(filtered_items, table, pk_col, pk_val, asset_data_servi
                             st.markdown(f"<span>{val}</span>",
                                         unsafe_allow_html=True)
                     else:
-                        st.text_input(
-                            label=f"Edit {field}",
-                            value=val,
-                            key=input_key,
-                            disabled=not st.session_state[edit_key],
-                            label_visibility="collapsed"
+                        # Determine input type based on field type (for dynamic columns)
+                        _render_appropriate_input_widget(
+                            field, val, input_key, asset_data_service,
+                            disabled=not st.session_state[edit_key]
                         )
 
                 with c2:
@@ -209,7 +383,7 @@ def search_assets_unified(asset_data_service: AssetDataService, search_params: d
         else:
             logger.warning("❌ 'tanggal_rfs' column NOT found in raw data")
 
-        column_rename_map = get_complete_column_mapping(asset_data_service)
+        column_rename_map = asset_data_service.get_column_mapping()
 
         # Apply renaming only for specific mapped columns
         result_df.rename(columns=column_rename_map, inplace=True)
@@ -233,25 +407,20 @@ def search_assets_unified(asset_data_service: AssetDataService, search_params: d
             else:
                 logger.warning("'tanggal_rfs' not found in column mapping")
 
-        # Add dynamic columns data
-        try:
-            dynamic_columns = asset_data_service.column_manager.get_dynamic_columns(
-                'user_terminals', active_only=True)
-            if dynamic_columns:
-                logger.info(
-                    f"Adding {len(dynamic_columns)} dynamic columns to search results")
+        # Dynamic columns are now automatically included in the query results
+        # No need to manually add them anymore since we use SELECT ut.*
+        logger.info(
+            f"Result has {len(result_df.columns)} columns after mapping")
 
-                # For each row, get dynamic column data
-                for idx, row in result_df.iterrows():
-                    fat_id = row.get('FATID', '')
-                    if fat_id:
-                        dynamic_data = asset_data_service.column_manager.get_dynamic_column_data(
-                            fat_id)
-                        for col_display_name, value in dynamic_data.items():
-                            result_df.at[idx, col_display_name] = value
-        except Exception as e:
-            logger.warning(
-                f"Could not add dynamic columns to search results: {e}")
+        # Debug: Check if dynamic columns are included
+        dynamic_cols_in_result = [col for col in result_df.columns if any(
+            test_col in col.lower() for test_col in ['test', 'dynamic'])]
+        if dynamic_cols_in_result:
+            logger.info(
+                f"Dynamic columns found in results: {dynamic_cols_in_result}")
+        else:
+            logger.info(
+                "No dynamic columns found in results (this may be normal)")
 
         logger.info(
             f"Unified search returned {len(result_df)} results with column mapping applied")
@@ -307,61 +476,28 @@ def fetch_data_by_search(asset_data_service: AssetDataService, search_column: st
         }
         # Convert display column name to database column name
         db_search_column = display_to_db_column_map.get(
-            search_column, search_column.lower().replace(' ', '_'))        # Use comprehensive data search instead of basic search to get all columns
+            search_column, search_column.lower().replace(' ', '_'))
+
+        # Use optimized database search instead of loading all data and filtering
         logger.info(
-            f"Fetching comprehensive data and filtering for {search_column}={search_value}")
+            f"Performing database search for {search_column}={search_value}")
 
-        # Load comprehensive data first
-        comprehensive_data = asset_data_service.load_comprehensive_asset_data()
-
-        if comprehensive_data is None or comprehensive_data.empty:
-            logger.warning("No comprehensive data available")
-            return pd.DataFrame()
-
-        # Filter the comprehensive data based on search column and value
-        if db_search_column == "fat_id":
-            search_result = comprehensive_data[comprehensive_data['fat_id'].astype(
-                str).str.contains(str(search_value), case=False, na=False)]
-        elif db_search_column == "olt":
-            search_result = comprehensive_data[comprehensive_data['olt'].astype(
-                str).str.contains(str(search_value), case=False, na=False)]
-        elif db_search_column == "fdt_id":
-            search_result = comprehensive_data[comprehensive_data['fdt_id'].astype(
-                str).str.contains(str(search_value), case=False, na=False)]
-        else:
-            # Check if it's a dynamic column
-            dynamic_columns = asset_data_service.column_manager.get_searchable_columns(
-                'user_terminals')
-            dynamic_column_names = [col['display_name']
-                                    for col in dynamic_columns]
-
-            if search_column in dynamic_column_names:
-                logger.info(f"Searching in dynamic column: {search_column}")
-                return asset_data_service.column_manager.search_dynamic_columns('user_terminals', search_column, search_value)
-            else:
-                # Fallback to comprehensive search for other columns
-                logger.warning(
-                    f"Using fallback comprehensive search for column: {search_column}")
-                # Use unified search instead of the old comprehensive search
-                search_params = {
-                    'primary_column': search_column,
-                    'primary_value': search_value,
-                    'additional_filters': additional_filters or {},
-                    'search_mode': 'auto',
-                    'limit': 1000
-                }
-                return search_assets_unified(asset_data_service, search_params)
+        # Use database-level filtering for much better performance
+        search_result = perform_optimized_search(
+            asset_data_service, db_search_column, search_value)
 
         if search_result is None or search_result.empty:
-            logger.info(f"No results found for {search_column}={search_value}")
-            # Apply column rename mapping for consistency (static + dynamic columns)
+            logger.warning(
+                f"No results found for {search_column}={search_value}")
             return pd.DataFrame()
-        column_rename_map = get_complete_column_mapping(asset_data_service)
 
+        logger.info(f"Search returned {len(search_result)} results")
+
+        # Apply column rename mapping for consistency
+        column_rename_map = asset_data_service.get_column_mapping()
         search_result.rename(columns=column_rename_map, inplace=True)
-        logger.info(f"Optimized search returned {len(search_result)} results")
-        return search_result
 
+        return search_result
     except Exception as e:
         # Fallback to unified search
         logger.error(f"Error in optimized search: {e}")
@@ -496,7 +632,7 @@ def app(asset_data_service: AssetDataService):
     st.markdown("""
 <style>
 [data-testid="stSidebarNav"] {
-display: none;
+display: ;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -588,12 +724,12 @@ display: none;
     }
 
     /* Mode disabled (tidak bisa di-edit) */
-    input[disabled],
-    textarea[disabled] {
-        color: #707070 !important;
-        -webkit-text-fill-color: #707070 !important;
-        opacity: 1 !important;  /* memastikan tidak terlihat transparan */
-    }
+    # input[disabled],
+    # textarea[disabled] {
+    #     color: #707070 !important;
+    #     -webkit-text-fill-color: #707070 !important;
+    #     opacity: 1 !important;  /* memastikan tidak terlihat transparan */
+    # }
     /* Styling untuk header dan tab */
     .stTabs {
         margin-top: 0.5rem;
@@ -788,7 +924,6 @@ display: none;
                 try:
                     # Check if openpyxl is available
                     try:
-                        import openpyxl
                         export_format = "Excel"
                         file_extension = "xlsx"
                         mime_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -1022,15 +1157,20 @@ display: none;
         # DEBUG: Log semua kolom yang ada untuk investigasi
         logger.info(f"=== DEBUG: TOTAL KOLOM ANALYSIS ===")
         logger.info(f"Total columns found: {len(all_columns)}")
+        # Check if this is comprehensive data (using display names and original names)
         logger.info(f"All columns: {sorted(list(all_columns))}")
+        has_tanggal_rfs = any(col in all_columns for col in [
+                              'Tanggal RFS', 'Tanggal Rfs', 'tanggal_rfs'])
+        has_kota_kab = any(col in all_columns for col in [
+                           'Kota/Kab', 'kota_kab'])
 
-        # Check if this is comprehensive data
-        if 'tanggal_rfs' in all_columns and 'kota_kab' in all_columns:
+        if has_tanggal_rfs and has_kota_kab:
             logger.info(
                 "✅ Comprehensive data detected (contains tanggal_rfs and kota_kab)")
         else:
-            logger.warning(
-                "⚠️ Non-comprehensive data detected - missing some expected columns")
+            # This is just a warning, not an error - system is working correctly
+            logger.info(
+                f"ℹ️ Data check: has_tanggal_rfs={has_tanggal_rfs}, has_kota_kab={has_kota_kab}")
 
         main_detail_title = ""
         main_detail_data = {}
@@ -1333,8 +1473,7 @@ display: none;
                             tab_context = tab_name.lower().replace(" ", "_").replace(
                                 "&", "").replace("📋", "").replace("🔧", "")
                             render_editable_grid(
-                                tab_data, "user_terminals", selected_column,
-                                primary_key_value, asset_data_service, tab_context)
+                                tab_data, "user_terminals", selected_column,                                primary_key_value, asset_data_service, tab_context)
                     else:
                         if tab_name == "Kolom Dinamis":
                             st.info(
@@ -1344,4 +1483,70 @@ display: none;
                                 "Tidak ada informasi relevan untuk kategori ini.")
         else:
             st.warning("Tidak ada data tambahan untuk ditampilkan.")
-# Hapus `if __name__ == "__main__":` jika ada
+
+
+def perform_optimized_search(asset_data_service: AssetDataService, search_column: str, search_value: str) -> pd.DataFrame:
+    """
+    Perform optimized database search with WHERE clause instead of loading all data.
+
+    Args:
+        asset_data_service: AssetDataService instance
+        search_column: Database column name to search
+        search_value: Value to search for
+
+    Returns:
+        DataFrame with search results
+    """
+    try:
+        # Build optimized query with WHERE clause at database level
+        base_query = asset_data_service.build_comprehensive_query()
+
+        # Remove ORDER BY to inject WHERE clause
+        base_query_parts = base_query.strip().split('ORDER BY')
+        select_and_joins = base_query_parts[0].strip()
+
+        # Build WHERE condition for different search columns
+        if search_column in ['fat_id', 'olt', 'fdt_id']:
+            # Main table columns
+            where_condition = f"LOWER(ut.{search_column}) LIKE LOWER(%s)"
+            params = [f"%{search_value}%"]
+        elif search_column in ['kota_kab', 'kecamatan', 'kelurahan']:
+            # Clusters table columns
+            where_condition = f"LOWER(cl.{search_column}) LIKE LOWER(%s)"
+            params = [f"%{search_value}%"]
+        elif search_column in ['total_hc', 'hc_old', 'hc_icrm']:
+            # Home connected table columns
+            where_condition = f"LOWER(CAST(hc.{search_column} AS TEXT)) LIKE LOWER(%s)"
+            params = [f"%{search_value}%"]
+        else:
+            # Default to user_terminals table
+            where_condition = f"LOWER(CAST(ut.{search_column} AS TEXT)) LIKE LOWER(%s)"
+            params = [f"%{search_value}%"]
+
+        # Build final optimized query
+        optimized_query = f"""
+            {select_and_joins}
+            WHERE {where_condition}
+            ORDER BY ut.fat_id
+            LIMIT 1000
+        """
+
+        # Execute query
+        data, columns, error = asset_data_service._execute_query(
+            optimized_query, tuple(params))
+
+        if error:
+            logger.error(f"Error in optimized search: {error}")
+            return pd.DataFrame()
+
+        if not data:
+            return pd.DataFrame()
+
+        result_df = pd.DataFrame(data, columns=columns)
+        logger.info(
+            f"Optimized search for {search_column}={search_value} returned {len(result_df)} results")
+        return result_df
+
+    except Exception as e:
+        logger.error(f"Exception in optimized search: {e}")
+        return pd.DataFrame()

@@ -173,4 +173,5 @@ dependencies = [
     "zstandard==0.23.0 ; python_full_version == '3.11.9'",
     "asyncpg>=0.30.0",
     "openpyxl>=3.1.5",
+    "dnspython>=2.7.0",
 ]

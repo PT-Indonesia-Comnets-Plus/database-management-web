@@ -39,6 +39,102 @@ class AssetDataService:
 
         # Initialize column manager for dynamic columns
         self._column_manager = None
+        # Cache for column mapping to avoid repeated database calls
+        self._column_mapping_cache = None
+        self._column_mapping_cache_time = None
+        self._column_mapping_cache_ttl = 300  # 5 minutes cache
+
+        # Cache for table columns to avoid repeated INFORMATION_SCHEMA queries
+        self._table_columns_cache = {}
+        self._table_columns_cache_time = None
+        self._table_columns_cache_ttl = 600  # 10 minutes cache
+
+        # Cache for comprehensive query to avoid rebuilding
+        self._comprehensive_query_cache = None
+        self._comprehensive_query_cache_time = None
+        self._comprehensive_query_cache_ttl = 600  # 10 minutes cache
+
+    @property
+    def column_manager(self):
+        """Lazy initialization of column manager."""
+        if self._column_manager is None:
+            # Import here to avoid circular imports
+            from features.home.views.add_column import ColumnManager
+            self._column_manager = ColumnManager(self.db_pool)
+        return self._column_manager
+
+    def get_column_mapping(self, force_refresh: bool = False) -> dict:
+        """
+        Get column mapping with caching to improve performance.
+
+        Args:
+            force_refresh: If True, bypass cache and reload from database
+
+        Returns:
+            Dictionary mapping database column names to display names
+        """
+        import time
+
+        current_time = time.time()
+
+        # Check if cache is valid
+        if (not force_refresh and
+            self._column_mapping_cache is not None and
+            self._column_mapping_cache_time is not None and
+                (current_time - self._column_mapping_cache_time) < self._column_mapping_cache_ttl):
+            logger.debug("Using cached column mapping")
+            return self._column_mapping_cache
+
+        # Load fresh mapping
+        try:
+            from features.home.views.search import get_complete_column_mapping
+            mapping = get_complete_column_mapping(self)
+
+            # Update cache
+            self._column_mapping_cache = mapping
+            self._column_mapping_cache_time = current_time
+
+            logger.info(
+                f"Refreshed column mapping cache with {len(mapping)} columns")
+            return mapping
+
+        except Exception as e:
+            logger.error(f"Error loading column mapping: {e}")
+            # Return cached version if available, even if expired
+            if self._column_mapping_cache is not None:
+                logger.warning("Using expired cache due to error")
+                return self._column_mapping_cache
+            # Return minimal fallback
+            return {
+                'fat_id': 'FATID',
+                'olt': 'OLT',
+                'fdt_id': 'FDT ID'
+            }
+
+    def invalidate_column_mapping_cache(self):
+        """Invalidate the column mapping cache. Call this when columns are added/removed."""
+        self._column_mapping_cache = None
+        self._column_mapping_cache_time = None
+        logger.info("Column mapping cache invalidated")
+
+    def invalidate_comprehensive_query_cache(self):
+        """Invalidate the comprehensive query cache. Call this when table schema changes."""
+        self._comprehensive_query_cache = None
+        self._comprehensive_query_cache_time = None
+        logger.info("Comprehensive query cache invalidated")
+
+    def invalidate_table_columns_cache(self):
+        """Invalidate the table columns cache. Call this when table schema changes."""
+        self._table_columns_cache = {}
+        self._table_columns_cache_time = None
+        logger.info("Table columns cache invalidated")
+
+    def invalidate_all_cache(self):
+        """Invalidate all caches. Call this when significant schema changes occur."""
+        self.invalidate_column_mapping_cache()
+        self.invalidate_comprehensive_query_cache()
+        self.invalidate_table_columns_cache()
+        logger.info("All caches invalidated")
 
     def _execute_query(self, query: str, params: Optional[tuple] = None, fetch: str = "all") -> Tuple[Optional[List[Tuple]], Optional[List[str]], Optional[str]]:
         """
@@ -547,9 +643,14 @@ class AssetDataService:
         if table_name not in allowed_tables:
             return f"Table '{table_name}' is not allowed for updates."
 
+        # Convert display column names to database column names
+        db_update_data = self._convert_display_to_db_columns(
+            table_name, update_data)
+
         db_identifier_col = identifier_col.lower()
-        set_clause = ", ".join([f'"{col}" = %s' for col in update_data.keys()])
-        values = list(update_data.values()) + [identifier_value]
+        set_clause = ", ".join(
+            [f'"{col}" = %s' for col in db_update_data.keys()])
+        values = list(db_update_data.values()) + [identifier_value]
         query = f'UPDATE {table_name} SET {set_clause} WHERE "{db_identifier_col}" = %s'
 
         _, _, error = self._execute_query(query, tuple(values), fetch="none")
@@ -662,8 +763,9 @@ class AssetDataService:
 
     def load_comprehensive_asset_data(self, limit: Optional[int] = None) -> Optional[pd.DataFrame]:
         """
-        Load comprehensive asset data from all tables with complete joins.
-        This method provides all available data for comprehensive search and detail views.        Args:
+        Load comprehensive asset data from all tables with complete joins.        This method provides all available data for comprehensive search and detail views.
+
+        Args:
             limit: Maximum number of rows to load. If None, loads all.
 
         Returns:
@@ -671,78 +773,8 @@ class AssetDataService:
         """
         logger.info(f"Loading comprehensive asset data (limit: {limit})")
 
-        query = """
-        SELECT 
-            -- User Terminals data (semua kolom)
-            ut.fat_id,
-            ut.hostname_olt,
-            ut.latitude_olt,
-            ut.longitude_olt,
-            ut.brand_olt,
-            ut.type_olt,
-            ut.kapasitas_olt,
-            ut.kapasitas_port_olt,
-            ut.olt_port,
-            ut.olt,
-            ut.interface_olt,
-            ut.fdt_id,
-            ut.status_osp_amarta_fdt,
-            ut.jumlah_splitter_fdt,
-            ut.kapasitas_splitter_fdt,
-            ut.fdt_new_existing,
-            ut.port_fdt,
-            ut.latitude_fdt,
-            ut.longitude_fdt,
-            ut.jumlah_splitter_fat,
-            ut.kapasitas_splitter_fat,
-            ut.latitude_fat,
-            ut.longitude_fat,
-            ut.status_osp_amarta_fat,
-            ut.fat_kondisi,
-            ut.fat_filter_pemakaian,
-            ut.keterangan_full,
-            ut.fat_id_x,
-            ut.filter_fat_cap,
-            
-            -- Clusters data (semua kolom kecuali id)
-            cl.latitude_cluster,
-            cl.longitude_cluster,
-            cl.area_kp,
-            cl.kota_kab,
-            cl.kecamatan,
-            cl.kelurahan,
-            cl.up3,
-            cl.ulp,
-            
-            -- Home Connected data (semua kolom kecuali id)
-            hc.hc_old,
-            hc.hc_icrm,
-            hc.total_hc,
-            hc.cleansing_hp,
-              -- Dokumentasi data (semua kolom kecuali id) - dengan prefix untuk avoid conflicts
-            dk.status_osp_amarta_fat as dokumentasi_status_osp_amarta_fat,
-            dk.link_dokumen_feeder,
-            dk.keterangan_dokumen,
-            dk.link_data_aset,
-            dk.keterangan_data_aset,
-            dk.link_maps,
-            dk.update_aset,
-            dk.amarta_update,
-            
-            -- Additional Information data (semua kolom kecuali id)
-            ai.pa,
-            ai.tanggal_rfs,
-            ai.mitra,
-            ai.kategori,
-            ai.sumber_datek
-            
-        FROM user_terminals ut
-        LEFT JOIN clusters cl ON ut.fat_id = cl.fat_id
-        LEFT JOIN home_connecteds hc ON ut.fat_id = hc.fat_id
-        LEFT JOIN dokumentasis dk ON ut.fat_id = dk.fat_id
-        LEFT JOIN additional_informations ai ON ut.fat_id = ai.fat_id
-        ORDER BY ut.fat_id
-        """
+        # Build dynamic query that includes all columns from all tables, handling duplicates
+        query = self._build_comprehensive_query()
 
         query_params = []
         if limit is not None:
@@ -756,19 +788,22 @@ class AssetDataService:
         if error:
             logger.error(f"Failed to load comprehensive asset data: {error}")
             return None
-
         if data is None:
             logger.warning("No comprehensive asset data returned from query")
             return pd.DataFrame(columns=columns or [])
 
         df = pd.DataFrame(data, columns=columns)
-        logger.info(f"Loaded {len(df)} comprehensive asset records")
+        logger.info(
+            f"Loaded {len(df)} comprehensive asset records with {len(columns)} columns")
+        logger.info(f"Raw database columns: {columns}")
+
         return df
 
     def update_asset_comprehensive(self, pk_column: str, pk_value: Any, update_data: Dict[str, Any]) -> Optional[str]:
         """
         Update asset data across multiple tables based on the field being updated.
         Automatically determines which table to update based on the field name.
+        Since dynamic columns are now added physically to tables, this handles them transparently.
 
         Args:
             pk_column: Primary key column name (e.g., 'fat_id', 'olt', 'fdt_id')
@@ -778,60 +813,76 @@ class AssetDataService:
         Returns:
             Error message if failed, None if successful
         """
+        if not update_data:
+            return "No data provided for update"
+
         try:
-            # Map field names to their respective tables
-            field_table_map = {                # User Terminals fields
+            # Field mapping to determine which table to update
+            field_to_table_mapping = {
+                # User Terminals fields (includes dynamic columns now)
                 'fat_id': 'user_terminals',
-                'olt': 'user_terminals',
-                'fdt_id': 'user_terminals',
+                'hostname_olt': 'user_terminals',
+                'latitude_olt': 'user_terminals',
+                'longitude_olt': 'user_terminals',
                 'brand_olt': 'user_terminals',
                 'type_olt': 'user_terminals',
-                'hostname_olt': 'user_terminals',
                 'kapasitas_olt': 'user_terminals',
                 'kapasitas_port_olt': 'user_terminals',
                 'olt_port': 'user_terminals',
+                'olt': 'user_terminals',
                 'interface_olt': 'user_terminals',
-                'latitude_olt': 'user_terminals',
-                'longitude_olt': 'user_terminals',
-                'latitude_fat': 'user_terminals',
-                'longitude_fat': 'user_terminals',
-                'jumlah_splitter_fat': 'user_terminals',
-                'kapasitas_fat': 'user_terminals',
-                'kapasitas_splitter_fat': 'user_terminals',                'status_osp_amarta_fat': 'user_terminals',
-                'fat_filter_pemakaian': 'user_terminals',
-                'latitude_fdt': 'user_terminals',
-                'longitude_fdt': 'user_terminals',
+                'fdt_id': 'user_terminals',
+                'status_osp_amarta_fdt': 'user_terminals',
                 'jumlah_splitter_fdt': 'user_terminals',
                 'kapasitas_splitter_fdt': 'user_terminals',
-                'status_osp_amarta_fdt': 'user_terminals',
-                'port_fdt': 'user_terminals',
-                'fat_id_x': 'user_terminals',
-                'fat_kondisi': 'user_terminals',
-                'filter_fat_cap': 'user_terminals',
                 'fdt_new_existing': 'user_terminals',
+                'port_fdt': 'user_terminals',
+                'latitude_fdt': 'user_terminals',
+                'longitude_fdt': 'user_terminals',
+                'jumlah_splitter_fat': 'user_terminals',
+                'kapasitas_splitter_fat': 'user_terminals',
+                'latitude_fat': 'user_terminals',
+                'longitude_fat': 'user_terminals',
+                'status_osp_amarta_fat': 'user_terminals',
+                'fat_kondisi': 'user_terminals',
+                'fat_filter_pemakaian': 'user_terminals',
                 'keterangan_full': 'user_terminals',
-
-                # Clusters fields
-                'kota_kab': 'clusters',
-                'kecamatan': 'clusters',
-                'kelurahan': 'clusters',
-                'cluster': 'clusters',
+                'fat_id_x': 'user_terminals',
+                'filter_fat_cap': 'user_terminals',                # Clusters fields
                 'latitude_cluster': 'clusters',
                 'longitude_cluster': 'clusters',
                 'area_kp': 'clusters',
+                'kota_kab': 'clusters',
+                'kecamatan': 'clusters',
+                'kelurahan': 'clusters',
                 'up3': 'clusters',
                 'ulp': 'clusters',
 
+                # Display name mappings for clusters
+                'Latitude Cluster': 'clusters',
+                'Longitude Cluster': 'clusters',
+                'Area Kp': 'clusters',
+                'Kota/Kab': 'clusters',
+                'Kecamatan': 'clusters',
+                'Kelurahan': 'clusters',
+                'UP3': 'clusters',
+                'ULP': 'clusters',
+
                 # Home Connected fields
-                'total_hc': 'home_connecteds',
                 'hc_old': 'home_connecteds',
                 'hc_icrm': 'home_connecteds',
+                'total_hc': 'home_connecteds',
                 'cleansing_hp': 'home_connecteds',
 
+                # Display name mappings for home_connecteds
+                'HC Old': 'home_connecteds',
+                'HC ICRM': 'home_connecteds',
+                'Total HC': 'home_connecteds',
+                'Cleansing HP': 'home_connecteds',
+
                 # Dokumentasi fields
-                'link_dokumen_feeder': 'dokumentasis',
-                # Alias untuk status_osp_amarta_fat dari dokumentasis
                 'dokumentasi_status_osp_amarta_fat': 'dokumentasis',
+                'link_dokumen_feeder': 'dokumentasis',
                 'keterangan_dokumen': 'dokumentasis',
                 'link_data_aset': 'dokumentasis',
                 'keterangan_data_aset': 'dokumentasis',
@@ -839,54 +890,67 @@ class AssetDataService:
                 'update_aset': 'dokumentasis',
                 'amarta_update': 'dokumentasis',
 
-                # Additional Information fields
-                'tanggal_rfs': 'additional_informations',
+                # Display name mappings for dokumentasis
+                'Dokumentasi Status Osp Amarta Fat': 'dokumentasis',
+                'Link Dokumen Feeder': 'dokumentasis',
+                'Keterangan Dokumen': 'dokumentasis',
+                'Link Data Aset': 'dokumentasis',
+                'Keterangan Data Aset': 'dokumentasis',
+                'Link Maps': 'dokumentasis',
+                'Update Aset': 'dokumentasis',
+                'Amarta Update': 'dokumentasis',  # Additional Information fields
                 'pa': 'additional_informations',
+                'tanggal_rfs': 'additional_informations',
                 'mitra': 'additional_informations',
                 'kategori': 'additional_informations',
-                'sumber_datek': 'additional_informations'
-            }            # Mapping alias kolom ke nama kolom asli di database
-            alias_to_db_column = {
-                'dokumentasi_status_osp_amarta_fat': 'status_osp_amarta_fat'
+                'sumber_datek': 'additional_informations',
+
+                # Display name mappings for additional_informations
+                'PA': 'additional_informations',
+                'Tanggal RFS': 'additional_informations',
+                'Tanggal Rfs': 'additional_informations',
+                'Mitra': 'additional_informations',
+                'Kategori': 'additional_informations',
+                'Sumber Datek': 'additional_informations',
             }
 
+            # Get dynamic columns to add them to the mapping
+            try:
+                dynamic_columns = self.column_manager.get_dynamic_columns(
+                    'user_terminals', active_only=True)
+                for col in dynamic_columns:
+                    # Dynamic columns are physically in user_terminals table
+                    field_to_table_mapping[col['display_name']
+                                           ] = 'user_terminals'
+                    field_to_table_mapping[col['column_name']
+                                           ] = 'user_terminals'
+            except Exception as e:
+                logger.warning(
+                    f"Could not load dynamic columns for mapping: {e}")
+
             # Group updates by table
-            table_updates = {}
-            for field, value in update_data.items():
-                # Convert display field names to database field names
-                db_field = field.lower().replace(' ', '_').replace('/', '_')
+            updates_by_table = {}
 
-                # Convert alias to real column name if needed
-                actual_db_field = alias_to_db_column.get(db_field, db_field)
+            for field_name, new_value in update_data.items():
+                table_name = field_to_table_mapping.get(
+                    field_name, 'user_terminals')  # Default to user_terminals
 
-                table = field_table_map.get(db_field)
-                if table:
-                    if table not in table_updates:
-                        table_updates[table] = {}
-                    table_updates[table][actual_db_field] = value
-                else:
-                    logger.warning(f"Unknown field for update: {field}")
+                if table_name not in updates_by_table:
+                    updates_by_table[table_name] = {}
 
-            # Convert primary key column to database format
-            pk_col_db = pk_column.lower()
+                updates_by_table[table_name][field_name] = new_value
 
             # Execute updates for each table
-            for table, updates in table_updates.items():
-                if updates:
-                    set_clause = ", ".join(
-                        [f'"{col}" = %s' for col in updates.keys()])
-                    query = f'UPDATE {table} SET {set_clause} WHERE {pk_col_db} = %s'
-                    params = list(updates.values()) + [pk_value]
+            pk_col_db = pk_column.lower()
 
-                    _, _, error = self._execute_query(
-                        query, tuple(params), fetch="none")
-                    if error:
-                        logger.error(f"Failed to update {table}: {error}")
-                        return f"Failed to update {table}: {error}"
+            for table_name, table_updates in updates_by_table.items():
+                error = self.update_asset_table(
+                    table_name, pk_col_db, pk_value, table_updates)
+                if error:
+                    return error
 
-                    logger.info(
-                        f"Successfully updated {table} for {pk_col_db}={pk_value}")
-
+            logger.info(
+                f"Successfully updated {len(update_data)} fields across {len(updates_by_table)} tables for {pk_column}={pk_value}")
             return None  # Success
 
         except Exception as e:
@@ -894,44 +958,231 @@ class AssetDataService:
             logger.error(error_msg)
             return error_msg
 
-    def delete_asset_comprehensive(self, pk_column: str, pk_value: Any) -> Optional[str]:
+    def build_comprehensive_query(self) -> str:
         """
-        Delete asset data from all related tables.
-
-        Args:
-            pk_column: Primary key column name
-            pk_value: Primary key value
+        Public method to build comprehensive query for external use.
+        This method is used by search helpers and other services that need
+        to build dynamic queries with all columns from all tables.
 
         Returns:
-            Error message if failed, None if successful
+            SQL query string
+        """
+        return self._build_comprehensive_query()
+
+    def _build_comprehensive_query(self) -> str:
+        """
+        Build a comprehensive query that dynamically includes all columns from all tables,
+        handling duplicate column names with prefixes.
+
+        Returns:
+            SQL query string
         """
         try:
-            pk_col_db = pk_column.lower()
+            # Get column information for each table
+            tables_info = {
+                'ut': 'user_terminals',
+                'cl': 'clusters',
+                'hc': 'home_connecteds',
+                'dk': 'dokumentasis',
+                'ai': 'additional_informations'
+            }
 
-            # Delete from all related tables (order matters due to foreign key constraints)
-            tables_to_delete = [
-                'home_connecteds',
-                'dokumentasis',
-                'additional_informations',
-                'clusters',
-                'user_terminals'  # Delete from main table last
-            ]
+            # Build SELECT clause with all columns
+            select_parts = []
 
-            for table in tables_to_delete:
-                query = f'DELETE FROM {table} WHERE {pk_col_db} = %s'
-                _, _, error = self._execute_query(
-                    query, (pk_value,), fetch="none")
+            # Always include all columns from user_terminals (main table) without prefix
+            # For other tables, get their columns and add with prefixes to avoid conflicts
+            select_parts.append("ut.*")
+            # Skip 'ut'
+            for alias, table_name in list(tables_info.items())[1:]:
+                table_columns = self._get_table_columns(table_name)
+                for col in table_columns:
+                    if col in ['fat_id', 'id']:
+                        # Skip fat_id and id from other tables to avoid redundancy
+                        # fat_id: Only use from main table (user_terminals)
+                        # id: Internal primary keys not needed in display
+                        continue
+                    elif col in ['created_at', 'updated_at']:
+                        # Add prefix to timestamp columns to avoid conflicts
+                        select_parts.append(f"{alias}.{col} as {alias}_{col}")
+                    elif col == 'status_osp_amarta_fat' and alias == 'dk':
+                        # Special case for dokumentasis
+                        select_parts.append(
+                            f"{alias}.{col} as dokumentasi_{col}")
+                    else:
+                        # Use original column name for other columns
+                        select_parts.append(f"{alias}.{col}")
 
-                if error:
-                    logger.error(f"Failed to delete from {table}: {error}")
-                    return f"Failed to delete from {table}: {error}"
+            query = f"""
+            SELECT {', '.join(select_parts)}
+            FROM user_terminals ut
+            LEFT JOIN clusters cl ON ut.fat_id = cl.fat_id
+            LEFT JOIN home_connecteds hc ON ut.fat_id = hc.fat_id
+            LEFT JOIN dokumentasis dk ON ut.fat_id = dk.fat_id
+            LEFT JOIN additional_informations ai ON ut.fat_id = ai.fat_id
+            ORDER BY ut.fat_id
+            """
 
-                logger.info(
-                    f"Successfully deleted from {table} for {pk_col_db}={pk_value}")
-
-            return None  # Success
+            return query
 
         except Exception as e:
-            error_msg = f"Error in comprehensive delete: {e}"
-            logger.error(error_msg)
-            return error_msg
+            logger.warning(
+                f"Error building dynamic query, falling back to basic query: {e}")
+            # Fallback to basic query if dynamic building fails
+            return """
+            SELECT ut.*, 
+                   cl.latitude_cluster, cl.longitude_cluster, cl.area_kp, cl.kota_kab,
+                   cl.kecamatan, cl.kelurahan, cl.up3, cl.ulp,
+                   hc.hc_old, hc.hc_icrm, hc.total_hc, hc.cleansing_hp,                   dk.status_osp_amarta_fat as dokumentasi_status_osp_amarta_fat,
+                   dk.link_dokumen_feeder, dk.keterangan_dokumen, dk.link_data_aset,
+                   dk.keterangan_data_aset, dk.link_maps, dk.update_aset, dk.amarta_update,
+                   ai.pa, ai.tanggal_rfs, ai.mitra, ai.kategori, ai.sumber_datek
+            FROM user_terminals ut
+            LEFT JOIN clusters cl ON ut.fat_id = cl.fat_id
+            LEFT JOIN home_connecteds hc ON ut.fat_id = hc.fat_id
+            LEFT JOIN dokumentasis dk ON ut.fat_id = dk.fat_id
+            LEFT JOIN additional_informations ai ON ut.fat_id = ai.fat_id
+            ORDER BY ut.fat_id
+            """
+
+    def _get_table_columns(self, table_name: str) -> List[str]:
+        """
+        Get all column names for a specific table with caching.
+
+        Args:
+            table_name: Name of the table
+
+        Returns:
+            List of column names
+        """
+        import time
+
+        current_time = time.time()
+
+        # Check if cache is valid
+        if (self._table_columns_cache_time and
+            current_time - self._table_columns_cache_time < self._table_columns_cache_ttl and
+                table_name in self._table_columns_cache):
+            return self._table_columns_cache[table_name]
+
+        try:
+            query = """
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = %s AND table_schema = 'public'
+            ORDER BY ordinal_position
+            """
+
+            data, columns, error = self._execute_query(query, (table_name,))
+            if error or not data:
+                logger.warning(
+                    f"Could not get columns for table {table_name}: {error}")
+                return []
+
+            column_list = [row[0] for row in data]
+
+            # Update cache
+            if not self._table_columns_cache_time:
+                self._table_columns_cache_time = current_time
+            self._table_columns_cache[table_name] = column_list
+
+            return column_list
+
+        except Exception as e:
+            logger.error(f"Error getting columns for table {table_name}: {e}")
+            return []
+
+    def _convert_display_to_db_columns(self, table_name: str, display_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Convert display column names back to database column names.
+
+        Args:
+            table_name: Target table name
+            display_data: Data with display column names
+
+        Returns:
+            Data with database column names
+        """
+        # Create reverse mapping from display name to database name
+        display_to_db_mapping = {
+            # User terminals mappings
+            'FATID': 'fat_id',
+            'Hostname Olt': 'hostname_olt',
+            'Latitude Olt': 'latitude_olt',
+            'Longitude Olt': 'longitude_olt',
+            'Brand Olt': 'brand_olt',
+            'Type Olt': 'type_olt',
+            'Kapasitas Olt': 'kapasitas_olt',
+            'Kapasitas Port Olt': 'kapasitas_port_olt',
+            'Olt Port': 'olt_port',
+            'OLT': 'olt',
+            'Interface Olt': 'interface_olt',
+            'FDT ID': 'fdt_id',
+            'Status Osp Amarta Fdt': 'status_osp_amarta_fdt',
+            'Jumlah Splitter Fdt': 'jumlah_splitter_fdt',
+            'Kapasitas Splitter Fdt': 'kapasitas_splitter_fdt',
+            'Fdt New Existing': 'fdt_new_existing',
+            'Port Fdt': 'port_fdt',
+            'Latitude Fdt': 'latitude_fdt',
+            'Longitude Fdt': 'longitude_fdt',
+            'Jumlah Splitter Fat': 'jumlah_splitter_fat',
+            'Kapasitas Splitter Fat': 'kapasitas_splitter_fat',
+            'Latitude Fat': 'latitude_fat',
+            'Longitude Fat': 'longitude_fat',
+            'Status OSP AMARTA FAT': 'status_osp_amarta_fat',
+            'Fat Kondisi': 'fat_kondisi',
+            'Fat Filter Pemakaian': 'fat_filter_pemakaian',
+            'Keterangan Full': 'keterangan_full',
+            'FAT ID X': 'fat_id_x',
+            'Filter Fat Cap': 'filter_fat_cap',
+
+            # Clusters mappings
+            'Latitude Cluster': 'latitude_cluster',
+            'Longitude Cluster': 'longitude_cluster',
+            'Area Kp': 'area_kp',
+            'Kota/Kab': 'kota_kab',
+            'Kecamatan': 'kecamatan',
+            'Kelurahan': 'kelurahan',
+            'UP3': 'up3',
+            'ULP': 'ulp',
+
+            # Home connecteds mappings
+            'HC Old': 'hc_old',
+            'HC ICRM': 'hc_icrm',
+            'Total HC': 'total_hc',
+            'Cleansing HP': 'cleansing_hp',
+
+            # Dokumentasis mappings
+            'Dokumentasi Status Osp Amarta Fat': 'status_osp_amarta_fat',
+            'Link Dokumen Feeder': 'link_dokumen_feeder',
+            'Keterangan Dokumen': 'keterangan_dokumen',
+            'Link Data Aset': 'link_data_aset',
+            'Keterangan Data Aset': 'keterangan_data_aset',
+            'Link Maps': 'link_maps',
+            'Update Aset': 'update_aset',
+            'Amarta Update': 'amarta_update',
+
+            # Additional informations mappings
+            'PA': 'pa',
+            'Tanggal RFS': 'tanggal_rfs',
+            'Tanggal Rfs': 'tanggal_rfs',
+            'Mitra': 'mitra',
+            'Kategori': 'kategori',
+            'Sumber Datek': 'sumber_datek',
+        }
+
+        converted_data = {}
+        for display_name, value in display_data.items():
+            # Try to find database column name
+            db_column = display_to_db_mapping.get(display_name)
+            if db_column:
+                converted_data[db_column] = value
+            else:
+                # If no mapping found, assume it's already a database column name
+                # or try to convert using simple rule (title case to snake_case)
+                db_column = display_name.lower().replace(' ', '_')
+                converted_data[db_column] = value
+
+        return converted_data
+
+    # ...existing code...

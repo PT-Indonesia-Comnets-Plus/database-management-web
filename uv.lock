@@ -440,6 +440,15 @@ wheels = [
 ]
 
 [[package]]
+name = "dnspython"
+version = "2.7.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/b5/4a/263763cb2ba3816dd94b08ad3a33d5fdae34ecb856678773cc40a3605829/dnspython-2.7.0.tar.gz", hash = "sha256:ce9c432eda0dc91cf618a5cedf1a4e142651196bbcd2c80e89ed5a907e5cfaf1", size = 345197, upload-time = "2024-10-05T20:14:59.362Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/68/1b/e0a87d256e40e8c888847551b20a017a6b98139178505dc7ffb96f04e954/dnspython-2.7.0-py3-none-any.whl", hash = "sha256:b4c34b7d10b51bcc3a5071e7b8dee77939f1e878477eeecc965e9835f63c6c86", size = 313632, upload-time = "2024-10-05T20:14:57.687Z" },
+]
+
+[[package]]
 name = "et-xmlfile"
 version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1086,6 +1095,7 @@ dependencies = [
     { name = "dataclasses-json", marker = "python_full_version == '3.11.9'" },
     { name = "decorator", marker = "python_full_version == '3.11.9'" },
     { name = "deprecation", marker = "python_full_version == '3.11.9'" },
+    { name = "dnspython" },
     { name = "executing", marker = "python_full_version == '3.11.9'" },
     { name = "filetype", marker = "python_full_version == '3.11.9'" },
     { name = "firebase-admin", marker = "python_full_version == '3.11.9'" },
@@ -1257,6 +1267,7 @@ requires-dist = [
     { name = "dataclasses-json", marker = "python_full_version == '3.11.9'", specifier = "==0.6.7" },
     { name = "decorator", marker = "python_full_version == '3.11.9'", specifier = "==5.2.1" },
     { name = "deprecation", marker = "python_full_version == '3.11.9'", specifier = "==2.1.0" },
+    { name = "dnspython", specifier = ">=2.7.0" },
     { name = "executing", marker = "python_full_version == '3.11.9'", specifier = "==2.2.0" },
     { name = "filetype", marker = "python_full_version == '3.11.9'", specifier = "==1.2.0" },
     { name = "firebase-admin", marker = "python_full_version == '3.11.9'", specifier = "==6.6.0" },

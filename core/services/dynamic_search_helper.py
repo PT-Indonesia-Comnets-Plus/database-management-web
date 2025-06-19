@@ -25,6 +25,9 @@ class UnifiedSearchService:
         self.asset_data_service = asset_data_service
         self._column_cache = {}
         self._search_cache = {}
+        # Cache for search queries to avoid rebuilding every time
+        self._query_cache = {}
+        self._query_cache_ttl = 300  # 5 minutes
 
     def get_all_searchable_columns(self, table_name: str = 'user_terminals') -> Dict[str, Dict]:
         """
@@ -234,33 +237,14 @@ class UnifiedSearchService:
                     params = [f"%{value}%"]
 
                 # Use the same comprehensive SELECT from AssetDataService but with filtering
-                query = """
-                    SELECT 
-                        ut.fat_id, ut.hostname_olt, ut.latitude_olt, ut.longitude_olt, ut.brand_olt,
-                        ut.type_olt, ut.kapasitas_olt, ut.kapasitas_port_olt, ut.olt_port, ut.olt,
-                        ut.interface_olt, ut.fdt_id, ut.status_osp_amarta_fdt, ut.jumlah_splitter_fdt,
-                        ut.kapasitas_splitter_fdt, ut.fdt_new_existing, ut.port_fdt, ut.latitude_fdt,
-                        ut.longitude_fdt, ut.jumlah_splitter_fat, ut.kapasitas_splitter_fat,
-                        ut.latitude_fat, ut.longitude_fat, ut.status_osp_amarta_fat, ut.fat_kondisi,
-                        ut.fat_filter_pemakaian, ut.keterangan_full, ut.fat_id_x, ut.filter_fat_cap,
-                        
-                        cl.latitude_cluster, cl.longitude_cluster, cl.area_kp, cl.kota_kab,
-                        cl.kecamatan, cl.kelurahan, cl.up3, cl.ulp,
-                        
-                        hc.hc_old, hc.hc_icrm, hc.total_hc, hc.cleansing_hp,
-                        
-                        dk.status_osp_amarta_fat as dokumentasi_status_osp_amarta_fat,
-                        dk.link_dokumen_feeder, dk.keterangan_dokumen, dk.link_data_aset,
-                        dk.keterangan_data_aset, dk.link_maps, dk.update_aset, dk.amarta_update,
-                        
-                        ai.pa, ai.tanggal_rfs, ai.mitra, ai.kategori, ai.sumber_datek
-                        
-                    FROM user_terminals ut
-                    LEFT JOIN clusters cl ON ut.fat_id = cl.fat_id
-                    LEFT JOIN home_connecteds hc ON ut.fat_id = hc.fat_id
-                    LEFT JOIN dokumentasis dk ON ut.fat_id = dk.fat_id
-                    LEFT JOIN additional_informations ai ON ut.fat_id = ai.fat_id
-                    WHERE """ + where_condition + """
+                # This ensures ALL columns including dynamic ones are included from ALL tables
+                base_query = self.asset_data_service.build_comprehensive_query()
+                # Remove the ORDER BY and add WHERE condition
+                base_query_parts = base_query.strip().split('ORDER BY')
+                select_and_joins = base_query_parts[0].strip()
+
+                query = select_and_joins + f"""
+                    WHERE {where_condition}
                     ORDER BY ut.fat_id
                     LIMIT %s
                 """
@@ -306,33 +290,13 @@ class UnifiedSearchService:
                     params = [f"%{value}%"]
 
                 # Same comprehensive query but with different WHERE condition
-                query = """
-                    SELECT 
-                        ut.fat_id, ut.hostname_olt, ut.latitude_olt, ut.longitude_olt, ut.brand_olt,
-                        ut.type_olt, ut.kapasitas_olt, ut.kapasitas_port_olt, ut.olt_port, ut.olt,
-                        ut.interface_olt, ut.fdt_id, ut.status_osp_amarta_fdt, ut.jumlah_splitter_fdt,
-                        ut.kapasitas_splitter_fdt, ut.fdt_new_existing, ut.port_fdt, ut.latitude_fdt,
-                        ut.longitude_fdt, ut.jumlah_splitter_fat, ut.kapasitas_splitter_fat,
-                        ut.latitude_fat, ut.longitude_fat, ut.status_osp_amarta_fat, ut.fat_kondisi,
-                        ut.fat_filter_pemakaian, ut.keterangan_full, ut.fat_id_x, ut.filter_fat_cap,
-                        
-                        cl.latitude_cluster, cl.longitude_cluster, cl.area_kp, cl.kota_kab,
-                        cl.kecamatan, cl.kelurahan, cl.up3, cl.ulp,
-                        
-                        hc.hc_old, hc.hc_icrm, hc.total_hc, hc.cleansing_hp,
-                        
-                        dk.status_osp_amarta_fat as dokumentasi_status_osp_amarta_fat,
-                        dk.link_dokumen_feeder, dk.keterangan_dokumen, dk.link_data_aset,
-                        dk.keterangan_data_aset, dk.link_maps, dk.update_aset, dk.amarta_update,
-                        
-                        ai.pa, ai.tanggal_rfs, ai.mitra, ai.kategori, ai.sumber_datek
-                        
-                    FROM user_terminals ut
-                    LEFT JOIN clusters cl ON ut.fat_id = cl.fat_id
-                    LEFT JOIN home_connecteds hc ON ut.fat_id = hc.fat_id
-                    LEFT JOIN dokumentasis dk ON ut.fat_id = dk.fat_id
-                    LEFT JOIN additional_informations ai ON ut.fat_id = ai.fat_id
-                    WHERE """ + where_condition + """
+                base_query = self.asset_data_service.build_comprehensive_query()
+                # Remove the ORDER BY and add WHERE condition
+                base_query_parts = base_query.strip().split('ORDER BY')
+                select_and_joins = base_query_parts[0].strip()
+
+                query = select_and_joins + f"""
+                    WHERE {where_condition}
                     ORDER BY ut.fat_id
                     LIMIT %s
                 """
@@ -534,6 +498,36 @@ class UnifiedSearchService:
         self._column_cache.clear()
         self._search_cache.clear()
         logger.info("Search service cache cleared")
+
+    def get_cached_comprehensive_base_query(self) -> str:
+        """Get cached base comprehensive query to avoid rebuilding on every search."""
+        import time
+
+        current_time = time.time()
+        cache_key = 'comprehensive_base'
+
+        # Check if cache is valid
+        if (cache_key in self._query_cache and
+            'query' in self._query_cache[cache_key] and
+            'timestamp' in self._query_cache[cache_key] and
+                (current_time - self._query_cache[cache_key]['timestamp']) < self._query_cache_ttl):
+            logger.debug("Using cached comprehensive base query")
+            return self._query_cache[cache_key]['query']
+
+        # Build new base query and cache it
+        base_query = self.asset_data_service.build_comprehensive_query()
+        # Remove ORDER BY to allow WHERE injection
+        base_query_parts = base_query.strip().split('ORDER BY')
+        clean_base_query = base_query_parts[0].strip()
+
+        # Cache the result
+        self._query_cache[cache_key] = {
+            'query': clean_base_query,
+            'timestamp': current_time
+        }
+
+        logger.info("Built and cached comprehensive base query")
+        return clean_base_query
 
     def _enrich_with_dynamic_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         """

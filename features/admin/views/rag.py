@@ -9,11 +9,8 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from typing import List
 from langchain_community.document_loaders import PyPDFLoader
 import base64
-# Hapus import pinecone dan time jika tidak digunakan lagi
-# import pinecone
-# import time
-import psycopg2  # <-- Tambahkan kembali import psycopg2
-from psycopg2 import pool  # <-- Pastikan pool diimpor
+import psycopg2 
+from psycopg2 import pool 
 
 # Ambil API Key Google (tetap diperlukan untuk embedding)
 api_key = os.getenv("GEMINI_API_KEY", st.secrets.get(
@@ -21,21 +18,6 @@ api_key = os.getenv("GEMINI_API_KEY", st.secrets.get(
 if not api_key:
     st.error("GOOGLE_API_KEY tidak ditemukan.")
     st.stop()
-
-# Hapus Konfigurasi Pinecone
-# pinecone_api_key = st.secrets.get("pinecone", {}).get("api_key")
-# pinecone_environment = st.secrets.get("pinecone", {}).get("environment")
-# pinecone_index_name = st.secrets.get("pinecone", {}).get("index_name")
-# if not all([pinecone_api_key, pinecone_environment, pinecone_index_name]):
-#     st.error("Konfigurasi Pinecone tidak lengkap.")
-#     st.stop()
-
-# Hapus Fungsi Helper Pinecone
-# @st.cache_resource
-# def get_pinecone_index():
-#     ...
-
-# --- Fungsi Helper Lain (Sebagian besar sama) ---
 
 
 def check_file_exists_in_bucket(bucket_name: str, file_name: str) -> bool:
@@ -152,10 +134,6 @@ def split_documents(documents: List[Document], chunk_size: int = 1000, chunk_ove
     )
     return text_splitter.split_documents(documents)
 
-
-# Hapus fungsi upsert_embeddings_to_pinecone
-# def upsert_embeddings_to_pinecone(...):
-#     ...
 
 # --- Fungsi Baru/Kembalikan: Simpan ke DB Postgres ---
 def save_embeddings_to_db(db_pool: pool.SimpleConnectionPool, documents: List[Document], embeddings: List[List[float]], file_name: str):
@@ -313,12 +291,6 @@ def app():
                     "Gagal mengunggah file ke Supabase Storage. Proses embedding dibatalkan.")
                 return
 
-            # 2. Proses PDF, Buat Embeddings, dan Simpan ke Database
-            # Opsional: Cek apakah file sudah diproses sebelumnya di DB
-            # file_processed_in_db = check_file_exists_in_db(db_pool, file_name)
-            # if file_processed_in_db:
-            #     st.warning(f"⚠️ File '{file_name}' sepertinya sudah diproses sebelumnya. Embedding lama akan dihapus dan diganti.")
-
             st.info(f"Memulai proses dokumen '{file_name}' untuk database...")
             with st.spinner("Memuat dan membagi PDF..."):
                 documents = load_pdf(temp_file_path)
@@ -338,24 +310,11 @@ def app():
             st.success(
                 f"✅ File '{file_name}' berhasil diproses dan disimpan ke database!")
 
-        # Hapus file sementara (opsional)
-        # if os.path.exists(temp_file_path):
-        #     try: os.remove(temp_file_path)
-        #     except Exception as e: st.warning(f"Gagal hapus file sementara: {e}")
-
 
 if __name__ == "__main__":
     if "storage" not in st.session_state:
         st.warning("Supabase storage client tidak ditemukan di session state.")
     if "db" not in st.session_state:
         st.error("Database pool 'db' tidak ditemukan di session state.")
-        # Mock jika perlu untuk testing langsung
-        # try:
-        #     from core.database import connect_db
-        #     st.session_state.db, st.session_state.storage = connect_db()
-        #     if not st.session_state.db: raise Exception("Mock DB Gagal")
-        # except Exception as e:
-        #     st.error(f"Gagal membuat mock DB/Storage: {e}")
-        #     st.stop()
 
     app()

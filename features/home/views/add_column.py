@@ -134,11 +134,10 @@ class ColumnManager:
             'clusters': 'fat_id',
             'home_connecteds': 'fat_id',
             'dokumentasis': 'fat_id',
-            'additional_informations': 'fat_id'
-        }
+            'additional_informations': 'fat_id'}
         return primary_keys.get(table_name, 'id')
 
-    def get_dynamic_columns(self, table_name: str = None) -> List[Dict]:
+    def get_dynamic_columns(self, table_name: str = None, active_only: bool = False) -> List[Dict]:
         """Get list of dynamic columns for specific table or all tables."""
         if table_name:
             query = """
@@ -147,22 +146,47 @@ class ColumnManager:
                    created_at, created_by
             FROM dynamic_columns 
             WHERE table_name = %s
-            ORDER BY display_name
             """
-            params = (table_name,)
+            params = [table_name]
+
+            if active_only:
+                query += " AND is_active = TRUE"
+
+            query += " ORDER BY display_name"
+
         else:
             query = """
             SELECT id, table_name, column_name, column_type, display_name, 
                    description, is_active, is_searchable, default_value,
-                   created_at, created_by
-            FROM dynamic_columns            ORDER BY table_name, display_name
+                   created_at, created_by            FROM dynamic_columns
             """
-            params = None
+            params = []
 
-        success, message, result = self.execute_query(query, params)
+            if active_only:
+                query += " WHERE is_active = TRUE"
+
+            query += " ORDER BY table_name, display_name"
+
+        success, message, result = self.execute_query(
+            query, tuple(params) if params else None)
         if success and result:
-            data, columns = result
-            return [dict(zip(columns, row)) for row in data]
+            data, column_names = result  # Unpack the tuple from execute_query
+            columns = []
+            for row in data:
+                columns.append({
+                    'id': row[0],
+                    'table_name': row[1],
+                    'column_name': row[2],
+                    'column_type': row[3],
+                    'display_name': row[4],
+                    'description': row[5],
+                    'is_active': row[6],
+                    'is_searchable': row[7],
+                    'default_value': row[8],
+                    'created_at': row[9],
+                    'created_by': row[10]
+                })
+            return columns
         return []
 
     def add_dynamic_column(self, table_name: str, column_name: str, display_name: str,
@@ -176,7 +200,7 @@ class ColumnManager:
         if table_name not in available_tables:
             return False, f"Table '{table_name}' tidak tersedia untuk menambah kolom"
 
-        # Clean column name
+        # Clean column name untuk database
         clean_column_name = column_name.lower().replace(' ', '_').replace('-', '_')
         clean_column_name = ''.join(
             c for c in clean_column_name if c.isalnum() or c == '_')
@@ -184,13 +208,61 @@ class ColumnManager:
         if not clean_column_name:
             return False, "Column name tidak valid"
 
+        # Map column type to PostgreSQL data type
+        pg_type_mapping = {
+            'TEXT': 'TEXT',
+            'INTEGER': 'INTEGER',
+            'DECIMAL': 'DECIMAL(10,2)',
+            'DATE': 'DATE',
+            'BOOLEAN': 'BOOLEAN',
+            'URL': 'TEXT'
+        }
+
+        pg_data_type = pg_type_mapping.get(column_type.upper(), 'TEXT')
+
         # Begin transaction to ensure data consistency
         try:
             conn = self.db_pool.getconn()
             cursor = conn.cursor()
 
-            # Insert into dynamic_columns
-            insert_query = """
+            # Check if column already exists in the target table
+            check_column_query = """
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = %s AND column_name = %s AND table_schema = 'public'
+            """
+            cursor.execute(check_column_query, (table_name, clean_column_name))
+            existing_column = cursor.fetchone()
+
+            if existing_column:
+                conn.rollback()
+                cursor.close()
+                self.db_pool.putconn(conn)
+                return False, f"Kolom '{clean_column_name}' sudah ada di table '{table_name}'!"
+
+            # 1. Add physical column to the target table
+            alter_table_query = f"""
+            ALTER TABLE {table_name} 
+            ADD COLUMN {clean_column_name} {pg_data_type}
+            """
+
+            if default_value:
+                if column_type.upper() == 'BOOLEAN':
+                    default_val = 'TRUE' if default_value.lower(
+                    ) in ['true', '1', 'yes', 'ya'] else 'FALSE'
+                elif column_type.upper() in ['INTEGER', 'DECIMAL']:
+                    default_val = default_value
+                elif column_type.upper() == 'DATE':
+                    default_val = f"'{default_value}'"
+                else:  # TEXT, URL
+                    default_val = f"'{default_value}'"
+
+                alter_table_query += f" DEFAULT {default_val}"
+
+            cursor.execute(alter_table_query)
+
+            # 2. Insert metadata into dynamic_columns for tracking
+            insert_metadata_query = """
             INSERT INTO dynamic_columns 
             (table_name, column_name, column_type, display_name, description, 
              is_searchable, default_value, created_by)
@@ -201,49 +273,56 @@ class ColumnManager:
             params = (table_name, clean_column_name, column_type.upper(),
                       display_name, description, is_searchable, default_value, created_by)
 
-            cursor.execute(insert_query, params)
+            cursor.execute(insert_metadata_query, params)
             column_id = cursor.fetchone()[0]
 
-            # If default_value is provided, add it to all existing records
-            if default_value:
-                # Get all existing records from the target table (linked via fat_id)
-                if table_name == 'user_terminals':
-                    records_query = "SELECT fat_id FROM user_terminals WHERE fat_id IS NOT NULL"
-                else:
-                    # For other tables, still link through user_terminals via fat_id
-                    records_query = f"""
-                    SELECT DISTINCT ut.fat_id 
-                    FROM user_terminals ut 
-                    INNER JOIN {table_name} t ON ut.fat_id = t.fat_id 
-                    WHERE ut.fat_id IS NOT NULL
-                    """
-
-                cursor.execute(records_query)
-                existing_records = cursor.fetchall()
-
-                # Insert default values for existing records
-                if existing_records:
-                    default_data_query = """
-                    INSERT INTO dynamic_column_data (record_id, column_id, column_value)
-                    VALUES (%s, %s, %s)
-                    """
-
-                    default_data = [(record[0], column_id, default_value)
-                                    for record in existing_records]
-                    cursor.executemany(default_data_query, default_data)
-
-            # Commit transaction
+            # 3. If default_value is provided and no DEFAULT was set, update existing records
+            if default_value and not any(kw in alter_table_query.upper() for kw in ['DEFAULT']):
+                if column_type.upper() == 'BOOLEAN':
+                    update_val = True if default_value.lower(
+                    ) in ['true', '1', 'yes', 'ya'] else False
+                    update_query = f"UPDATE {table_name} SET {clean_column_name} = %s WHERE {clean_column_name} IS NULL"
+                    cursor.execute(update_query, (update_val,))
+                elif column_type.upper() in ['INTEGER', 'DECIMAL']:
+                    try:
+                        update_val = float(default_value) if column_type.upper(
+                        ) == 'DECIMAL' else int(default_value)
+                        update_query = f"UPDATE {table_name} SET {clean_column_name} = %s WHERE {clean_column_name} IS NULL"
+                        cursor.execute(update_query, (update_val,))
+                    except ValueError:
+                        pass  # Skip if default value is not a valid number
+                else:  # TEXT, URL, DATE
+                    update_query = f"UPDATE {table_name} SET {clean_column_name} = %s WHERE {clean_column_name} IS NULL"
+                    # Commit transaction
+                    cursor.execute(update_query, (default_value,))
             conn.commit()
             cursor.close()
             self.db_pool.putconn(conn)
 
-            # Clear cache to ensure fresh data in search
+            # Clear any caches
             if hasattr(self, '_column_cache'):
                 self._column_cache.clear()
 
-            success_message = f"Kolom '{display_name}' berhasil ditambahkan ke table '{table_name}'!"
-            if default_value and existing_records:
-                success_message += f" Default value '{default_value}' diterapkan ke {len(existing_records)} record yang ada."
+            # Notify AssetDataService to refresh all caches since schema changed
+            try:
+                # Import here to avoid circular imports
+                from core.services.AssetDataService import AssetDataService
+                # Try to invalidate cache in any existing instances in streamlit session
+                if 'asset_service' in st.session_state:
+                    asset_service = st.session_state.asset_service
+                    if hasattr(asset_service, 'invalidate_all_cache'):
+                        asset_service.invalidate_all_cache()
+                        logger.info(
+                            "Invalidated all AssetDataService caches due to schema change")
+                # Also clear streamlit cache to ensure fresh data
+                st.cache_data.clear()
+                logger.info("Column added - all caches invalidated")
+            except Exception as cache_error:
+                logger.warning(f"Could not invalidate caches: {cache_error}")
+
+            success_message = f"Kolom '{display_name}' berhasil ditambahkan secara fisik ke table '{table_name}'!"
+            if default_value:
+                success_message += f" Default value '{default_value}' telah diterapkan."
 
             return True, success_message
 
@@ -254,9 +333,9 @@ class ColumnManager:
                 self.db_pool.putconn(conn)
 
             error_message = str(e)
-            if "unique constraint" in error_message.lower():
+            if "duplicate column name" in error_message.lower():
                 return False, f"Kolom '{clean_column_name}' sudah ada di table '{table_name}'!"
-            return False, f"Error: {error_message}"
+            return False, f"Error menambahkan kolom: {error_message}"
 
     def delete_column(self, column_id: int) -> Tuple[bool, str]:
         """Delete a dynamic column (soft delete)."""
@@ -511,9 +590,7 @@ def render_add_column_ui():
                 st.error("❌ Koneksi database gagal!")
                 return
 
-            st.session_state.column_manager = ColumnManager(db_pool)
-
-            # Create tables if needed
+            st.session_state.column_manager = ColumnManager(db_pool)            # Create tables if needed
             success, message = st.session_state.column_manager.create_dynamic_tables()
             if not success:
                 st.error(f"Error creating tables: {message}")
@@ -523,7 +600,9 @@ def render_add_column_ui():
 
     except Exception as e:
         st.error(f"❌ Error initialize: {e}")
-        return    # Tabs for different functions
+        return
+    
+    # Tabs for different functions
     tab1, tab2, tab3, tab4 = st.tabs(
         ["📋 Daftar Kolom", "➕ Tambah Kolom", "📊 Data Entry", "🔗 Status Integrasi"])
 

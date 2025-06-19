@@ -8,15 +8,14 @@ import os
 from PIL import Image, ImageOps
 from io import BytesIO
 import base64
-# Pastikan Tuple diimpor jika digunakan, meskipun di kode ini tidak secara eksplisit
 from typing import Tuple, Optional
 import logging
 
 from core.services.UserService import UserService
 from core.services.EmailService import EmailService
-from core import initialize_session_state  # Ini akan memanggil ServiceManager
+from core import initialize_session_state 
 from core.utils.load_css import load_custom_css
-from core.utils.cookies import get_cookie_manager  # Untuk fallback logout
+from core.utils.cookies import get_cookie_manager  
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -191,25 +190,49 @@ class MainPageManager:
 
     def _display_registration_form(self) -> None:
         """Display registration form."""
-        st.subheader("📝 Register")
+        st.subheader("📝 Register")        # Check if OTP verification is needed
+        if st.session_state.get('show_otp_verification', False):
+            self._display_otp_verification_form()
+            return
+        
+        # Information about requirements
+        st.info("📧 **Persyaratan Pendaftaran:**\n"
+                "• Email Google (Gmail atau Google Workspace) yang aktif\n"
+                "• Username 3-30 karakter (huruf, angka, underscore)\n"
+                "• Password minimal 6 karakter dengan huruf besar, kecil, dan angka")
 
-        with st.form("register_form_main", clear_on_submit=False):  # Key unik untuk form
+        with st.form("register_form_main", clear_on_submit=False):
+            st.markdown("#### 📝 **Informasi Akun**")
+            
             col1, col2 = st.columns(2)
 
             with col1:
                 username = st.text_input(
-                    "Username", placeholder="johndoe", key="main_reg_username")
+                    "Username", 
+                    placeholder="johndoe", 
+                    help="Username unik 3-30 karakter (huruf, angka, underscore)",
+                    key="main_reg_username")
                 email = st.text_input(
-                    "Email", placeholder="john@iconnet.com", key="main_reg_email")
+                    "Email", 
+                    placeholder="john@gmail.com", 
+                    help="Email Google yang aktif untuk menerima kode verifikasi",
+                    key="main_reg_email")
 
             with col2:
                 password = st.text_input(
-                    "Password", type="password", key="main_reg_password")
+                    "Password", 
+                    type="password", 
+                    help="Minimal 6 karakter dengan huruf besar, kecil, dan angka",
+                    key="main_reg_password")
                 confirm_password = st.text_input(
-                    "Confirm Password", type="password", key="main_reg_confirm_password")
+                    "Confirm Password", 
+                    type="password", 
+                    help="Ulangi password yang sama persis",
+                    key="main_reg_confirm_password")
 
+            st.markdown("---")
             register_button = st.form_submit_button(
-                "Register", use_container_width=True)
+                "🚀 Daftar Sekarang", use_container_width=True, type="primary")
 
             if register_button:
                 if self.user_service:
@@ -229,8 +252,7 @@ class MainPageManager:
             try:
                 # UserService.login akan menangani st.success/st.warning/st.error
                 # dan pembaruan st.session_state serta cookies.
-                self.user_service.login(email, password)
-                # Jika login berhasil, UserService akan mengatur session state
+                self.user_service.login(email, password)                # Jika login berhasil, UserService akan mengatur session state
                 # dan kita bisa rerun untuk memperbarui UI
                 if self.is_user_authenticated():  # Cek lagi setelah login attempt
                     st.rerun()
@@ -240,20 +262,72 @@ class MainPageManager:
 
     def _handle_registration(self, username: str, email: str, password: str, confirm_password: str) -> None:
         """Handle registration form submission."""
+        # Basic field validation
         if not all([username, email, password, confirm_password]):
             st.warning("Please fill in all fields.")
             return
 
+        # Password confirmation validation
         if password != confirm_password:
             st.error("Passwords do not match.")
             return
 
+        # Advanced validation before sending OTP
+        try:
+            # Username validation
+            if len(username) < 3:
+                st.error("Username must be at least 3 characters long.")
+                return
+            if len(username) > 30:
+                st.error("Username must be less than 30 characters.")
+                return
+            
+            # Check for valid username characters (alphanumeric and underscore only)
+            import re
+            if not re.match(r'^[a-zA-Z0-9_]+$', username):
+                st.error("Username can only contain letters, numbers, and underscores.")
+                return
+
+            # Password strength validation
+            if len(password) < 6:
+                st.error("Password must be at least 6 characters long.")
+                return
+            if len(password) > 128:
+                st.error("Password must be less than 128 characters.")
+                return
+            
+            # Check for password strength requirements
+            has_upper = any(c.isupper() for c in password)
+            has_lower = any(c.islower() for c in password)
+            has_digit = any(c.isdigit() for c in password)
+            
+            if not (has_upper and has_lower and has_digit):
+                st.error("Password must contain at least one uppercase letter, one lowercase letter, and one number.")
+                return
+
+            # Basic email format validation
+            email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+            if not re.match(email_pattern, email):
+                st.error("Please enter a valid email address.")
+                return
+
+        except Exception as e:
+            logger.error(f"Error during validation: {e}")
+            st.error("An error occurred during validation. Please try again.")
+            return
+
+        # All validations passed, now proceed with registration
         with st.spinner("Creating account..."):
             try:
                 # UserService.signup akan menangani st.success/st.warning/st.error
+                # dan mengatur show_otp_verification = True jika OTP berhasil dikirim
                 self.user_service.signup(
                     username, email, password, confirm_password, role="Employee")
-                # Tidak perlu rerun di sini, biarkan pengguna melihat pesan sukses/error
+                
+                # Jika OTP verification diminta, rerun untuk menampilkan form OTP
+                if st.session_state.get('show_otp_verification', False):
+                    st.rerun()
+                    
             except Exception as e:  # Menangkap error tak terduga dari UserService.signup
                 logger.error(
                     f"Unexpected error during registration handling: {e}")
@@ -353,6 +427,84 @@ class MainPageManager:
         except Exception as e:
             logger.error(f"Error during fallback logout: {e}")
             st.error("Error during logout. Please refresh the page.")
+
+    def _display_otp_verification_form(self) -> None:
+        """Display OTP verification form."""
+        st.subheader("🔐 Verifikasi Email")
+
+        verification_email = st.session_state.get('verification_email', '')
+
+        # Informasi lengkap tentang proses verifikasi
+        st.success(
+            f"📧 **Kode verifikasi telah dikirim ke:** {verification_email}")
+
+        col1, col2 = st.columns([2, 1])
+
+        with col1:
+            otp_input = st.text_input(
+                "Kode Verifikasi (6 digit)",
+                placeholder="123456",
+                max_chars=6,
+                help="Masukkan kode 6 digit yang dikirim ke email Anda",
+                key="otp_verification_input"
+            )
+
+        with col2:
+            st.write("")  # Space
+            verify_button = st.button(
+                "✅ Verifikasi", use_container_width=True, type="primary")
+
+        # Action buttons
+        st.markdown("---")
+        col3, col4, col5 = st.columns([1, 1, 1])
+
+        with col3:
+            if st.button("📧 Kirim Ulang Kode", use_container_width=True):
+                if self.user_service:
+                    with st.spinner("Mengirim ulang kode..."):
+                        success, message = self.user_service.send_verification_otp(
+                            verification_email)
+                        if success:
+                            st.success(message)
+                        else:
+                            st.error(message)
+                else:
+                    st.error("User service not available.")
+
+        with col4:
+            if st.button("❓ Tidak Terima Email?", use_container_width=True):
+                st.info("""
+                **Jika Anda tidak menerima email:**
+                - 📂 Periksa folder **Spam/Junk**
+                - ⏳ Tunggu 1-2 menit
+                - 📧 Pastikan email yang dimasukkan benar
+                - 🔄 Coba tombol "Kirim Ulang Kode"
+                """)
+
+        with col5:
+            if st.button("❌ Batal", use_container_width=True):
+                # Clean up verification state
+                if 'show_otp_verification' in st.session_state:
+                    del st.session_state.show_otp_verification
+                if 'verification_email' in st.session_state:
+                    del st.session_state.verification_email
+                if 'pending_registration' in st.session_state and verification_email in st.session_state.pending_registration:
+                    del st.session_state.pending_registration[verification_email]
+                st.rerun()
+
+        # Handle verification
+        if verify_button and otp_input:
+            if self.user_service:
+                if len(otp_input) != 6 or not otp_input.isdigit():
+                    st.error("❌ Kode verifikasi harus 6 digit angka!")
+                else:
+                    with st.spinner("Memverifikasi kode..."):
+                        self.user_service.complete_registration_after_otp(
+                            verification_email, otp_input)
+            else:
+                st.error("User service not available.")
+        elif verify_button:
+            st.warning("⚠️ Masukkan kode verifikasi terlebih dahulu.")
 
     def run(self) -> None:
         """Main application entry point."""

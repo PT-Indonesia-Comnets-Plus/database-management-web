@@ -299,7 +299,6 @@ flowchart TD
 - **tools_web_search**: Pencarian web menggunakan Tavily API
 - **trigger_spreadsheet_etl_and_get_summary**: Trigger ETL pipeline untuk data spreadsheet
 
-````
 ## Instalasi & Setup (Local)
 
 ```powershell
@@ -317,7 +316,7 @@ cp .secret_example.toml
 
 uv run streamlit run Main_Page.py
 
-````
+```
 
 ### Fitur Utama
 

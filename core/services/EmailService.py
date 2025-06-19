@@ -14,6 +14,14 @@ class EmailService:
 
     def send_email(self, recipient, subject, body):
         try:
+            # Validasi konfigurasi email
+            if not all([self.smtp_server, self.smtp_port, self.smtp_username, self.smtp_password]):
+                st.error("❌ Konfigurasi email tidak lengkap. Hubungi administrator.")
+                return False
+
+            # Log konfigurasi (tanpa password)
+            st.info(f"🔄 Mengirim email ke {recipient} menggunakan {self.smtp_server}:{self.smtp_port}")
+
             # Membuat pesan email
             msg = MIMEMultipart()
             msg['From'] = self.smtp_username
@@ -23,13 +31,38 @@ class EmailService:
 
             # Mengirim email menggunakan SMTP
             with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+                st.info("🔄 Memulai koneksi STARTTLS...")
                 server.starttls()
+                
+                st.info("🔄 Melakukan autentikasi...")
                 server.login(self.smtp_username, self.smtp_password)
+                
+                st.info("🔄 Mengirim email...")
                 server.sendmail(self.smtp_username, recipient, msg.as_string())
 
-            st.success(f"Email sent successfully to {recipient}")
+            st.success("✅ Email berhasil dikirim!")
+            return True
+            
+        except smtplib.SMTPAuthenticationError as e:
+            st.error(f"❌ Gagal autentikasi email: {str(e)}")
+            st.error("💡 **Solusi:** Pastikan menggunakan App Password Gmail, bukan password biasa!")
+            st.info("📋 **Cara membuat App Password Gmail:**")
+            st.info("1. Masuk ke Google Account Settings")
+            st.info("2. Pilih Security > 2-Step Verification")
+            st.info("3. Di bagian bawah, pilih App passwords")
+            st.info("4. Buat App password untuk 'Mail'")
+            st.info("5. Gunakan App password tersebut di konfigurasi SMTP")
+            return False
+        except smtplib.SMTPRecipientsRefused as e:
+            st.error(f"❌ Email tujuan ditolak: {str(e)}")
+            return False
+        except smtplib.SMTPServerDisconnected as e:
+            st.error(f"❌ Koneksi ke server email terputus: {str(e)}")
+            return False
         except Exception as e:
-            st.error(f"Failed to send email: {e}")
+            st.error(f"❌ Gagal mengirim email: {str(e)}")
+            st.error(f"**Detail error:** {type(e).__name__}")
+            return False
 
     def send_verification_email(self, recipient, user, verification_link):
         subject = "Verify Your Email Address"

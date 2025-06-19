@@ -20,11 +20,30 @@ def app(user_data_service: UserDataService):
         unverified_users_df = user_data_service.get_users(status='Pending')
 
         if not unverified_users_df.empty:
-            # Display relevant columns only
-            # UID needed for verification
-            display_cols_pending = ['username', 'email', 'created_at', 'UID']
+            # Display relevant columns including email verification status
+            available_cols = unverified_users_df.columns.tolist()
+            display_cols_pending = ['username', 'email', 'created_at']
+            
+            # Add email verification columns if they exist
+            if 'email_verified' in available_cols:
+                display_cols_pending.append('email_verified')
+            if 'otp_verified_at' in available_cols:
+                display_cols_pending.append('otp_verified_at')
+                
+            # Always include UID at the end (needed for verification)
+            display_cols_pending.append('UID')
+            
+            # Only include columns that actually exist in the dataframe
+            display_cols_pending = [col for col in display_cols_pending if col in available_cols]
+            
             st.dataframe(
                 unverified_users_df[display_cols_pending], use_container_width=True, hide_index=True)
+            
+            # Show info about email verification status
+            email_verified_count = 0
+            if 'email_verified' in available_cols:
+                email_verified_count = unverified_users_df['email_verified'].sum()
+                st.info(f"📧 {email_verified_count} dari {len(unverified_users_df)} user telah memverifikasi email mereka via OTP")
 
             # Use email for selection as it's more user-friendly than UID
             emails_to_verify = unverified_users_df['email'].tolist()
