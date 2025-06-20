@@ -6,15 +6,36 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 import logging
 import streamlit as st
-from firebase_admin import exceptions
 import requests
 import re
 import dns.resolver
+
+# Try to import firebase with fallback
+try:
+    from firebase_admin import exceptions as firebase_exceptions
+    FIREBASE_AVAILABLE = True
+except ImportError:
+    logging.warning("Firebase modules not available in UserService")
+    FIREBASE_AVAILABLE = False
+    firebase_exceptions = None
 
 from core.utils.cookies import save_user_to_cookie, clear_user_cookie
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+
+def is_firebase_error(exception, error_type="FirebaseError"):
+    """Check if exception is a Firebase error when Firebase is available."""
+    if not FIREBASE_AVAILABLE or not firebase_exceptions:
+        return False
+
+    if error_type == "AlreadyExistsError":
+        return hasattr(firebase_exceptions, 'AlreadyExistsError') and isinstance(exception, firebase_exceptions.AlreadyExistsError)
+    elif error_type == "NotFoundError":
+        return hasattr(firebase_exceptions, 'NotFoundError') and isinstance(exception, firebase_exceptions.NotFoundError)
+    else:  # FirebaseError
+        return hasattr(firebase_exceptions, 'FirebaseError') and isinstance(exception, firebase_exceptions.FirebaseError)
 
 
 class UserServiceError(Exception):
@@ -172,16 +193,16 @@ class UserService:
 
             if user_doc_data.get("status") != "Verified":
                 st.warning("Your account is not verified by admin yet.")
-                return
-
-            self._create_session(user, user_doc_data)
+                return self._create_session(user, user_doc_data)
             st.success(f"Login successful as {user_doc_data['role']}!")
         except ValidationError as e:
             st.warning(str(e))
-        except exceptions.FirebaseError as e:
-            logger.error(f"Firebase error during login: {e}")
-            st.warning(f"A Firebase error occurred: {e}")
         except Exception as e:
+            if FIREBASE_AVAILABLE and firebase_exceptions and hasattr(firebase_exceptions, 'FirebaseError'):
+                if isinstance(e, firebase_exceptions.FirebaseError):
+                    logger.error(f"Firebase error during login: {e}")
+                    st.warning(f"A Firebase error occurred: {e}")
+                    return
             logger.error(f"Unexpected error during login: {e}")
             st.error(f"An unexpected error occurred: {e}")
 
@@ -221,15 +242,17 @@ class UserService:
             # Check if username is already taken
             if user_ref.get().exists:
                 st.warning("Username already taken")
-                return
-
-            # Check if email is already taken
+                return            # Check if email is already taken
             try:
                 self.auth.get_user_by_email(email)
                 st.warning("Email already taken")
                 return
-            except exceptions.NotFoundError:
-                pass
+            except Exception as e:
+                if not is_firebase_error(e, "NotFoundError"):
+                    logger.error(f"Error checking email: {e}")
+                    st.error("Error checking email availability")
+                    return
+                # NotFoundError is expected - email is available
 
             # Send OTP for email verification BEFORE creating account
             st.info("📧 Mengirim kode verifikasi ke email Anda...")
@@ -260,19 +283,19 @@ class UserService:
             st.success(otp_message)
             st.info("💡 **Langkah selanjutnya:** Masukkan kode verifikasi 6 digit yang telah dikirim ke email Anda untuk menyelesaikan pendaftaran.")
 
-            # Show OTP input form
-            st.session_state.show_otp_verification = True
+            # Show OTP input form            st.session_state.show_otp_verification = True
             st.session_state.verification_email = email
 
             logger.info(f"OTP sent for registration: {email}")
 
         except ValidationError as e:
             st.warning(str(e))
-        except exceptions.AlreadyExistsError:
-            st.warning("Email or username already taken.")
         except Exception as e:
-            logger.error(f"Error during signup: {e}")
-            st.error(f"An error occurred: {e}")
+            if is_firebase_error(e, "AlreadyExistsError"):
+                st.warning("Email or username already taken.")
+            else:
+                logger.error(f"Error during signup: {e}")
+                st.error(f"An error occurred: {e}")
 
     def complete_registration_after_otp(self, email: str, otp: str) -> None:
         """
@@ -348,27 +371,19 @@ class UserService:
                 del st.session_state.show_otp_verification
             if 'verification_email' in st.session_state:
                 del st.session_state.verification_email
-
-            st.success("🎉 Akun berhasil dibuat dan email terverifikasi!")
+                st.success("🎉 Akun berhasil dibuat dan email terverifikasi!")
             st.info("⏳ **Langkah Selanjutnya:** Akun Anda sedang menunggu verifikasi dari admin. Anda akan dapat login setelah admin memverifikasi akun Anda.")
             st.balloons()
 
             logger.info(
                 f"User account created and verified successfully: {email}")
 
-        except exceptions.AlreadyExistsError:
-            st.warning("Email atau username sudah terdaftar.")
         except Exception as e:
-            logger.error(f"Error completing registration: {e}")
-            st.error(f"Terjadi error saat menyelesaikan pendaftaran: {e}")
-
-        except ValidationError as e:
-            st.warning(str(e))
-        except exceptions.AlreadyExistsError:
-            st.warning("Email or username already taken.")
-        except Exception as e:
-            logger.error(f"Error during signup: {e}")
-            st.error(f"An error occurred: {e}")
+            if is_firebase_error(e, "AlreadyExistsError"):
+                st.warning("Email atau username sudah terdaftar.")
+            else:
+                logger.error(f"Error completing registration: {e}")
+                st.error(f"Terjadi error saat menyelesaikan pendaftaran: {e}")
 
     def logout(self) -> None:
         """
@@ -556,8 +571,7 @@ class UserService:
         """
         Verify Gmail existence using multiple methods.
 
-        Args:
-            email: Gmail address to verify
+        Args:            email: Gmail address to verify
 
         Returns:
             bool: True if email likely exists, False otherwise
@@ -568,12 +582,13 @@ class UserService:
                 self.auth.get_user_by_email(email)
                 # If user exists in Firebase, email is definitely valid
                 return True
-            except exceptions.NotFoundError:
-                # User not in Firebase, but email might still exist
-                pass
-            except Exception:
-                # Firebase check failed, continue with other methods
-                pass
+            except Exception as e:
+                if is_firebase_error(e, "NotFoundError"):
+                    # User not in Firebase, but email might still exist
+                    pass
+                else:
+                    # Firebase check failed, continue with other methods
+                    pass
 
             # Method 2: Try Google's password reset flow simulation
             # This is a more ethical way to check email existence
