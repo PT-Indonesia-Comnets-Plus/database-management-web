@@ -1,5 +1,9 @@
 """
-Main page for ICONNET application with user authentication and registration.
+Main pagfrom core.services.UserService import UserService
+from core.services.EmailService import EmailService
+from core import initialize_session_state 
+from core.utils.load_css import load_custom_css
+from core.utils.cookies import get_cookie_managerICONNET application with user authentication and registration.
 Refactored for efficiency and clean code practices.
 """
 
@@ -36,16 +40,8 @@ class MainPageManager:
 
     def _initialize_services(self) -> None:
         """Initialize required services."""
-        try:            # initialize_session_state() akan memanggil ServiceManager
-            # yang menangani pemuatan cookies dan inisialisasi semua layanan inti.
-            if not initialize_session_state():
-                st.error(
-                    "Failed to initialize application services. Please check your deployment configuration.")
-                st.info("💡 **Possible solutions:**\n"
-                        "• Check that all required environment variables are set\n"
-                        "• Verify that secrets.toml is properly configured\n"
-                        "• Ensure all dependencies are installed (check requirements.txt)")
-                st.stop()
+        try:            # initialize_session_state() akan memanggil ServiceManager            # yang menangani pemuatan cookies dan inisialisasi semua layanan inti.
+            initialize_session_state()  # Always continues now
 
             # Ambil layanan dari session_state setelah inisialisasi berhasil
             self.user_service = st.session_state.get('user_service')
@@ -59,13 +55,13 @@ class MainPageManager:
                 logger.warning("EmailService not available")
 
             if not self.user_service and not self.email_service:
-                st.error(
-                    "Critical services are not available. Some features may not work.")
+                st.warning(
+                    "🔧 **Limited Mode**: Some services are not available")
                 st.info("💡 **This may be due to:**\n"
                         "• Missing Firebase configuration\n"
                         "• Missing SMTP configuration\n"
-                        "• Deployment environment issues")
-                # Don't stop completely, allow read-only mode
+                        "• Deployment environment issues\n\n"
+                        "**You can still browse the app, but authentication features may not work.**")
 
             logger.info("MainPageManager services initialized.")
 
@@ -160,21 +156,44 @@ class MainPageManager:
         """Check if user is currently authenticated."""
         # Simple check like your old working code
         username_exists = bool(st.session_state.get("username", "").strip())
-        is_signed_out = st.session_state.get("signout", True)
-
         # User is authenticated if username exists and not signed out
+        is_signed_out = st.session_state.get("signout", True)
         return username_exists and not is_signed_out
 
     def display_authentication_form(self) -> None:
         """Display authentication forms (login/register)."""
-        st.markdown("---")
+        st.markdown("---")        # Check if services are available
+        if not self.user_service and not self.email_service:
+            # Show simple fallback interface
+            st.warning("🔧 **Limited Mode**: Services are not available")
+            st.info("""
+            **Authentication and data features are currently unavailable.**
+            
+            This may be due to:
+            • Missing Firebase configuration
+            • Missing database configuration  
+            • Deployment environment issues
+            
+            **Expected Features:**
+            • 🔐 User Authentication (Login/Register with email verification)
+            • 📊 Database Management (Dynamic tables, import/export)
+            • 🤖 AI Assistant (RAG-powered chatbot)
+            • ⚙️ Admin Panel (User management, system config)
+            • 📧 Email System (Notifications, verification)
+            """)
 
-        # Authentication method selection
+            st.markdown("---")
+            st.subheader("🚀 Application Demo")
+            st.success("✅ Application UI successfully loaded!")
+            st.info("🔧 Configure backend services to enable full functionality.")
+            return
+
+        # Normal authentication flow when services are available
         auth_method = st.radio(
             "Choose method:",
             ["Login", "Register"],
             horizontal=True,
-            key="auth_method_main_page"  # Key unik untuk radio button ini
+            key="auth_method_main_page"
         )
 
         if auth_method == "Login":
@@ -251,11 +270,18 @@ class MainPageManager:
                     self._handle_registration(
                         username, email, password, confirm_password)
                 else:
-                    st.error(
-                        "User service not available. Cannot process registration.")
+                    st.error("🔧 **Registration Service Unavailable**")
+                    st.info("Registration functionality requires Firebase services which are not currently available. "
+                            "This may be due to deployment configuration issues.")
 
     def _handle_login(self, email: str, password: str) -> None:
         """Handle login form submission."""
+        if not self.user_service:
+            st.error("🔧 **Login Service Unavailable**")
+            st.info("Login functionality requires Firebase services which are not currently available. "
+                    "This may be due to deployment configuration issues.")
+            return
+
         if not email or not password:
             st.warning("Please fill in all fields.")
             return

@@ -56,13 +56,6 @@ def initialize_session_state() -> bool:
     Returns:
         bool: True if initialization successful, False otherwise
     """
-    if not SERVICES_AVAILABLE:
-        logger.error(
-            "Core services not available. Cannot initialize session state.")
-        st.error(
-            "Application services are not available. Please check your deployment configuration.")
-        return False
-
     try:
         # Load cookies to session state
         if COOKIES_AVAILABLE and load_cookie_to_session:
@@ -73,10 +66,18 @@ def initialize_session_state() -> bool:
         # Initialize services only if not already done
         if 'services_initialized' not in st.session_state:
             if not _initialize_services():
-                return False
+                # Even if services fail, continue with limited functionality
+                logger.warning(
+                    "Some services failed to initialize, continuing with limited functionality")
             st.session_state.services_initialized = True
 
         return True
+
+    except Exception as e:
+        logger.error(f"Failed to initialize session state: {e}")
+        # Don't stop the app, just show warning and continue
+        logger.warning("Continuing with minimal functionality")
+        return True  # Always return True to allow app to continue
 
     except Exception as e:
         logger.error(f"Failed to initialize session state: {e}")
