@@ -15,7 +15,7 @@ from core.services.UserService import UserService
 from core.services.EmailService import EmailService
 from core import initialize_session_state
 from core.utils.load_css import load_custom_css
-from core.utils.cookies import get_cookie_manager
+from core.utils.session_manager import get_session_manager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -142,26 +142,19 @@ class MainPageManager:
             logger.error(f"Error displaying header: {e}")
             # Fallback display in case of any error
             st.markdown(
-                "<p style='text-align: center; color: #666; font-size: 16px;'>Database Management & AI Assistant Platform</p>", unsafe_allow_html=True)
+                "<p style='text-align: center; color: #666; font-size: 16px;'>Database Management & AI Assistant Platform</p>",
+                unsafe_allow_html=True)
 
     def is_user_authenticated(self) -> bool:
-        """Check if user is currently authenticated."""
-        # Simple check like your old working code
-        username_exists = bool(st.session_state.get("username", "").strip())
-        is_signed_out = st.session_state.get("signout", True)
+        """Check if user is currently authenticated using enhanced session manager."""
+        session_manager = get_session_manager()
+        is_authenticated = session_manager.is_user_authenticated()
 
-        # Debug logging to understand authentication state
+        # Additional debug logging
+        username = st.session_state.get('username', '')
+        signout = st.session_state.get('signout', True)
         logger.debug(
-            f"Authentication check - Username: {st.session_state.get('username', '')}, Signout: {is_signed_out}")
-
-        # User is authenticated if username exists and not signed out
-        is_authenticated = username_exists and not is_signed_out
-
-        if is_authenticated:
-            logger.info(
-                f"User {st.session_state.get('username')} is authenticated")
-        else:
-            logger.debug("User is not authenticated")
+            f"Auth check - Username: '{username}', Signout: {signout}, Result: {is_authenticated}")
 
         return is_authenticated
 
@@ -425,21 +418,9 @@ class MainPageManager:
         """Fallback logout method if UserService fails or is unavailable."""
         logger.warning("Executing fallback logout.")
         try:
-            # Clear cookies
-            # Ini juga akan mencoba membersihkan session state
-            get_cookie_manager().clear_user()
-
-            # Eksplisit membersihkan session state yang relevan dengan sesi pengguna
-            # Hati-hati jangan menghapus state yang dibutuhkan oleh layanan inti jika mereka
-            # di-cache atau dimaksudkan untuk persisten antar sesi (meskipun jarang untuk data pengguna).
-            user_session_keys = ["username", "useremail",
-                                 "role", "signout", "messages", "thread_id"]
-            for key in user_session_keys:
-                if key in st.session_state:
-                    del st.session_state[key]
-
-            # Pastikan signout diatur ke True
-            st.session_state.signout = True
+            # Clear user session using enhanced session manager
+            session_manager = get_session_manager()
+            session_manager.clear_user_session()
 
             st.success("Logged out successfully (fallback).")
             st.rerun()
@@ -528,6 +509,16 @@ class MainPageManager:
 
     def run(self) -> None:
         """Main application entry point."""
+        # Debug: Log session state at start
+        logger.debug(f"=== PAGE RUN START ===")
+        logger.debug(
+            f"Username in session: '{st.session_state.get('username', '')}'")
+        logger.debug(
+            f"Signout status: {st.session_state.get('signout', True)}")
+        logger.debug(
+            f"Email in session: '{st.session_state.get('useremail', '')}'")
+        logger.debug(f"Role in session: '{st.session_state.get('role', '')}'")
+
         # Clear login completion flag on each run to prevent loops
         if st.session_state.get('login_just_completed', False):
             st.session_state.login_just_completed = False
@@ -536,17 +527,19 @@ class MainPageManager:
         self.load_styles()
         self.display_header()
 
-        # Debug: Log current session state
+        # Check authentication status
         auth_status = self.is_user_authenticated()
-        logger.debug(f"Current authentication status: {auth_status}")
+        logger.debug(f"Authentication check result: {auth_status}")
 
         if auth_status:
             logger.info(
-                f"Displaying dashboard for user: {st.session_state.get('username')}")
+                f"✅ User authenticated: {st.session_state.get('username')} - Displaying dashboard")
             self.display_user_dashboard()
         else:
-            logger.debug("User not authenticated, showing login form")
+            logger.debug("❌ User not authenticated - Showing login form")
             self.display_authentication_form()
+
+        logger.debug(f"=== PAGE RUN END ===")
 
 
 def main():

@@ -25,12 +25,12 @@ def get_cookie_manager():
         cookies = EncryptedCookieManager(
             prefix="Iconnet_Corp_App_v1",
             password=cookie_password
-        )        # Check if cookies are ready with timeout
-        max_wait = 5  # Reduce timeout from 10 to 5 seconds
+        )        # Check if cookies are ready with longer timeout and better handling
+        max_wait = 15  # Increase timeout to 15 seconds for better reliability
         start_time = time.time()
 
         while not cookies.ready() and (time.time() - start_time) < max_wait:
-            time.sleep(0.1)
+            time.sleep(0.2)  # Increase sleep time to reduce CPU usage
 
         if not cookies.ready():
             logger.warning(
@@ -113,8 +113,20 @@ def clear_user_cookie() -> bool:
 
 
 def load_cookie_to_session() -> bool:
-    """Load cookie to session (matches old working code)."""
-    cookies = _get_cookies()
+    """Load cookie to session with retry mechanism for better reliability."""
+    # First, try to get cookies with retries
+    cookies = None
+    max_retries = 3
+    
+    for attempt in range(max_retries):
+        cookies = _get_cookies()
+        if cookies and cookies.ready():
+            break
+        
+        if attempt < max_retries - 1:  # Don't sleep on the last attempt
+            logger.info(f"Cookies not ready, retrying... (attempt {attempt + 1}/{max_retries})")
+            time.sleep(1)  # Wait 1 second between retries
+    
     if cookies and cookies.ready():
         try:
             username = cookies.get("username", "") or ""
@@ -122,22 +134,23 @@ def load_cookie_to_session() -> bool:
             role = cookies.get("role", "") or ""
             signout_status = cookies.get("signout", "True")
 
-            st.session_state.username = username
-            st.session_state.useremail = email
-            st.session_state.role = role
-            st.session_state.signout = signout_status == "True"
-
-            # Log successful cookie load
+            # Only update session if we have valid user data
             if username and email and signout_status == "False":
-                logger.info(
-                    f"User {username} successfully loaded from cookies to session")
+                st.session_state.username = username
+                st.session_state.useremail = email
+                st.session_state.role = role
+                st.session_state.signout = False
+
+                logger.info(f"User {username} successfully loaded from cookies to session")
                 return True
+            else:
+                logger.debug("No valid user data found in cookies")
 
         except Exception as e:
             logger.error(f"Failed to load cookies to session: {e}")
 
-    # Fallback: ensure session state has defaults
-    if not hasattr(st.session_state, 'username'):
+    # Fallback: ensure session state has proper defaults if no valid cookies
+    if not hasattr(st.session_state, 'username') or not st.session_state.get('username'):
         st.session_state.username = ""
     if not hasattr(st.session_state, 'useremail'):
         st.session_state.useremail = ""
@@ -146,7 +159,7 @@ def load_cookie_to_session() -> bool:
     if not hasattr(st.session_state, 'signout'):
         st.session_state.signout = True
 
-    logger.info("Cookies not available, using session-only authentication")
+    logger.debug("Using session-only authentication (no valid cookies found)")
     return False
 
 # Keep the class-based approach for compatibility but use simple functions primarily

@@ -3,7 +3,7 @@
 import streamlit as st
 import logging
 from typing import Optional, Dict, Any
-from .utils.cookies import load_cookie_to_session
+from .utils.session_manager import get_session_manager
 from .utils.firebase_config import get_firebase_app
 from .utils.database import connect_db
 
@@ -19,10 +19,17 @@ logger = logging.getLogger(__name__)
 
 def initialize_session_state() -> bool:
     """Initialize all session state and services."""
-    try:        # ALWAYS load cookies first (like in your old working code)
-        if "username" not in st.session_state:
-            # Initialize Database and Storage
-            load_cookie_to_session()
+    try:        # ALWAYS attempt to load user session on every initialization (critical for persistence)
+        logger.debug("Attempting to load user session...")
+        session_manager = get_session_manager()
+        session_loaded = session_manager.load_user_session()
+        
+        if session_loaded:
+            logger.info(f"Successfully restored user session: {st.session_state.get('username', 'Unknown')}")
+        else:
+            logger.debug("No valid user session found, starting fresh session")
+            
+        # Initialize Database and Storage
         if "db" not in st.session_state or "storage" not in st.session_state:
             try:
                 db_pool, storage = connect_db()

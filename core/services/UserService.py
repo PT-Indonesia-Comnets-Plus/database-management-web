@@ -11,7 +11,7 @@ import requests
 import re
 import dns.resolver
 
-from core.utils.cookies import save_user_to_cookie, clear_user_cookie
+from core.utils.session_manager import get_session_manager
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -117,14 +117,13 @@ class UserService:
             st.session_state.username = user_data.get('username', user.uid)
             st.session_state.useremail = user.email
             st.session_state.role = user_data['role']
-            st.session_state.signout = False
-
-            # Save to cookies with proper error handling
-            cookie_saved = save_user_to_cookie(
+            st.session_state.signout = False            # Save session to persistent storage with proper error handling
+            session_manager = get_session_manager()
+            session_saved = session_manager.save_user_session(
                 user_data.get('username', user.uid), user.email, user_data['role'])
-            if not cookie_saved:
+            if not session_saved:
                 logger.warning(
-                    "Failed to save user data to cookies, but session created")
+                    "Failed to save user session to persistent storage, but session created")
 
             # Log activity
             self.save_login_logout(user.uid, "login")
@@ -375,14 +374,10 @@ class UserService:
         try:
             username = st.session_state.get('username', '')
             if username:
-                self.save_login_logout(username, "logout")
-
-            clear_user_cookie()
-            st.session_state.signout = True
-            st.session_state.username = ''
-            st.session_state.useremail = ''
-            st.session_state.role = ''
-
+                self.save_login_logout(username, "logout")            # Clear user session from all persistent storage
+            session_manager = get_session_manager()
+            session_manager.clear_user_session()
+            
             logger.info("User logged out successfully")
 
         except Exception as e:
