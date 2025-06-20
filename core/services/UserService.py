@@ -106,7 +106,8 @@ class UserService:
         has_lower = any(c.islower() for c in password)
         has_digit = any(c.isdigit() for c in password)
 
-        if not (has_upper and has_lower and has_digit):            raise ValidationError(
+        if not (has_upper and has_lower and has_digit):
+            raise ValidationError(
                 "Password must contain at least one uppercase letter, one lowercase letter, and one number")
 
     def _create_session(self, user, user_data: Dict[str, Any]) -> None:
@@ -127,8 +128,9 @@ class UserService:
 
             # Log activity
             self.save_login_logout(user.uid, "login")
-            
-            logger.info(f"Session created successfully for user: {user_data.get('username', user.uid)}")
+
+            logger.info(
+                f"Session created successfully for user: {user_data.get('username', user.uid)}")
 
         except Exception as e:
             logger.error(f"Failed to create session: {e}")
@@ -147,7 +149,8 @@ class UserService:
             AuthenticationError: If authentication fails
         """
         try:
-            self._validate_login_input(email, password)            # Verify password through Firebase REST API
+            # Verify password through Firebase REST API
+            self._validate_login_input(email, password)
             user_data = self.verify_password(email, password)
             if not user_data:
                 st.warning("Invalid email or password")
@@ -157,7 +160,7 @@ class UserService:
             if not user.email_verified:
                 st.warning("Email not verified. Please check your inbox.")
                 return
-            
+
             # Validate user in Firestore
             user_doc = self.fs.collection('users').document(user.uid).get()
             if not user_doc.exists:
@@ -168,7 +171,7 @@ class UserService:
             if user_doc_data.get("status") != "Verified":
                 st.warning("Your account is not verified by admin yet.")
                 return
-            
+
             # User is verified, create session and login
             self._create_session(user, user_doc_data)
             st.success(f"Login successful as {user_doc_data['role']}!")
