@@ -114,7 +114,7 @@ def clear_user_cookie() -> bool:
     return False
 
 
-def load_cookie_to_session(session_state) -> bool:
+def load_cookie_to_session() -> bool:
     """Load cookie to session (matches old working code)."""
     cookies = _get_cookies()
     if cookies and cookies.ready():
@@ -124,29 +124,28 @@ def load_cookie_to_session(session_state) -> bool:
             role = cookies.get("role", "") or ""
             signout_status = cookies.get("signout", "True")
 
-            session_state.username = username
-            session_state.useremail = email
-            session_state.role = role
-            session_state.signout = signout_status == "True"
+            st.session_state.username = username
+            st.session_state.useremail = email
+            st.session_state.role = role
+            st.session_state.signout = signout_status == "True"
 
             # Log successful cookie load
             if username and email and signout_status == "False":
-                logger.info(
-                    f"User {username} successfully loaded from cookies to session")
+                logger.info(                    f"User {username} successfully loaded from cookies to session")
                 return True
 
         except Exception as e:
             logger.error(f"Failed to load cookies to session: {e}")
 
     # Fallback: ensure session state has defaults
-    if not hasattr(session_state, 'username'):
-        session_state.username = ""
-    if not hasattr(session_state, 'useremail'):
-        session_state.useremail = ""
-    if not hasattr(session_state, 'role'):
-        session_state.role = ""
-    if not hasattr(session_state, 'signout'):
-        session_state.signout = True
+    if not hasattr(st.session_state, 'username'):
+        st.session_state.username = ""
+    if not hasattr(st.session_state, 'useremail'):
+        st.session_state.useremail = ""
+    if not hasattr(st.session_state, 'role'):
+        st.session_state.role = ""
+    if not hasattr(st.session_state, 'signout'):
+        st.session_state.signout = True
 
     logger.info("Cookies not available, using session-only authentication")
     return False
