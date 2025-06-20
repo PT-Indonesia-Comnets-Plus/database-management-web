@@ -36,26 +36,38 @@ class MainPageManager:
 
     def _initialize_services(self) -> None:
         """Initialize required services."""
-        try:
-            # initialize_session_state() akan memanggil ServiceManager
+        try:            # initialize_session_state() akan memanggil ServiceManager
             # yang menangani pemuatan cookies dan inisialisasi semua layanan inti.
             if not initialize_session_state():
                 st.error(
-                    "Failed to initialize application services. Please refresh.")
+                    "Failed to initialize application services. Please check your deployment configuration.")
+                st.info("💡 **Possible solutions:**\n"
+                        "• Check that all required environment variables are set\n"
+                        "• Verify that secrets.toml is properly configured\n"
+                        "• Ensure all dependencies are installed (check requirements.txt)")
                 st.stop()
 
             # Ambil layanan dari session_state setelah inisialisasi berhasil
             self.user_service = st.session_state.get('user_service')
             self.email_service = st.session_state.get('email_service')
 
-            # Pastikan layanan penting tersedia
-            if not self.user_service or not self.email_service:
-                logger.error(
-                    "UserService or EmailService not found in session_state after initialization.")
+            # Handle gracefully when services are not available
+            if not self.user_service:
+                logger.warning("UserService not available")
+
+            if not self.email_service:
+                logger.warning("EmailService not available")
+
+            if not self.user_service and not self.email_service:
                 st.error(
-                    "Required services are not available. Application cannot proceed.")
-                st.stop()
-            logger.info("MainPageManager services initialized successfully.")
+                    "Critical services are not available. Some features may not work.")
+                st.info("💡 **This may be due to:**\n"
+                        "• Missing Firebase configuration\n"
+                        "• Missing SMTP configuration\n"
+                        "• Deployment environment issues")
+                # Don't stop completely, allow read-only mode
+
+            logger.info("MainPageManager services initialized.")
 
         except Exception as e:
             logger.error(

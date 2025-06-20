@@ -1,8 +1,19 @@
-import firebase_admin
-from firebase_admin import credentials, firestore, auth
 import streamlit as st
 import json
 import logging
+
+# Try to import firebase modules with fallback
+try:
+    import firebase_admin
+    from firebase_admin import credentials, firestore, auth
+    FIREBASE_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"Firebase modules not available: {e}")
+    FIREBASE_AVAILABLE = False
+    firebase_admin = None
+    credentials = None
+    firestore = None
+    auth = None
 
 logger = logging.getLogger(__name__)
 
@@ -10,6 +21,11 @@ logger = logging.getLogger(__name__)
 @st.cache_resource
 def get_firebase_app():
     """Initialize Firebase app with error handling for missing configuration."""
+    if not FIREBASE_AVAILABLE:
+        logger.error(
+            "Firebase modules not available. Cannot initialize Firebase.")
+        return None, None, None
+
     try:
         if not firebase_admin._apps:
             # Check if Firebase secrets exist
