@@ -149,9 +149,19 @@ class MainPageManager:
         # Simple check like your old working code
         username_exists = bool(st.session_state.get("username", "").strip())
         is_signed_out = st.session_state.get("signout", True)
-
+        
+        # Debug logging to understand authentication state
+        logger.debug(f"Authentication check - Username: {st.session_state.get('username', '')}, Signout: {is_signed_out}")
+        
         # User is authenticated if username exists and not signed out
-        return username_exists and not is_signed_out
+        is_authenticated = username_exists and not is_signed_out
+        
+        if is_authenticated:
+            logger.info(f"User {st.session_state.get('username')} is authenticated")
+        else:
+            logger.debug("User is not authenticated")
+            
+        return is_authenticated
 
     def display_authentication_form(self) -> None:
         """Display authentication forms (login/register)."""
@@ -190,7 +200,8 @@ class MainPageManager:
 
     def _display_registration_form(self) -> None:
         """Display registration form."""
-        st.subheader("📝 Register")        # Check if OTP verification is needed
+        st.subheader("📝 Register")        
+        # Check if OTP verification is needed
         if st.session_state.get('show_otp_verification', False):
             self._display_otp_verification_form()
             return
@@ -252,12 +263,16 @@ class MainPageManager:
             try:
                 # UserService.login akan menangani st.success/st.warning/st.error
                 # dan pembaruan st.session_state serta cookies.
-                # Jika login berhasil, UserService akan mengatur session state
                 self.user_service.login(email, password)
-                # dan kita bisa rerun untuk memperbarui UI
-                if self.is_user_authenticated():  # Cek lagi setelah login attempt
-                    st.rerun()
-            except Exception as e:  # Menangkap error tak terduga dari UserService.login
+                
+                # Check if login was successful, and only rerun if authenticated
+                if self.is_user_authenticated():
+                    # Use session state flag to prevent infinite loops
+                    if not st.session_state.get('login_just_completed', False):
+                        st.session_state.login_just_completed = True
+                        st.rerun()
+                    
+            except Exception as e:
                 logger.error(f"Unexpected error during login handling: {e}")
                 st.error("An unexpected error occurred during login.")
 
@@ -503,21 +518,30 @@ class MainPageManager:
                 else:
                     with st.spinner("Memverifikasi kode..."):
                         self.user_service.complete_registration_after_otp(
-                            verification_email, otp_input)
-            else:
+                            verification_email, otp_input)            else:
                 st.error("User service not available.")
         elif verify_button:
             st.warning("⚠️ Masukkan kode verifikasi terlebih dahulu.")
 
     def run(self) -> None:
         """Main application entry point."""
+        # Clear login completion flag on each run to prevent loops
+        if st.session_state.get('login_just_completed', False):
+            st.session_state.login_just_completed = False
+            
         self.configure_page()
         self.load_styles()
         self.display_header()
 
-        if self.is_user_authenticated():
+        # Debug: Log current session state
+        auth_status = self.is_user_authenticated()
+        logger.debug(f"Current authentication status: {auth_status}")
+        
+        if auth_status:
+            logger.info(f"Displaying dashboard for user: {st.session_state.get('username')}")
             self.display_user_dashboard()
         else:
+            logger.debug("User not authenticated, showing login form")
             self.display_authentication_form()
 
 

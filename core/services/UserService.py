@@ -106,27 +106,29 @@ class UserService:
         has_lower = any(c.islower() for c in password)
         has_digit = any(c.isdigit() for c in password)
 
-        if not (has_upper and has_lower and has_digit):
-            raise ValidationError(
+        if not (has_upper and has_lower and has_digit):            raise ValidationError(
                 "Password must contain at least one uppercase letter, one lowercase letter, and one number")
 
     def _create_session(self, user, user_data: Dict[str, Any]) -> None:
         """Create user session after successful authentication."""
         try:
-            st.session_state.username = user.uid
+            # Use actual username from user_data, not Firebase UID
+            st.session_state.username = user_data.get('username', user.uid)
             st.session_state.useremail = user.email
             st.session_state.role = user_data['role']
             st.session_state.signout = False
 
             # Save to cookies with proper error handling
             cookie_saved = save_user_to_cookie(
-                user.uid, user.email, user_data['role'])
+                user_data.get('username', user.uid), user.email, user_data['role'])
             if not cookie_saved:
                 logger.warning(
                     "Failed to save user data to cookies, but session created")
 
             # Log activity
             self.save_login_logout(user.uid, "login")
+            
+            logger.info(f"Session created successfully for user: {user_data.get('username', user.uid)}")
 
         except Exception as e:
             logger.error(f"Failed to create session: {e}")
@@ -145,9 +147,7 @@ class UserService:
             AuthenticationError: If authentication fails
         """
         try:
-            self._validate_login_input(email, password)
-
-            # Verify password through Firebase REST API
+            self._validate_login_input(email, password)            # Verify password through Firebase REST API
             user_data = self.verify_password(email, password)
             if not user_data:
                 st.warning("Invalid email or password")
@@ -157,7 +157,7 @@ class UserService:
             if not user.email_verified:
                 st.warning("Email not verified. Please check your inbox.")
                 return
-
+            
             # Validate user in Firestore
             user_doc = self.fs.collection('users').document(user.uid).get()
             if not user_doc.exists:
@@ -167,7 +167,10 @@ class UserService:
             user_doc_data = user_doc.to_dict()
             if user_doc_data.get("status") != "Verified":
                 st.warning("Your account is not verified by admin yet.")
-                return self._create_session(user, user_doc_data)
+                return
+            
+            # User is verified, create session and login
+            self._create_session(user, user_doc_data)
             st.success(f"Login successful as {user_doc_data['role']}!")
         except ValidationError as e:
             st.warning(str(e))

@@ -25,10 +25,8 @@ def get_cookie_manager():
         cookies = EncryptedCookieManager(
             prefix="Iconnet_Corp_App_v1",
             password=cookie_password
-        )
-
-        # Check if cookies are ready with timeout
-        max_wait = 10  # seconds
+        )        # Check if cookies are ready with timeout
+        max_wait = 5  # Reduce timeout from 10 to 5 seconds
         start_time = time.time()
 
         while not cookies.ready() and (time.time() - start_time) < max_wait:
