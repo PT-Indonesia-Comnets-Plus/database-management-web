@@ -131,7 +131,8 @@ def load_cookie_to_session() -> bool:
 
             # Log successful cookie load
             if username and email and signout_status == "False":
-                logger.info(                    f"User {username} successfully loaded from cookies to session")
+                logger.info(
+                    f"User {username} successfully loaded from cookies to session")
                 return True
 
         except Exception as e:
