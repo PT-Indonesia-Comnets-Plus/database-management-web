@@ -16,6 +16,7 @@ from core.services.EmailService import EmailService
 from core import initialize_session_state
 from core.utils.load_css import load_custom_css
 from core.utils.session_manager import get_session_manager
+from core.utils.persistent_session import get_persistent_session_manager
 from core.utils.session_restoration import ensure_session_persistence, debug_session_state
 
 # Configure logging
@@ -152,8 +153,14 @@ class MainPageManager:
 
     def is_user_authenticated(self) -> bool:
         """Check if user is currently authenticated using enhanced session manager."""
-        session_manager = get_session_manager()
-        is_authenticated = session_manager.is_user_authenticated()
+        # Try persistent session manager first
+        persistent_manager = get_persistent_session_manager()
+        is_authenticated = persistent_manager.is_authenticated()
+
+        if not is_authenticated:
+            # Fallback to legacy session manager
+            session_manager = get_session_manager()
+            is_authenticated = session_manager.is_user_authenticated()
 
         # Additional debug logging
         username = st.session_state.get('username', '')
@@ -421,13 +428,16 @@ class MainPageManager:
                 self._fallback_logout()  # Coba fallback jika service tidak ada
         except Exception as e:
             logger.error(f"Error during UserService logout: {e}")
-            self._fallback_logout()  # Coba fallback jika ada error di service logout
-
-    def _fallback_logout(self) -> None:
+            # Coba fallback jika ada error di service logout    def _fallback_logout(self) -> None:
+            self._fallback_logout()
         """Fallback logout method if UserService fails or is unavailable."""
         logger.warning("Executing fallback logout.")
         try:
-            # Clear user session using enhanced session manager
+            # Clear user session using persistent session manager first
+            persistent_manager = get_persistent_session_manager()
+            persistent_manager.clear_session()
+
+            # Also clear using legacy session manager as backup
             session_manager = get_session_manager()
             session_manager.clear_user_session()
 

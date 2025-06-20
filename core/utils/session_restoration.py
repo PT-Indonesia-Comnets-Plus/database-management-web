@@ -7,6 +7,7 @@ import streamlit as st
 import logging
 from typing import Optional
 from .session_manager import get_session_manager
+from .persistent_session import get_persistent_session_manager
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +27,9 @@ def ensure_session_persistence() -> bool:
 
         logger.debug("Validating session persistence...")
 
-        # Get session manager and attempt to restore session
-        session_manager = get_session_manager()
-
-        # Try to load user session from any available source
-        session_restored = session_manager.load_user_session()
+        # Try persistent session manager first (more reliable)
+        persistent_manager = get_persistent_session_manager()
+        session_restored = persistent_manager.load_session()
 
         if session_restored:
             # Validate that the restored session is complete
@@ -46,6 +45,26 @@ def ensure_session_persistence() -> bool:
                 return True
             else:
                 logger.debug("Restored session is incomplete or invalid")
+
+        # Fallback: Try legacy session manager
+        session_manager = get_session_manager()
+        session_restored = session_manager.load_user_session()
+
+        if session_restored:
+            # Validate that the restored session is complete
+            username = st.session_state.get('username', '')
+            email = st.session_state.get('useremail', '')
+            signout = st.session_state.get('signout', True)
+
+            if username and email and not signout:
+                st.session_state._session_validated = True
+                st.session_state._session_is_valid = True
+                logger.info(
+                    f"Session persistence validated for user (legacy): {username}")
+                return True
+            else:
+                logger.debug(
+                    "Legacy restored session is incomplete or invalid")
 
         # No valid session found
         st.session_state._session_validated = True

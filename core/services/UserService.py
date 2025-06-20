@@ -12,6 +12,7 @@ import re
 import dns.resolver
 
 from core.utils.session_manager import get_session_manager
+from core.utils.persistent_session import get_persistent_session_manager
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -113,24 +114,35 @@ class UserService:
     def _create_session(self, user, user_data: Dict[str, Any]) -> None:
         """Create user session after successful authentication."""
         try:
+            username = user_data.get('username', user.uid)
+            email = user.email
+            role = user_data['role']
+
             # Use actual username from user_data, not Firebase UID
-            st.session_state.username = user_data.get('username', user.uid)
-            st.session_state.useremail = user.email
-            st.session_state.role = user_data['role']
-            # Save session to persistent storage with proper error handling
+            st.session_state.username = username
+            st.session_state.useremail = email
+            st.session_state.role = role
             st.session_state.signout = False
+
+            # Save session to persistent storage (multiple methods)
+            persistent_manager = get_persistent_session_manager()
+            session_saved = persistent_manager.save_session(
+                username, email, role)
+
+            # Also try legacy session manager as backup
             session_manager = get_session_manager()
-            session_saved = session_manager.save_user_session(
-                user_data.get('username', user.uid), user.email, user_data['role'])
-            if not session_saved:
+            backup_saved = session_manager.save_user_session(
+                username, email, role)
+
+            if not session_saved and not backup_saved:
                 logger.warning(
-                    "Failed to save user session to persistent storage, but session created")
+                    "Failed to save user session to any persistent storage, but session created")
 
             # Log activity
             self.save_login_logout(user.uid, "login")
 
             logger.info(
-                f"Session created successfully for user: {user_data.get('username', user.uid)}")
+                f"Session created successfully for user: {username}")
 
         except Exception as e:
             logger.error(f"Failed to create session: {e}")
@@ -377,6 +389,12 @@ class UserService:
             if username:
                 # Clear user session from all persistent storage
                 self.save_login_logout(username, "logout")
+
+            # Clear from persistent session manager (primary)
+            persistent_manager = get_persistent_session_manager()
+            persistent_manager.clear_session()
+
+            # Also clear from legacy session manager (backup)
             session_manager = get_session_manager()
             session_manager.clear_user_session()
 
