@@ -19,7 +19,15 @@ logger = logging.getLogger(__name__)
 
 def initialize_session_state() -> bool:
     """Initialize all session state and services."""
-    try:        # ALWAYS attempt to load user session on every initialization (critical for persistence)
+    try:
+        # Prevent multiple initializations
+        if st.session_state.get('_core_initialized', False):
+            logger.debug("Core already initialized, skipping...")
+            return True
+
+        logger.debug("Starting core initialization...")
+
+        # ALWAYS attempt to load user session on every initialization (critical for persistence)
         logger.debug("Attempting to load user session...")
         session_manager = get_session_manager()
         session_loaded = session_manager.load_user_session()
@@ -132,6 +140,9 @@ def initialize_session_state() -> bool:
                 except Exception as e:
                     logger.error(f"Failed to initialize AssetDataService: {e}")
 
+        # Mark initialization as complete
+        st.session_state._core_initialized = True
+        logger.info("Core initialization completed successfully")
         return True
 
     except Exception as e:
