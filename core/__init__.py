@@ -19,11 +19,10 @@ logger = logging.getLogger(__name__)
 
 def initialize_session_state() -> bool:
     """Initialize all session state and services."""
-    try:
-        # ALWAYS load cookies first (like in your old working code)
+    try:        # ALWAYS load cookies first (like in your old working code)
         if "username" not in st.session_state:
             # Initialize Database and Storage
-            load_cookie_to_session(st.session_state)
+            load_cookie_to_session()
         if "db" not in st.session_state or "storage" not in st.session_state:
             try:
                 db_pool, storage = connect_db()

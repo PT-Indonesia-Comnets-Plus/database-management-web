@@ -16,11 +16,13 @@ class EmailService:
         try:
             # Validasi konfigurasi email
             if not all([self.smtp_server, self.smtp_port, self.smtp_username, self.smtp_password]):
-                st.error("❌ Konfigurasi email tidak lengkap. Hubungi administrator.")
+                st.error(
+                    "❌ Konfigurasi email tidak lengkap. Hubungi administrator.")
                 return False
 
             # Log konfigurasi (tanpa password)
-            st.info(f"🔄 Mengirim email ke {recipient} menggunakan {self.smtp_server}:{self.smtp_port}")
+            st.info(
+                f"🔄 Mengirim email ke {recipient} menggunakan {self.smtp_server}:{self.smtp_port}")
 
             # Membuat pesan email
             msg = MIMEMultipart()
@@ -33,19 +35,20 @@ class EmailService:
             with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
                 st.info("🔄 Memulai koneksi STARTTLS...")
                 server.starttls()
-                
+
                 st.info("🔄 Melakukan autentikasi...")
                 server.login(self.smtp_username, self.smtp_password)
-                
+
                 st.info("🔄 Mengirim email...")
                 server.sendmail(self.smtp_username, recipient, msg.as_string())
 
             st.success("✅ Email berhasil dikirim!")
             return True
-            
+
         except smtplib.SMTPAuthenticationError as e:
             st.error(f"❌ Gagal autentikasi email: {str(e)}")
-            st.error("💡 **Solusi:** Pastikan menggunakan App Password Gmail, bukan password biasa!")
+            st.error(
+                "💡 **Solusi:** Pastikan menggunakan App Password Gmail, bukan password biasa!")
             st.info("📋 **Cara membuat App Password Gmail:**")
             st.info("1. Masuk ke Google Account Settings")
             st.info("2. Pilih Security > 2-Step Verification")
@@ -118,7 +121,7 @@ class EmailService:
         <body>
             <div class="email-container">
                 <div class="email-header">
-                    <img src="https://raw.githubusercontent.com/rizkyyanuark/intern-iconnet/blob/main/image/static\image\logo_Iconnet.png" alt="Harmon Corp Logo">
+                    <img src="https://raw.githubusercontent.com/rizkyyanuark/intern-iconnet/blob/main/image/static/image/logo_Iconnet.png" alt="Harmon Corp Logo">
                 </div>
                 <div class="email-body">                    <p>Hi {user.display_name or user.email},</p>
                     <p>Please verify your email address by clicking the button below:</p>
