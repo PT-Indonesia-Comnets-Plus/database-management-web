@@ -23,12 +23,13 @@ def initialize_session_state() -> bool:
         logger.debug("Attempting to load user session...")
         session_manager = get_session_manager()
         session_loaded = session_manager.load_user_session()
-        
+
         if session_loaded:
-            logger.info(f"Successfully restored user session: {st.session_state.get('username', 'Unknown')}")
+            logger.info(
+                f"Successfully restored user session: {st.session_state.get('username', 'Unknown')}")
         else:
             logger.debug("No valid user session found, starting fresh session")
-            
+
         # Initialize Database and Storage
         if "db" not in st.session_state or "storage" not in st.session_state:
             try:

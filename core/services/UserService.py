@@ -117,7 +117,8 @@ class UserService:
             st.session_state.username = user_data.get('username', user.uid)
             st.session_state.useremail = user.email
             st.session_state.role = user_data['role']
-            st.session_state.signout = False            # Save session to persistent storage with proper error handling
+            # Save session to persistent storage with proper error handling
+            st.session_state.signout = False
             session_manager = get_session_manager()
             session_saved = session_manager.save_user_session(
                 user_data.get('username', user.uid), user.email, user_data['role'])
@@ -374,10 +375,11 @@ class UserService:
         try:
             username = st.session_state.get('username', '')
             if username:
-                self.save_login_logout(username, "logout")            # Clear user session from all persistent storage
+                # Clear user session from all persistent storage
+                self.save_login_logout(username, "logout")
             session_manager = get_session_manager()
             session_manager.clear_user_session()
-            
+
             logger.info("User logged out successfully")
 
         except Exception as e:

@@ -117,16 +117,17 @@ def load_cookie_to_session() -> bool:
     # First, try to get cookies with retries
     cookies = None
     max_retries = 3
-    
+
     for attempt in range(max_retries):
         cookies = _get_cookies()
         if cookies and cookies.ready():
             break
-        
+
         if attempt < max_retries - 1:  # Don't sleep on the last attempt
-            logger.info(f"Cookies not ready, retrying... (attempt {attempt + 1}/{max_retries})")
+            logger.info(
+                f"Cookies not ready, retrying... (attempt {attempt + 1}/{max_retries})")
             time.sleep(1)  # Wait 1 second between retries
-    
+
     if cookies and cookies.ready():
         try:
             username = cookies.get("username", "") or ""
@@ -141,7 +142,8 @@ def load_cookie_to_session() -> bool:
                 st.session_state.role = role
                 st.session_state.signout = False
 
-                logger.info(f"User {username} successfully loaded from cookies to session")
+                logger.info(
+                    f"User {username} successfully loaded from cookies to session")
                 return True
             else:
                 logger.debug("No valid user data found in cookies")
