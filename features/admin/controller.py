@@ -5,7 +5,7 @@ from core.services.UserDataService import UserDataService
 from streamlit_option_menu import option_menu
 from core import initialize_session_state
 from PIL import Image, ImageOps
-from .views import dashboard, rag2, verify_users
+from .views import dashboard, rag, verify_users
 from core.services.RAG import RAGService
 
 
@@ -82,7 +82,7 @@ class AdminPage:
         elif selected_option == 'Verify Users':
             verify_users.app(self.user_data_service)
         elif selected_option == 'RAG Management':  # Sesuaikan dengan nama di options
-            rag2.app(self.rag_service)
+            rag.app(self.rag_service)
 
     def render(self):
         """Renders the complete Admin Page."""

@@ -13,9 +13,9 @@ import logging
 
 from core.services.UserService import UserService
 from core.services.EmailService import EmailService
-from core import initialize_session_state 
+from core import initialize_session_state
 from core.utils.load_css import load_custom_css
-from core.utils.cookies import get_cookie_manager  
+from core.utils.cookies import get_cookie_manager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -194,7 +194,7 @@ class MainPageManager:
         if st.session_state.get('show_otp_verification', False):
             self._display_otp_verification_form()
             return
-        
+
         # Information about requirements
         st.info("📧 **Persyaratan Pendaftaran:**\n"
                 "• Email Google (Gmail atau Google Workspace) yang aktif\n"
@@ -203,30 +203,30 @@ class MainPageManager:
 
         with st.form("register_form_main", clear_on_submit=False):
             st.markdown("#### 📝 **Informasi Akun**")
-            
+
             col1, col2 = st.columns(2)
 
             with col1:
                 username = st.text_input(
-                    "Username", 
-                    placeholder="johndoe", 
+                    "Username",
+                    placeholder="johndoe",
                     help="Username unik 3-30 karakter (huruf, angka, underscore)",
                     key="main_reg_username")
                 email = st.text_input(
-                    "Email", 
-                    placeholder="john@gmail.com", 
+                    "Email",
+                    placeholder="john@gmail.com",
                     help="Email Google yang aktif untuk menerima kode verifikasi",
                     key="main_reg_email")
 
             with col2:
                 password = st.text_input(
-                    "Password", 
-                    type="password", 
+                    "Password",
+                    type="password",
                     help="Minimal 6 karakter dengan huruf besar, kecil, dan angka",
                     key="main_reg_password")
                 confirm_password = st.text_input(
-                    "Confirm Password", 
-                    type="password", 
+                    "Confirm Password",
+                    type="password",
                     help="Ulangi password yang sama persis",
                     key="main_reg_confirm_password")
 
@@ -250,10 +250,8 @@ class MainPageManager:
 
         with st.spinner("Authenticating..."):
             try:
-                # UserService.login akan menangani st.success/st.warning/st.error
-                # dan pembaruan st.session_state serta cookies.
-                self.user_service.login(email, password)                # Jika login berhasil, UserService akan mengatur session state
-                # dan kita bisa rerun untuk memperbarui UI
+                self.user_service.login(email, password)
+
                 if self.is_user_authenticated():  # Cek lagi setelah login attempt
                     st.rerun()
             except Exception as e:  # Menangkap error tak terduga dari UserService.login
@@ -281,11 +279,12 @@ class MainPageManager:
             if len(username) > 30:
                 st.error("Username must be less than 30 characters.")
                 return
-            
+
             # Check for valid username characters (alphanumeric and underscore only)
             import re
             if not re.match(r'^[a-zA-Z0-9_]+$', username):
-                st.error("Username can only contain letters, numbers, and underscores.")
+                st.error(
+                    "Username can only contain letters, numbers, and underscores.")
                 return
 
             # Password strength validation
@@ -295,14 +294,15 @@ class MainPageManager:
             if len(password) > 128:
                 st.error("Password must be less than 128 characters.")
                 return
-            
+
             # Check for password strength requirements
             has_upper = any(c.isupper() for c in password)
             has_lower = any(c.islower() for c in password)
             has_digit = any(c.isdigit() for c in password)
-            
+
             if not (has_upper and has_lower and has_digit):
-                st.error("Password must contain at least one uppercase letter, one lowercase letter, and one number.")
+                st.error(
+                    "Password must contain at least one uppercase letter, one lowercase letter, and one number.")
                 return
 
             # Basic email format validation
@@ -323,11 +323,11 @@ class MainPageManager:
                 # dan mengatur show_otp_verification = True jika OTP berhasil dikirim
                 self.user_service.signup(
                     username, email, password, confirm_password, role="Employee")
-                
+
                 # Jika OTP verification diminta, rerun untuk menampilkan form OTP
                 if st.session_state.get('show_otp_verification', False):
                     st.rerun()
-                    
+
             except Exception as e:  # Menangkap error tak terduga dari UserService.signup
                 logger.error(
                     f"Unexpected error during registration handling: {e}")

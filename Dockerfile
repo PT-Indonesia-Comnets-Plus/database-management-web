@@ -1,35 +1,18 @@
-# Gunakan base image Python yang sesuai dengan versi di pyproject.toml
-# 'requires-python = ">=3.11"'
-FROM python:3.11-slim
+# Gunakan image dasar Python
+FROM python:3.11-slim-buster
 
-# Set working directory di dalam container
+# Atur direktori kerja di dalam container
 WORKDIR /app
 
-# Install Poetry
-# Sebaiknya pin versi Poetry untuk build yang konsisten
-ENV POETRY_VERSION=2.1.3
-RUN uv pip install "poetry==${POETRY_VERSION}"
+RUN pip install uv
 
-# Nonaktifkan pembuatan virtual environment oleh Poetry di dalam container,
-# karena container itu sendiri sudah merupakan lingkungan terisolasi.
-RUN poetry config virtualenvs.create false
+COPY requirements.txt .
 
-# Salin file dependensi terlebih dahulu untuk memanfaatkan Docker layer caching
-# Jika file-file ini tidak berubah, Docker tidak perlu menginstal ulang dependensi
-COPY pyproject.toml poetry.lock* /app/
+RUN uv pip install --system -r requirements.txt
 
-# Install dependensi proyek (hanya dependensi produksi, tanpa dev dependencies)
-# --no-interaction: Jangan ajukan pertanyaan interaktif
-# --no-ansi: Nonaktifkan output ANSI untuk log yang lebih bersih
-RUN poetry install --no-dev --no-interaction --no-ansi
+COPY . .
 
-# Salin sisa kode aplikasi ke dalam working directory di container
-COPY . /app/
-
-# Port default yang digunakan Streamlit
+# Paparkan port yang digunakan Streamlit (defaultnya 8501)
 EXPOSE 8501
 
-# Perintah untuk menjalankan aplikasi Streamlit Anda
-# Ganti 'your_streamlit_app_file.py' dengan nama file Python utama aplikasi Streamlit Anda
-# Misalnya, jika file utama Anda adalah main.py, gunakan "streamlit", "run", "main.py"
-CMD ["streamlit", "run", "your_streamlit_app_file.py", "--server.port=8501", "--server.address=0.0.0.0"]
+CMD ["streamlit", "run", "Main_Page.py", "--server.port", "8501", "--server.address", "0.0.0.0"]

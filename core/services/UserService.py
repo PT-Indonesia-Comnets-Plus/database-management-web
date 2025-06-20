@@ -79,44 +79,49 @@ class UserService:
         if not password or not confirm_password:
             raise ValidationError("Password cannot be empty")
         if len(password) < 6:
-            raise ValidationError("Password must be at least 6 characters long")
+            raise ValidationError(
+                "Password must be at least 6 characters long")
         if password != confirm_password:
             raise ValidationError("Passwords do not match")
-        
+
         # Additional username validation
         if len(username) < 3:
-            raise ValidationError("Username must be at least 3 characters long")
+            raise ValidationError(
+                "Username must be at least 3 characters long")
         if len(username) > 30:
             raise ValidationError("Username must be less than 30 characters")
-        
+
         # Check for valid username characters (alphanumeric and underscore only)
         import re
         if not re.match(r'^[a-zA-Z0-9_]+$', username):
-            raise ValidationError("Username can only contain letters, numbers, and underscores")
-        
+            raise ValidationError(
+                "Username can only contain letters, numbers, and underscores")
+
         # Additional password validation
         if len(password) > 30:
             raise ValidationError("Password must be less than 128 characters")
-        
+
         # Optional: Check for password strength
         has_upper = any(c.isupper() for c in password)
         has_lower = any(c.islower() for c in password)
         has_digit = any(c.isdigit() for c in password)
-        
+
         if not (has_upper and has_lower and has_digit):
-            raise ValidationError("Password must contain at least one uppercase letter, one lowercase letter, and one number")
+            raise ValidationError(
+                "Password must contain at least one uppercase letter, one lowercase letter, and one number")
 
     def _create_session(self, user, user_data: Dict[str, Any]) -> None:
         """Create user session after successful authentication."""
         try:
-            st.session_state.username = user.uid
+            st.session_state.username = user_data.get(
+                'username', user.uid)  # Use username from Firestore
             st.session_state.useremail = user.email
             st.session_state.role = user_data['role']
             st.session_state.signout = False
 
             # Save to cookies with proper error handling
             cookie_saved = save_user_to_cookie(
-                user.uid, user.email, user_data['role'])
+                user_data.get('username', user.uid), user.email, user_data['role'])
             if not cookie_saved:
                 logger.warning(
                     "Failed to save user data to cookies, but session created")
@@ -150,20 +155,26 @@ class UserService:
                 return
 
             user = self.auth.get_user_by_email(email)
-            if not user.email_verified:
-                st.warning("Email not verified. Please check your inbox.")
-                return
 
-            # Validate user in Firestore
+            # Validate user in Firestore first
             user_doc = self.fs.collection('users').document(user.uid).get()
             if not user_doc.exists:
                 st.warning("User data not found.")
                 return
 
             user_doc_data = user_doc.to_dict()
+
+            # Check email verification from Firestore (our OTP system)
+            if not user_doc_data.get("email_verified", False):
+                st.warning(
+                    "Email not verified. Please complete OTP verification.")
+                return
+
             if user_doc_data.get("status") != "Verified":
                 st.warning("Your account is not verified by admin yet.")
-                return            self._create_session(user, user_doc_data)
+                return
+
+            self._create_session(user, user_doc_data)
             st.success(f"Login successful as {user_doc_data['role']}!")
         except ValidationError as e:
             st.warning(str(e))
@@ -226,12 +237,13 @@ class UserService:
 
             if not otp_sent:
                 st.error(f"Gagal mengirim kode verifikasi: {otp_message}")
-                return# Store user data temporarily for after OTP verification
+                return  # Store user data temporarily for after OTP verification
             if 'pending_registration' not in st.session_state:
                 st.session_state.pending_registration = {}
 
             # Debug: Log what we're storing
-            logger.info(f"Storing registration data - Username: {username}, Email: {email}, Password length: {len(password)}")
+            logger.info(
+                f"Storing registration data - Username: {username}, Email: {email}, Password length: {len(password)}")
 
             st.session_state.pending_registration[email] = {
                 'username': username,
@@ -242,7 +254,8 @@ class UserService:
 
             # Debug: Verify what was stored
             stored_data = st.session_state.pending_registration[email]
-            logger.info(f"Verified stored data - Password length: {len(stored_data.get('password', ''))}")
+            logger.info(
+                f"Verified stored data - Password length: {len(stored_data.get('password', ''))}")
 
             st.success(otp_message)
             st.info("💡 **Langkah selanjutnya:** Masukkan kode verifikasi 6 digit yang telah dikirim ke email Anda untuk menyelesaikan pendaftaran.")
@@ -296,19 +309,26 @@ class UserService:
             role = pending_data['role']
 
             # Debug: Check password validity
-            logger.info(f"Creating user with email: {email}, username: {username}")
-            
+            logger.info(
+                f"Creating user with email: {email}, username: {username}")
+
             # Validate password before sending to Firebase
             if not password or not isinstance(password, str) or len(password) < 6:
-                st.error(f"❌ Terjadi error: Password tidak valid (minimal 6 karakter). Password saat ini: {len(password) if password else 0} karakter")
+                st.error(
+                    f"❌ Terjadi error: Password tidak valid (minimal 6 karakter). Password saat ini: {len(password) if password else 0} karakter")
                 return
 
             # Validate username
             if not username or not isinstance(username, str):
                 st.error("❌ Terjadi error: Username tidak valid")
-                return
+                return            # Create user in Firebase Authentication
+            created_user = self.auth.create_user(
+                email=email, password=password, uid=username)
 
-            self.auth.create_user(email=email, password=password, uid=username)            # Save user data to Firestore
+            # Update Firebase Auth user to mark email as verified
+            self.auth.update_user(created_user.uid, email_verified=True)
+
+            # Save user data to Firestore
             user_ref = self.fs.collection("users").document(username)
             user_data = {
                 "username": username,
@@ -322,7 +342,8 @@ class UserService:
             user_ref.set(user_data)
 
             # Clean up pending registration
-            del st.session_state.pending_registration[email]            # Clean up verification UI state
+            # Clean up verification UI state
+            del st.session_state.pending_registration[email]
             if 'show_otp_verification' in st.session_state:
                 del st.session_state.show_otp_verification
             if 'verification_email' in st.session_state:
