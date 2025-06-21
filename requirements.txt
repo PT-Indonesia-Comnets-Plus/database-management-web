@@ -143,6 +143,8 @@ stack-data==0.6.3
 storage3==0.11.3
 streamlit==1.41.1
 streamlit-cookies-manager==0.2.0
+extra-streamlit-components==0.1.60
+streamlit-js-eval==0.1.8
 streamlit-folium==0.15.0
 streamlit-option-menu==0.3.2
 strenum==0.4.15

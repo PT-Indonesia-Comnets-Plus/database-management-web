@@ -11,8 +11,7 @@ import requests
 import re
 import dns.resolver
 
-from core.utils.session_manager import get_session_manager
-from core.utils.persistent_session import get_persistent_session_manager
+from core.utils.cookies import save_user_to_cookie, clear_user_cookie
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -50,15 +49,11 @@ class UserService:
         Initialize UserService with required dependencies.
 
         Args:
-            firestore: Firestore database instance
-            auth: Firebase Auth instance
-            firebase_api: Firebase API utilities
-            email_service: Email service for verification emails        Raises:
-            UserServiceError: If any required dependency is None
+            firestore: Firestore client
+            auth: Firebase Auth client
+            firebase_api: Firebase API key
+            email_service: Email service instance
         """
-        if not all([firestore, auth, firebase_api, email_service]):
-            raise UserServiceError("All dependencies are required")
-
         self.fs = firestore
         self.auth = auth
         self.firebase_api = firebase_api
@@ -66,43 +61,44 @@ class UserService:
 
     def _validate_login_input(self, email: str, password: str) -> None:
         """Validate login input parameters."""
-        if not email or not email.strip():
-            raise ValidationError("Email cannot be empty")
-        if not password or not password.strip():
-            raise ValidationError("Password cannot be empty")
+        if not email or not password:
+            raise ValidationError("Email and password are required")
+
+        # Basic email format validation
+        if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
+            raise ValidationError("Invalid email format")
+
+        if len(password) < 6:
+            raise ValidationError("Password must be at least 6 characters")
 
     def _validate_signup_input(self, username: str, email: str, password: str, confirm_password: str) -> None:
         """Validate signup input parameters."""
-        if not username or not username.strip():
-            raise ValidationError("Username cannot be empty")
-        if not email or not email.strip():
-            raise ValidationError("Email cannot be empty")
-        if not password or not confirm_password:
-            raise ValidationError("Password cannot be empty")
-        if len(password) < 6:
-            raise ValidationError(
-                "Password must be at least 6 characters long")
+        if not all([username, email, password, confirm_password]):
+            raise ValidationError("All fields are required")
+
         if password != confirm_password:
             raise ValidationError("Passwords do not match")
 
-        # Additional username validation
-        if len(username) < 3:
-            raise ValidationError(
-                "Username must be at least 3 characters long")
-        if len(username) > 30:
-            raise ValidationError("Username must be less than 30 characters")
+        # Username validation
+        if len(username) < 3 or len(username) > 30:
+            raise ValidationError("Username must be 3-30 characters")
 
-        # Check for valid username characters (alphanumeric and underscore only)
-        import re
         if not re.match(r'^[a-zA-Z0-9_]+$', username):
             raise ValidationError(
                 "Username can only contain letters, numbers, and underscores")
 
+        # Email format validation
+        if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
+            raise ValidationError("Invalid email format")
+
+        # Password validation
+        if len(password) < 6:
+            raise ValidationError("Password must be at least 6 characters")
+
         # Additional password validation
         if len(password) > 30:
+            # Optional: Check for password strength
             raise ValidationError("Password must be less than 128 characters")
-
-        # Optional: Check for password strength
         has_upper = any(c.isupper() for c in password)
         has_lower = any(c.islower() for c in password)
         has_digit = any(c.isdigit() for c in password)
@@ -118,31 +114,62 @@ class UserService:
             email = user.email
             role = user_data['role']
 
-            # Use actual username from user_data, not Firebase UID
+            # Set session state
             st.session_state.username = username
             st.session_state.useremail = email
             st.session_state.role = role
             st.session_state.signout = False
 
-            # Save session to persistent storage (multiple methods)
-            persistent_manager = get_persistent_session_manager()
-            session_saved = persistent_manager.save_session(
-                username, email, role)
+            logger.info(
+                f"Session state set - username: {username}, role: {role}, signout: False")
 
-            # Also try legacy session manager as backup
-            session_manager = get_session_manager()
-            backup_saved = session_manager.save_user_session(
-                username, email, role)
+            # Save to cookies (legacy support)
+            cookie_saved = save_user_to_cookie(username, email, role)
+            if not cookie_saved:
+                logger.warning("Failed to save user data to cookies")
 
-            if not session_saved and not backup_saved:
-                logger.warning(
-                    "Failed to save user session to any persistent storage, but session created")
+            # Save to cloud session storage (primary)
+            try:
+                cloud_session_storage = st.session_state.get(
+                    "cloud_session_storage")
+                if cloud_session_storage:
+                    session_saved = cloud_session_storage.save_session(
+                        username, email, role)
+                    if session_saved:
+                        logger.info(
+                            "User session saved to cloud session storage")
+                    else:
+                        logger.warning(
+                            "Failed to save to cloud session storage")
+                else:
+                    logger.warning("Cloud session storage not available")
+            except Exception as e:
+                logger.error(f"Error saving to cloud session storage: {e}")
+
+            # Save to legacy session storage (fallback)
+            try:
+                session_storage_service = st.session_state.get(
+                    "session_storage_service")
+                if session_storage_service:
+                    session_saved = session_storage_service.save_user_session(
+                        username, email, role)
+                    if session_saved:
+                        logger.info(
+                            "User session saved to legacy session storage service")
+                    else:
+                        logger.warning(
+                            "Failed to save to legacy session storage service")
+                else:
+                    logger.warning(
+                        "Legacy session storage service not available")
+            except Exception as e:
+                logger.error(
+                    f"Error saving to legacy session storage service: {e}")
 
             # Log activity
             self.save_login_logout(user.uid, "login")
 
-            logger.info(
-                f"Session created successfully for user: {username}")
+            logger.info(f"Session created successfully for user: {username}")
 
         except Exception as e:
             logger.error(f"Failed to create session: {e}")
@@ -161,8 +188,9 @@ class UserService:
             AuthenticationError: If authentication fails
         """
         try:
-            # Verify password through Firebase REST API
             self._validate_login_input(email, password)
+
+            # Verify password through Firebase REST API
             user_data = self.verify_password(email, password)
             if not user_data:
                 st.warning("Invalid email or password")
@@ -196,6 +224,71 @@ class UserService:
             logger.error(f"Unexpected error during login: {e}")
             st.error(f"An unexpected error occurred: {e}")
 
+    def logout(self) -> None:
+        """
+        Log out the current user and clean up session data.
+
+        Raises:
+            UserServiceError: If logout process fails
+        """
+        try:
+            username = st.session_state.get('username', '')
+            if username:
+                self.save_login_logout(username, "logout")
+
+            # Clear legacy cookies
+            clear_user_cookie()
+
+            # Clear cloud session storage (primary)
+            try:
+                cloud_session_storage = st.session_state.get(
+                    "cloud_session_storage")
+                if cloud_session_storage:
+                    session_cleared = cloud_session_storage.clear_session(
+                        username)
+                    if session_cleared:
+                        logger.info(
+                            "User session cleared from cloud session storage")
+                    else:
+                        logger.warning("Failed to clear cloud session storage")
+                else:
+                    logger.warning(
+                        "Cloud session storage not available for logout")
+            except Exception as e:
+                logger.error(f"Error clearing cloud session storage: {e}")
+
+            # Clear legacy session storage service (fallback)
+            try:
+                session_storage_service = st.session_state.get(
+                    "session_storage_service")
+                if session_storage_service:
+                    session_cleared = session_storage_service.clear_user_session(
+                        username)
+                    if session_cleared:
+                        logger.info(
+                            "User session cleared from legacy session storage service")
+                    else:
+                        logger.warning(
+                            "Failed to clear legacy session storage service")
+                else:
+                    logger.warning(
+                        "Legacy session storage service not available for logout")
+            except Exception as e:
+                logger.error(
+                    f"Error clearing legacy session storage service: {e}")
+
+            # Clear session state
+            st.session_state.signout = True
+            st.session_state.username = ''
+            st.session_state.useremail = ''
+            st.session_state.role = ''
+
+            logger.info("User logged out successfully")
+
+        except Exception as e:
+            logger.error(f"Error during logout: {e}")
+            raise UserServiceError(f"Logout failed: {e}")
+
     def signup(self, username: str, email: str, password: str, confirm_password: str, role: str) -> None:
         """
         Register a new user account with OTP verification.
@@ -209,46 +302,39 @@ class UserService:
             role: User role
 
         Raises:
-            UserServiceError: If user creation fails
+            ValidationError: If input validation fails
+            AuthenticationError: If user already exists
         """
         try:
-            # Basic validation (redundant check, but keep for safety)
-            if not all([username, email, password, confirm_password]):
-                st.error("All fields are required.")
+            self._validate_signup_input(
+                username, email, password, confirm_password)
+
+            # Check if username already exists in Firestore
+            existing_users = self.fs.collection('users').where(
+                'username', '==', username).limit(1).get()
+            if existing_users:
+                st.warning("Username already taken. Please choose another.")
                 return
 
-            if password != confirm_password:
-                st.error("Passwords do not match.")
-                return
-
-            # Basic email validation only (no complex verification)
-            email_valid, email_message = self.validate_email_basic(email)
-            if not email_valid:
-                st.error(email_message)
-                return
-
-            user_ref = self.fs.collection("users").document(username)
-
-            # Check if username is already taken
-            if user_ref.get().exists:
-                st.warning("Username already taken")
-                return
-
-            # Check if email is already taken
+            # Check if email already exists in Firebase Auth
             try:
-                self.auth.get_user_by_email(email)
-                st.warning("Email already taken")
-                return
-            except exceptions.NotFoundError:
+                existing_user = self.auth.get_user_by_email(email)
+                if existing_user:
+                    st.warning(
+                        "Email already registered. Please use a different email or try logging in.")
+                    return
+            except exceptions.UserNotFoundError:
+                # This is good - email doesn't exist yet
                 pass
 
-            # Send OTP for email verification BEFORE creating account
-            st.info("📧 Mengirim kode verifikasi ke email Anda...")
-            otp_sent, otp_message = self.send_verification_otp(email)
+            # Generate and send OTP
+            success, otp_message = self.send_verification_otp(email)
 
-            if not otp_sent:
-                st.error(f"Gagal mengirim kode verifikasi: {otp_message}")
-                return  # Store user data temporarily for after OTP verification
+            if not success:
+                st.error(otp_message)
+                return
+
+            # Store registration data in session for later completion
             if 'pending_registration' not in st.session_state:
                 st.session_state.pending_registration = {}
 
@@ -269,13 +355,10 @@ class UserService:
                 f"Verified stored data - Password length: {len(stored_data.get('password', ''))}")
 
             st.success(otp_message)
-            st.info("💡 **Langkah selanjutnya:** Masukkan kode verifikasi 6 digit yang telah dikirim ke email Anda untuk menyelesaikan pendaftaran.")
 
-            # Show OTP input form
+            # Set flag to show OTP verification form
             st.session_state.show_otp_verification = True
             st.session_state.verification_email = email
-
-            logger.info(f"OTP sent for registration: {email}")
 
         except ValidationError as e:
             st.warning(str(e))
@@ -290,48 +373,37 @@ class UserService:
         Complete user registration after OTP verification.
 
         Args:
-            email: Email address
+            email: User email address
             otp: OTP code entered by user
         """
         try:
             # Verify OTP first
-            otp_valid, otp_message = self.verify_otp(email, otp)
+            is_verified, message = self.verify_email_otp(email, otp)
 
-            if not otp_valid:
-                st.error(otp_message)
+            if not is_verified:
+                st.error(message)
                 return
 
-            # Get pending registration data
-            if ('pending_registration' not in st.session_state or
-                    email not in st.session_state.pending_registration):
-                st.error("Data pendaftaran tidak ditemukan. Silakan daftar ulang.")
-                return
-
-            pending_data = st.session_state.pending_registration[email]
-
-            # Check if registration data is still valid (expires in 30 minutes)
-            if datetime.now() - pending_data['timestamp'] > timedelta(minutes=30):
-                del st.session_state.pending_registration[email]
+            # Get stored registration data
+            if 'pending_registration' not in st.session_state or email not in st.session_state.pending_registration:
                 st.error(
-                    "Data pendaftaran telah kedaluwarsa. Silakan daftar ulang.")
-                return            # Create user in Firebase Authentication
-            username = pending_data['username']
-            password = pending_data['password']
-            role = pending_data['role']
+                    "Registration data not found. Please try registering again.")
+                return
 
-            # Debug: Check password validity
+            registration_data = st.session_state.pending_registration[email]
+            username = registration_data['username']
+            password = registration_data['password']
+            role = registration_data['role']
+
+            # Debug: Log what we're retrieving
             logger.info(
-                f"Creating user with email: {email}, username: {username}")
+                f"Retrieving registration data - Username: {username}, Password length: {len(password)}")
 
-            # Validate password before sending to Firebase
-            if not password or not isinstance(password, str) or len(password) < 6:
-                st.error(
-                    f"❌ Terjadi error: Password tidak valid (minimal 6 karakter). Password saat ini: {len(password) if password else 0} karakter")
-                return
-
-            # Validate username
-            if not username or not isinstance(username, str):
-                st.error("❌ Terjadi error: Username tidak valid")
+            # Check registration data age (max 30 minutes)
+            registration_time = registration_data.get('timestamp')
+            if registration_time and (datetime.now() - registration_time).total_seconds() > 1800:
+                st.error("Registration session expired. Please try again.")
+                del st.session_state.pending_registration[email]
                 return
 
             # Save user data to Firestore
@@ -356,53 +428,16 @@ class UserService:
             if 'verification_email' in st.session_state:
                 del st.session_state.verification_email
 
-            st.success("🎉 Akun berhasil dibuat dan email terverifikasi!")
-            st.info("⏳ **Langkah Selanjutnya:** Akun Anda sedang menunggu verifikasi dari admin. Anda akan dapat login setelah admin memverifikasi akun Anda.")
-            st.balloons()
+            st.success(
+                "Account created successfully! Your account is pending admin verification.")
 
-            logger.info(
-                f"User account created and verified successfully: {email}")
+            logger.info(f"User {username} registered successfully")
 
         except exceptions.AlreadyExistsError:
-            st.warning("Email atau username sudah terdaftar.")
+            st.error("User already exists.")
         except Exception as e:
             logger.error(f"Error completing registration: {e}")
             st.error(f"Terjadi error saat menyelesaikan pendaftaran: {e}")
-
-        except ValidationError as e:
-            st.warning(str(e))
-        except exceptions.AlreadyExistsError:
-            st.warning("Email or username already taken.")
-        except Exception as e:
-            logger.error(f"Error during signup: {e}")
-            st.error(f"An error occurred: {e}")
-
-    def logout(self) -> None:
-        """
-        Log out the current user and clean up session data.
-
-        Raises:
-            UserServiceError: If logout process fails
-        """
-        try:
-            username = st.session_state.get('username', '')
-            if username:
-                # Clear user session from all persistent storage
-                self.save_login_logout(username, "logout")
-
-            # Clear from persistent session manager (primary)
-            persistent_manager = get_persistent_session_manager()
-            persistent_manager.clear_session()
-
-            # Also clear from legacy session manager (backup)
-            session_manager = get_session_manager()
-            session_manager.clear_user_session()
-
-            logger.info("User logged out successfully")
-
-        except Exception as e:
-            logger.error(f"Error during logout: {e}")
-            raise UserServiceError(f"Logout failed: {e}")
 
     def verify_password(self, email: str, password: str) -> Optional[Dict[str, Any]]:
         """
@@ -419,703 +454,133 @@ class UserService:
             AuthenticationError: If verification fails
         """
         try:
-            api_key = st.secrets["firebase"]["firebase_api"]
-            url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={api_key}"
-            payload = {
+            url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={self.firebase_api}"
+            data = {
                 "email": email,
                 "password": password,
                 "returnSecureToken": True
             }
 
-            response = requests.post(url, json=payload, timeout=30)
+            response = requests.post(url, json=data)
+            response_data = response.json()
+
             if response.status_code == 200:
-                return response.json()
+                return response_data
             else:
+                error_message = response_data.get(
+                    "error", {}).get("message", "Unknown error")
                 logger.warning(
-                    f"Password verification failed for {email}: {response.status_code}")
+                    f"Password verification failed for {email}: {error_message}")
                 return None
 
-        except requests.RequestException as e:
-            logger.error(f"Network error during password verification: {e}")
-            raise AuthenticationError(f"Network error: {e}")
         except Exception as e:
-            logger.error(f"Unexpected error during password verification: {e}")
-            raise AuthenticationError(f"Verification failed: {e}")
-
-    def save_login_logout(self, username: str, event_type: str) -> None:
-        """
-        Save user login/logout activity to Firestore.
-
-        Args:
-            username: User identifier
-            event_type: Either 'login' or 'logout'
-
-        Raises:
-            UserServiceError: If activity logging fails
-        """
-        try:
-            now = datetime.now()
-            date = now.strftime("%d-%m-%Y")
-            time = now.strftime("%H:%M:%S")
-
-            doc_ref = self.fs.collection(
-                "employee attendance").document(username)
-
-            if event_type == "login":
-                update_data = {f"activity.{date}.Login_Time": self.firebase_api.ArrayUnion([
-                                                                                           time])}
-            elif event_type == "logout":
-                update_data = {f"activity.{date}.Logout_Time": self.firebase_api.ArrayUnion([
-                                                                                            time])}
-            else:
-                raise ValueError(f"Invalid event_type: {event_type}")
-
-            try:
-                doc_ref.update(update_data)
-            except Exception:
-                # Document doesn't exist, create it
-                activity_data = {
-                    "activity": {
-                        date: {
-                            "Login_Time": [time] if event_type == "login" else [],
-                            "Logout_Time": [time] if event_type == "logout" else []
-                        }
-                    }
-                }
-                doc_ref.set(activity_data, merge=True)
-
-            logger.info(
-                f"Activity logged: {username} - {event_type} at {time}")
-
-        except Exception as e:
-            logger.error(f"Failed to log activity for {username}: {e}")
-            raise UserServiceError(f"Activity logging failed: {e}")
-
-    def _validate_google_email_exists(self, email: str) -> bool:
-        """
-        Validate if a Google email address actually exists.
-
-        Args:
-            email: Email address to validate
-
-        Returns:
-            bool: True if email exists, False otherwise
-        """
-        try:
-            # First check if it's a valid email format
-            email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-            if not re.match(email_pattern, email):
-                return False            # Extract domain from email
-            domain = email.split('@')[1]
-
-            # For Gmail and Google Workspace emails
-            if domain.lower() in ['gmail.com', 'googlemail.com'] or domain.endswith('.google.com'):
-                return self._check_gmail_exists(email)
-            else:
-                # For other domains, check if they use Google Workspace
-                return self._check_domain_mx_records(domain, email)
-
-        except Exception as e:
-            logger.warning(f"Error validating email {email}: {e}")
-            return False
-
-    def _check_gmail_exists(self, email: str) -> bool:
-        """
-        Check if a Gmail address actually exists using multiple verification methods.
-
-        Args:
-            email: Gmail address to check
-
-        Returns:
-            bool: True if email exists, False otherwise
-        """
-        try:
-            # First, basic format validation
-            email_lower = email.lower()
-
-            # Check if it's a Gmail domain
-            if not (email_lower.endswith('@gmail.com') or email_lower.endswith('@googlemail.com')):
-                return False
-
-            # Extract username part
-            username = email.split('@')[0]
-
-            # Gmail username validation rules
-            if len(username) < 6 or len(username) > 30:
-                return False
-
-            if username.startswith('.') or username.endswith('.'):
-                return False
-
-            if '..' in username:
-                return False
-
-            # Check for valid characters
-            valid_chars = set('abcdefghijklmnopqrstuvwxyz0123456789.')
-            if not all(c in valid_chars for c in username):
-                return False
-
-            # Now try to verify the email actually exists
-            return self._verify_gmail_existence(email)
-
-        except Exception as e:
-            logger.warning(f"Gmail validation failed for {email}: {e}")
-            return False
-
-    def _verify_gmail_existence(self, email: str) -> bool:
-        """
-        Verify Gmail existence using multiple methods.
-
-        Args:
-            email: Gmail address to verify
-
-        Returns:
-            bool: True if email likely exists, False otherwise
-        """
-        try:
-            # Method 1: Try using Firebase Auth to check if user exists
-            try:
-                self.auth.get_user_by_email(email)
-                # If user exists in Firebase, email is definitely valid
-                return True
-            except exceptions.NotFoundError:
-                # User not in Firebase, but email might still exist
-                pass
-            except Exception:
-                # Firebase check failed, continue with other methods
-                pass
-
-            # Method 2: Try Google's password reset flow simulation
-            # This is a more ethical way to check email existence
-            if self._check_gmail_via_password_reset(email):
-                return True
-
-            # Method 3: Use Google Apps API if available
-            if hasattr(st, 'secrets') and 'google_service_account' in st.secrets:
-                if self._check_gmail_via_google_api(email):
-                    return True
-
-            # Method 4: Basic heuristic check for common invalid patterns
-            return self._heuristic_gmail_check(email)
-
-        except Exception as e:
-            logger.warning(
-                f"Gmail existence verification failed for {email}: {e}")
-            return False
-
-    def _check_gmail_via_password_reset(self, email: str) -> bool:
-        """
-        Check Gmail existence by simulating password reset flow.
-
-        Args:
-            email: Gmail address to check
-
-        Returns:
-            bool: True if email appears to exist
-        """
-        try:
-            import requests
-
-            # Use Google's account recovery API endpoint
-            url = "https://accounts.google.com/signin/recovery"
-
-            session = requests.Session()
-            session.headers.update({
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            })
-
-            # First, get the recovery page
-            response = session.get(url)
-            if response.status_code != 200:
-                return False
-
-            # Try to submit email for recovery
-            recovery_data = {
-                'Email': email,
-                'continue': 'https://accounts.google.com/',
-                'flowName': 'GlifWebSignIn',
-                'flowEntry': 'ServiceLogin'
-            }
-
-            # Submit the email
-            response = session.post(
-                "https://accounts.google.com/_/signin/recovery/initiate",
-                data=recovery_data,
-                allow_redirects=False
-            )
-
-            # Check response for indicators of email existence
-            # Google returns different responses for existing vs non-existing emails
-            if response.status_code in [200, 302]:
-                response_text = response.text.lower()
-
-                # If email doesn't exist, Google usually indicates this
-                error_indicators = [
-                    'couldn\'t find your google account',
-                    'email not found',
-                    'account does not exist',
-                    'invalid email'
-                ]
-
-                if any(indicator in response_text for indicator in error_indicators):
-                    return False
-
-                # If no error indicators, email likely exists
-                return True
-
-            return False
-
-        except Exception as e:
-            logger.warning(f"Password reset check failed for {email}: {e}")
-            return False
-
-    def _check_gmail_via_google_api(self, email: str) -> bool:
-        """
-        Check Gmail using Google API if service account is available.
-
-        Args:
-            email: Gmail address to check
-
-        Returns:
-            bool: True if email exists
-        """
-        try:
-            # This would require Google Service Account credentials
-            # For now, return False as we don't have API access
-            return False
-
-        except Exception as e:
-            logger.warning(f"Google API check failed for {email}: {e}")
-            return False
-
-    def _heuristic_gmail_check(self, email: str) -> bool:
-        """
-        Apply heuristic checks to determine if Gmail is likely valid.
-
-        Args:
-            email: Gmail address to check
-
-        Returns:
-            bool: True if email passes heuristic checks
-        """
-        try:
-            username = email.split('@')[0].lower()
-
-            # Check for obviously fake patterns
-            fake_patterns = [
-                # Sequential numbers
-                r'.*123456.*',
-                r'.*654321.*',
-                # Obvious test patterns
-                r'.*test.*test.*',
-                r'.*fake.*',
-                r'.*dummy.*',
-                r'.*temp.*',
-                # Very random looking strings (all consonants or all vowels)
-                r'^[bcdfghjklmnpqrstvwxyz]{8,}$',
-                r'^[aeiou]{6,}$',
-                # Keyboard patterns
-                r'.*qwerty.*',
-                r'.*asdfgh.*',
-                r'.*123abc.*'
-            ]
-
-            import re
-            for pattern in fake_patterns:
-                if re.match(pattern, username):
-                    return False
-
-            # Additional checks for suspicious patterns
-            # Too many repeated characters
-            for char in username:
-                if username.count(char) > len(username) // 2:
-                    return False
-
-            # For this specific case, let's be more strict
-            # If it looks like a test/fake email, reject it
-            suspicious_words = ['test', 'fake',
-                                'dummy', 'temp', 'example', 'sample']
-            if any(word in username for word in suspicious_words):
-                return False
-
-            # Email appears legitimate based on heuristics
-            return True
-
-        except Exception as e:
-            logger.warning(f"Heuristic check failed for {email}: {e}")
-            return False
-
-    def _check_gmail_via_api(self, email: str) -> bool:
-        """
-        Alternative method to check Gmail using Google's verification.
-
-        Args:
-            email: Gmail address to check
-
-        Returns:
-            bool: True if likely exists, False otherwise
-        """
-        try:
-            # Use a simple verification approach
-            # This is a basic check - in production, you might want to use
-            # Google's People API or Gmail API for more accurate results
-
-            # For now, we'll assume Gmail addresses are valid if they
-            # follow the correct format and domain
-            if '@gmail.com' in email.lower() or '@googlemail.com' in email.lower():
-                return True
-            return False
-
-        except Exception as e:
-            logger.warning(f"API verification failed for {email}: {e}")
-            return False
-
-    def _check_domain_mx_records(self, domain: str, email: str) -> bool:
-        """
-        Check if domain uses Google Workspace by examining MX records.
-
-        Args:
-            domain: Domain to check
-            email: Full email address
-
-        Returns:
-            bool: True if domain uses Google services, False otherwise
-        """
-        try:
-            # Get MX records for the domain
-            mx_records = dns.resolver.resolve(domain, 'MX')
-
-            # Check if any MX record points to Google
-            google_mx_keywords = ['google.com',
-                                  'googlemail.com', 'aspmx.l.google.com']
-
-            for mx in mx_records:
-                mx_host = str(mx.exchange).lower()
-                if any(keyword in mx_host for keyword in google_mx_keywords):
-                    # Domain uses Google Workspace, so email could be valid
-                    # For more accurate verification, you'd need domain-specific checks
-                    return True
-
-            return False
-        except Exception as e:
-            logger.warning(f"MX record check failed for domain {domain}: {e}")
-            return False
-
-    def validate_email_before_registration(self, email: str) -> tuple[bool, str]:
-        """
-        Comprehensive email validation before registration with strict verification.
-
-        Args:
-            email: Email address to validate
-
-        Returns:
-            tuple: (is_valid, message)
-        """
-        try:
-            # Basic format validation
-            email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-            if not re.match(email_pattern, email):
-                return False, "❌ Format email tidak valid"
-
-            # Check if it's a Google email
-            domain = email.split('@')[1].lower()
-
-            if domain not in ['gmail.com', 'googlemail.com'] and not domain.endswith('.google.com'):
-                # Check if domain uses Google Workspace
-                if not self._check_domain_mx_records(domain, email):
-                    return False, "❌ Email harus menggunakan layanan Google (Gmail atau Google Workspace)"
-
-            # Show verification progress
-            with st.spinner("🔍 Memverifikasi keberadaan email Google..."):
-                # More strict verification
-                if not self._validate_google_email_exists(email):
-                    return False, "❌ Email Google tidak ditemukan atau tidak dapat diverifikasi. Pastikan:\n" \
-                        "1. Email sudah terdaftar di Google\n" \
-                        "2. Email aktif dan dapat menerima email\n" \
-                        "3. Tidak menggunakan email palsu atau test"
-
-            # Additional strict checks for suspicious emails
-            username = email.split('@')[0].lower()
-
-            # Check for obvious fake/test patterns
-            suspicious_patterns = [
-                'test', 'fake', 'dummy', 'temp', 'example', 'sample',
-                'placeholder', 'mock', 'invalid', 'notreal'
-            ]
-
-            if any(pattern in username for pattern in suspicious_patterns):
-                return False, "❌ Email terdeteksi sebagai email test/palsu. Gunakan email Google yang valid."
-
-            # Check for too many random characters (likely fake)
-            if len(username) > 15:
-                # Count consonants vs vowels ratio - real names usually have balance
-                vowels = set('aeiou')
-                consonants = set('bcdfghjklmnpqrstvwxyz')
-
-                vowel_count = sum(1 for c in username if c in vowels)
-                consonant_count = sum(1 for c in username if c in consonants)
-
-                if vowel_count == 0 or consonant_count == 0:
-                    return False, "❌ Email terdeteksi sebagai kombinasi karakter acak. Gunakan email yang valid."
-
-                # Check for keyboard patterns
-                keyboard_patterns = ['qwerty', 'asdf',
-                                     'zxcv', '123456', '654321']
-                if any(pattern in username for pattern in keyboard_patterns):
-                    return False, "❌ Email mengandung pola keyboard yang mencurigakan."
-
-            # Additional check for unnatural-looking email patterns
-            # Check for emails that look like random character combinations
-            if self._is_likely_random_email(username):
-                return False, "❌ Email terdeteksi sebagai kombinasi karakter yang tidak natural. Gunakan email dengan nama yang wajar."
-
-            st.success("✅ Email berhasil diverifikasi!")
-            return True, "Email valid dan terverifikasi"
-
-        except Exception as e:
-            logger.error(f"Error in email validation: {e}")
-            return False, f"❌ Terjadi error saat memvalidasi email: {e}"
-
-    def _is_likely_random_email(self, username: str) -> bool:
-        """
-        Check if email username looks like random characters or unlikely to be real.
-
-        Args:
-            username: Username part of email
-
-        Returns:
-            bool: True if email looks random/fake
-        """
-        try:
-            # Remove dots and numbers for analysis
-            clean_username = ''.join(
-                c for c in username.lower() if c.isalpha())
-
-            if len(clean_username) < 3:
-                return False  # Too short to analyze
-
-            # Check for excessive consonant clusters or vowel clusters
-            vowels = set('aeiou')
-            consonants = set('bcdfghjklmnpqrstvwxyz')
-
-            # Count consecutive consonants/vowels
-            max_consecutive_consonants = 0
-            max_consecutive_vowels = 0
-            current_consonants = 0
-            current_vowels = 0
-
-            for char in clean_username:
-                if char in vowels:
-                    current_vowels += 1
-                    current_consonants = 0
-                    max_consecutive_vowels = max(
-                        max_consecutive_vowels, current_vowels)
-                elif char in consonants:
-                    current_consonants += 1
-                    current_vowels = 0
-                    max_consecutive_consonants = max(
-                        max_consecutive_consonants, current_consonants)
-
-            # Flag if too many consecutive consonants (unlikely in real names)
-            if max_consecutive_consonants >= 5:  # Like "rizkyyanuark" has "rzky"
-                return True
-
-            # Check for repeated character patterns that look artificial
-            if len(clean_username) >= 8:
-                # Look for doubled letters in unusual positions
-                doubled_count = 0
-                for i in range(len(clean_username) - 1):
-                    if clean_username[i] == clean_username[i + 1]:
-                        doubled_count += 1
-
-                # Multiple doubled letters might indicate artificial name
-                if doubled_count >= 2:
-                    return True
-
-            # Check for uncommon letter combinations
-            uncommon_patterns = [
-                'rzk', 'yyk', 'yyy', 'zzz', 'qzx', 'xzq', 'wyx', 'vwx'
-            ]
-
-            for pattern in uncommon_patterns:
-                if pattern in clean_username:
-                    return True
-
-            # Check if it looks like keyboard mashing or random
-            # Real names usually have more common letter combinations
-            common_bigrams = [
-                'th', 'he', 'in', 'er', 'an', 're', 'ed', 'nd', 'to', 'en',
-                'ti', 'es', 'or', 'te', 'of', 'be', 'ha', 'as', 'hi', 'is'
-            ]
-
-            bigram_count = 0
-            for i in range(len(clean_username) - 1):
-                bigram = clean_username[i:i+2]
-                if bigram in common_bigrams:
-                    bigram_count += 1
-
-            # If very few common bigrams, might be random
-            if len(clean_username) >= 8 and bigram_count == 0:
-                return True
-
-            return False
-
-        except Exception as e:
-            logger.warning(f"Random email check failed for {username}: {e}")
-            return False
-
-    def generate_otp(self) -> str:
-        """
-        Generate a 6-digit OTP code.
-
-        Returns:
-            str: 6-digit OTP code
-        """
-        return ''.join(random.choices(string.digits, k=6))
+            logger.error(f"Error verifying password for {email}: {e}")
+            raise AuthenticationError(f"Password verification failed: {e}")
 
     def send_verification_otp(self, email: str) -> tuple[bool, str]:
         """
-        Send OTP verification code to email address.
+        Send OTP verification email to user.
 
         Args:
-            email: Email address to send OTP to
+            email: User email address
 
         Returns:
-            tuple: (success, message)
+            Tuple of (success: bool, message: str)
         """
         try:
             # Generate OTP
-            otp = self.generate_otp()
+            otp = ''.join(random.choices(string.digits, k=6))
 
-            # Store OTP in session state with expiration
-            if 'email_verification' not in st.session_state:
-                st.session_state.email_verification = {}
+            # Store OTP in session with timestamp
+            if 'otp_storage' not in st.session_state:
+                st.session_state.otp_storage = {}
 
-            # OTP expires in 10 minutes
-            expiry_time = datetime.now() + timedelta(minutes=10)
-
-            st.session_state.email_verification[email] = {
+            st.session_state.otp_storage[email] = {
                 'otp': otp,
-                'expiry': expiry_time,
-                'attempts': 0
+                'timestamp': datetime.now()
             }
 
-            # Send email with OTP
-            subject = "Kode Verifikasi ICONNET Assistant"
+            # Send email
+            subject = "Verification Code for ICONNET Account"
             body = f"""
-            <html>
-            <body>
-                <h2>Verifikasi Email - ICONNET Assistant</h2>
-                <p>Halo,</p>
-                <p>Anda telah mendaftar di ICONNET Assistant. Gunakan kode verifikasi berikut untuk melengkapi pendaftaran:</p>
-                
-                <div style="background-color: #f0f2f6; padding: 20px; border-radius: 10px; text-align: center; margin: 20px 0;">
-                    <h1 style="color: #1f4e79; font-size: 36px; margin: 0; letter-spacing: 5px;">{otp}</h1>
-                </div>
-                
-                <p><strong>Kode ini berlaku selama 10 menit.</strong></p>
-                
-                <p>Jika Anda tidak mendaftar di ICONNET Assistant, abaikan email ini.</p>
-                
-                <hr>
-                <p style="color: #666; font-size: 12px;">
-                    Email ini dikirim secara otomatis. Jangan membalas email ini.
-                </p>
-            </body>
-            </html>
+            Hi there!
+
+            Your verification code for ICONNET account registration is: {otp}
+
+            This code will expire in 10 minutes.
+
+            If you didn't request this code, please ignore this email.
+
+            Best regards,
+            ICONNET Team
             """
 
-            # Send email using EmailService
             success = self.email_service.send_email(email, subject, body)
 
             if success:
-                logger.info(f"OTP sent successfully to {email}")
-                return True, f"Kode verifikasi telah dikirim ke {email}. Silakan periksa kotak masuk Anda."
+                return True, f"Verification code sent to {email}. Please check your inbox."
             else:
-                logger.error(f"Failed to send OTP to {email}")
-                return False, "Gagal mengirim kode verifikasi. Silakan coba lagi."
+                return False, "Failed to send verification email. Please try again."
 
         except Exception as e:
             logger.error(f"Error sending OTP to {email}: {e}")
-            return False, f"Terjadi error saat mengirim kode verifikasi: {e}"
+            return False, f"Error sending verification email: {e}"
 
-    def verify_otp(self, email: str, entered_otp: str) -> tuple[bool, str]:
+    def verify_email_otp(self, email: str, user_otp: str) -> tuple[bool, str]:
         """
-        Verify OTP code for email.
+        Verify OTP code for email verification.
 
         Args:
-            email: Email address
-            entered_otp: OTP code entered by user
+            email: User email address
+            user_otp: OTP code entered by user
 
         Returns:
-            tuple: (is_valid, message)
+            Tuple of (is_valid: bool, message: str)
         """
         try:
-            if 'email_verification' not in st.session_state:
-                return False, "Tidak ada kode verifikasi yang ditemukan. Silakan kirim ulang kode."
+            if 'otp_storage' not in st.session_state or email not in st.session_state.otp_storage:
+                return False, "No verification code found. Please request a new code."
 
-            if email not in st.session_state.email_verification:
-                return False, "Tidak ada kode verifikasi untuk email ini. Silakan kirim ulang kode."
+            stored_data = st.session_state.otp_storage[email]
+            stored_otp = stored_data['otp']
+            timestamp = stored_data['timestamp']
 
-            verification_data = st.session_state.email_verification[email]
-
-            # Check if OTP expired
-            if datetime.now() > verification_data['expiry']:
-                del st.session_state.email_verification[email]
-                return False, "Kode verifikasi telah kedaluwarsa. Silakan kirim ulang kode."
-
-            # Check attempts limit
-            if verification_data['attempts'] >= 3:
-                del st.session_state.email_verification[email]
-                return False, "Terlalu banyak percobaan gagal. Silakan kirim ulang kode verifikasi."
+            # Check if OTP is expired (10 minutes)
+            if (datetime.now() - timestamp).total_seconds() > 600:
+                del st.session_state.otp_storage[email]
+                return False, "Verification code expired. Please request a new code."
 
             # Verify OTP
-            if entered_otp.strip() == verification_data['otp']:
-                # OTP is correct, clean up
-                del st.session_state.email_verification[email]
-                logger.info(f"Email {email} verified successfully")
-                return True, "Email berhasil diverifikasi!"
+            if user_otp == stored_otp:
+                # OTP is valid, remove it from storage
+                del st.session_state.otp_storage[email]
+                return True, "Email verified successfully!"
             else:
-                # Increment attempts
-                st.session_state.email_verification[email]['attempts'] += 1
-                remaining_attempts = 3 - \
-                    st.session_state.email_verification[email]['attempts']
-                return False, f"Kode verifikasi salah. Sisa percobaan: {remaining_attempts}"
+                return False, "Invalid verification code. Please try again."
 
         except Exception as e:
             logger.error(f"Error verifying OTP for {email}: {e}")
-            return False, f"Terjadi error saat memverifikasi kode: {e}"
+            return False, f"Error verifying code: {e}"
 
-    def validate_email_basic(self, email: str) -> tuple[bool, str]:
+    def save_login_logout(self, username: str, action: str) -> None:
         """
-        Basic email validation - format and domain check only.
+        Log user login/logout activity.
 
         Args:
-            email: Email address to validate
-
-        Returns:
-            tuple: (is_valid, message)
+            username: User ID/username
+            action: Either 'login' or 'logout'
         """
         try:
-            # Basic format validation
-            email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-            if not re.match(email_pattern, email):
-                return False, "❌ Format email tidak valid"
+            activity_doc = {
+                "username": username,
+                "action": action,
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "ip_address": "Unknown"  # Could be enhanced to get real IP
+            }
 
-            # Check if it's a Google email (Gmail or Google Workspace)
-            domain = email.split('@')[1].lower()
-
-            google_domains = ['gmail.com', 'googlemail.com']
-            is_gmail = domain in google_domains
-            is_google_workspace = domain.endswith('.google.com')
-
-            if not is_gmail and not is_google_workspace:
-                # For non-Google domains, we'll still allow them but recommend Google
-                st.info(
-                    "💡 **Rekomendasi:** Gunakan email Google (Gmail) untuk pengalaman terbaik.")
-
-            return True, "Format email valid"
+            self.fs.collection("user_activity").add(activity_doc)
+            logger.info(f"Activity logged: {username} - {action}")
 
         except Exception as e:
-            logger.error(f"Error in basic email validation: {e}")
-            return False, f"Terjadi error saat memvalidasi email: {e}"
+            logger.error(f"Failed to log activity for {username}: {e}")
+            # Don't raise exception as this is not critical

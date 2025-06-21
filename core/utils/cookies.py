@@ -1,70 +1,34 @@
 """Cookie management utilities for user session persistence."""
 
 import streamlit as st
-import logging
+from streamlit_cookies_manager import EncryptedCookieManager
 from typing import Optional
 import time
+import logging
 
 logger = logging.getLogger(__name__)
 
+# Initialize cookies globally like in your old code
+try:
+    cookies = EncryptedCookieManager(
+        prefix="Iconnet_Corp_App_v1",
+        password=st.secrets.get("cookie_password", "super_secret_key")
+    )
 
-def get_cookie_manager():
-    """
-    Get cookie manager instance with proper error handling for cloud deployment.
-    """
-    try:
-        from streamlit_cookies_manager import EncryptedCookieManager
-
-        # Get password from secrets with fallback
-        cookie_password = "super_secret_key"  # Default fallback
-        if hasattr(st, 'secrets'):
-            cookie_password = st.secrets.get(
-                "cookie_password", "super_secret_key")
-
-        # Initialize cookies
-        cookies = EncryptedCookieManager(
-            prefix="Iconnet_Corp_App_v1",
-            password=cookie_password
-        )        # Check if cookies are ready with longer timeout and better handling
-        max_wait = 15  # Increase timeout to 15 seconds for better reliability
-        start_time = time.time()
-
-        while not cookies.ready() and (time.time() - start_time) < max_wait:
-            time.sleep(0.2)  # Increase sleep time to reduce CPU usage
-
-        if not cookies.ready():
-            logger.warning(
-                "Cookies not ready after timeout, proceeding without cookies")
-            return None
-
-        return cookies
-
-    except ImportError as e:
-        logger.error(f"Failed to import streamlit_cookies_manager: {e}")
-        st.warning(
-            "Cookie manager not available. Using session-only authentication.")
-        return None
-    except Exception as e:
-        logger.error(f"Failed to initialize cookie manager: {e}")
-        return None
-
-
-# Initialize cookies with lazy loading
-_cookies_instance = None
-
-
-def _get_cookies():
-    """Get cookies instance with lazy loading."""
-    global _cookies_instance
-    if _cookies_instance is None:
-        _cookies_instance = get_cookie_manager()
-    return _cookies_instance
+    # Check if cookies are ready
+    COOKIES_AVAILABLE = cookies.ready()
+    if not COOKIES_AVAILABLE:
+        logger.warning("Cookies not ready, using fallback session storage")
+except Exception as e:
+    logger.warning(
+        f"Failed to initialize cookies: {e}, using fallback session storage")
+    cookies = None
+    COOKIES_AVAILABLE = False
 
 
 def save_user_to_cookie(username: str, email: str, role: str) -> bool:
-    """Save user to cookie (matches old working code)."""
-    cookies = _get_cookies()
-    if cookies and cookies.ready():
+    """Save user to cookie (with fallback handling for Streamlit Cloud)."""
+    if COOKIES_AVAILABLE and cookies and cookies.ready():
         try:
             cookies["username"] = username
             cookies["email"] = email
@@ -75,94 +39,99 @@ def save_user_to_cookie(username: str, email: str, role: str) -> bool:
             return True
         except Exception as e:
             logger.error(f"Failed to save user to cookies: {e}")
-            # Don't show error to user, just log it
-            logger.warning("Falling back to session-only authentication")
             return False
     else:
-        # Fallback to session-only authentication
-        logger.info("Cookies not available, using session-only authentication")
-        return False
+        logger.warning(
+            "Cookies not available, session data saved to session state only")
+        # Update session state as fallback
+        st.session_state.username = username
+        st.session_state.useremail = email
+        st.session_state.role = role
+        st.session_state.signout = False
+        return False  # Return False to indicate cookies weren't used
 
 
 def clear_user_cookie() -> bool:
-    """Clear user cookie (matches old working code)."""
-    cookies = _get_cookies()
-    if cookies and cookies.ready():
-        cookies["username"] = ""
-        cookies["email"] = ""
-        cookies["role"] = ""
-        cookies["signout"] = "True"
-        cookies.save()
+    """Clear user cookie (with fallback handling for Streamlit Cloud)."""
+    if COOKIES_AVAILABLE and cookies and cookies.ready():
+        try:
+            cookies["username"] = ""
+            cookies["email"] = ""
+            cookies["role"] = ""
+            cookies["signout"] = "True"
+            cookies.save()
 
-        # Clear session state immediately
+            # Clear session state immediately
+            st.session_state.username = ""
+            st.session_state.useremail = ""
+            st.session_state.role = ""
+            st.session_state.signout = True
+
+            logger.info("User data cleared from cookies and session")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to clear cookies: {e}")
+            # Still clear session state even if cookies fail
+            st.session_state.username = ""
+            st.session_state.useremail = ""
+            st.session_state.role = ""
+            st.session_state.signout = True
+            return False
+    else:
+        # Clear session state as fallback
         st.session_state.username = ""
         st.session_state.useremail = ""
         st.session_state.role = ""
         st.session_state.signout = True
-
-        logger.info("User data cleared from cookies and session")
-        return True
-
-    # Fallback: clear session state only
-    st.session_state.username = ""
-    st.session_state.useremail = ""
-    st.session_state.role = ""
-    st.session_state.signout = True
-    logger.info("Cookies not available, cleared session state only")
-    return False
+        logger.warning("Cookies not available, cleared session state only")
+        return False
 
 
-def load_cookie_to_session() -> bool:
-    """Load cookie to session with retry mechanism for better reliability."""
-    # First, try to get cookies with retries
-    cookies = None
-    max_retries = 3
-
-    for attempt in range(max_retries):
-        cookies = _get_cookies()
-        if cookies and cookies.ready():
-            break
-
-        if attempt < max_retries - 1:  # Don't sleep on the last attempt
-            logger.info(
-                f"Cookies not ready, retrying... (attempt {attempt + 1}/{max_retries})")
-            time.sleep(1)  # Wait 1 second between retries
-
-    if cookies and cookies.ready():
+def load_cookie_to_session(session_state) -> bool:
+    """Load cookie to session (with fallback handling for Streamlit Cloud)."""
+    if COOKIES_AVAILABLE and cookies and cookies.ready():
         try:
             username = cookies.get("username", "") or ""
             email = cookies.get("email", "") or ""
             role = cookies.get("role", "") or ""
             signout_status = cookies.get("signout", "True")
 
-            # Only update session if we have valid user data
-            if username and email and signout_status == "False":
-                st.session_state.username = username
-                st.session_state.useremail = email
-                st.session_state.role = role
-                st.session_state.signout = False
+            session_state.username = username
+            session_state.useremail = email
+            session_state.role = role
+            session_state.signout = signout_status == "True"
 
+            # Log successful cookie load
+            if username and email and signout_status == "False":
                 logger.info(
                     f"User {username} successfully loaded from cookies to session")
                 return True
             else:
-                logger.debug("No valid user data found in cookies")
+                logger.debug(
+                    "No valid user data in cookies or user signed out")
+                return False
 
         except Exception as e:
             logger.error(f"Failed to load cookies to session: {e}")
-
-    # Fallback: ensure session state has proper defaults if no valid cookies
-    if not hasattr(st.session_state, 'username') or not st.session_state.get('username'):
-        st.session_state.username = ""
-    if not hasattr(st.session_state, 'useremail'):
-        st.session_state.useremail = ""
-    if not hasattr(st.session_state, 'role'):
-        st.session_state.role = ""
-    if not hasattr(st.session_state, 'signout'):
-        st.session_state.signout = True
-
-    logger.debug("Using session-only authentication (no valid cookies found)")
-    return False
+            # Set default values on error
+            session_state.username = ""
+            session_state.useremail = ""
+            session_state.role = ""
+            session_state.signout = True
+            return False
+    else:
+        # Set default values when cookies not available
+        if not hasattr(session_state, 'username'):
+            session_state.username = ""
+        if not hasattr(session_state, 'useremail'):
+            session_state.useremail = ""
+        if not hasattr(session_state, 'role'):
+            session_state.role = ""
+        if not hasattr(session_state, 'signout'):
+            session_state.signout = True
+        logger.debug(
+            "Cookies not available, initialized default session state")
+        return False
 
 # Keep the class-based approach for compatibility but use simple functions primarily
 
@@ -173,36 +142,48 @@ class CookieManager:
     def __init__(self):
         """Initialize the encrypted cookie manager."""
         # Use the global cookies instance
-        self._cookies = _get_cookies()
+        self._cookies = cookies
 
     @property
     def ready(self) -> bool:
         """Check if cookies are ready for use."""
-        return self._cookies and self._cookies.ready() if self._cookies else False
+        return self._cookies.ready()
 
     def is_user_authenticated(self) -> bool:
         """Check if user is authenticated based on cookies."""
         if not self.ready:
-            # Fallback to session state
-            return bool(st.session_state.get("username", "").strip()) and not st.session_state.get("signout", True)
+            return False
 
         try:
             username = self._cookies.get("username", "")
-            signout_status = self._cookies.get("signout", "True")
-            return bool(username.strip()) and signout_status == "False"
+            email = self._cookies.get("email", "")
+            signout_str = self._cookies.get("signout", "True")
+
+            return bool(username and email and signout_str == "False")
         except Exception as e:
-            logger.error(f"Error checking authentication from cookies: {e}")
-            # Fallback to session state
-            return bool(st.session_state.get("username", "").strip()) and not st.session_state.get("signout", True)
+            logger.error(f"Failed to check authentication status: {e}")
+            return False
 
     def save_user(self, username: str, email: str, role: str) -> bool:
-        """Save user authentication data to cookies."""
+        """Save user credentials to encrypted cookies."""
         return save_user_to_cookie(username, email, role)
 
     def clear_user(self) -> bool:
-        """Clear user authentication data from cookies."""
+        """Clear user data from cookies and session state."""
         return clear_user_cookie()
 
     def load_to_session(self, session_state) -> bool:
         """Load user data from cookies to session state."""
         return load_cookie_to_session(session_state)
+
+
+# Global cookie manager instance
+_cookie_manager: Optional[CookieManager] = None
+
+
+def get_cookie_manager() -> CookieManager:
+    """Get or create the global cookie manager instance."""
+    global _cookie_manager
+    if _cookie_manager is None:
+        _cookie_manager = CookieManager()
+    return _cookie_manager

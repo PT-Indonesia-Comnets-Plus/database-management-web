@@ -3,9 +3,10 @@
 import streamlit as st
 import logging
 from typing import Optional, Dict, Any
-from .utils.session_manager import get_session_manager
+from .utils.cookies import load_cookie_to_session
 from .utils.firebase_config import get_firebase_app
 from .utils.database import connect_db
+from .utils.cloud_config import configure_for_cloud, is_streamlit_cloud
 
 # Import services
 from .services.UserService import UserService
@@ -13,6 +14,8 @@ from .services.UserDataService import UserDataService
 from .services.EmailService import EmailService
 from .services.RAG import RAGService
 from .services.AssetDataService import AssetDataService
+from .services.SessionStorageService import get_session_storage_service
+from .services.CloudSessionStorage import get_cloud_session_storage
 
 logger = logging.getLogger(__name__)
 
@@ -20,25 +23,10 @@ logger = logging.getLogger(__name__)
 def initialize_session_state() -> bool:
     """Initialize all session state and services."""
     try:
-        # Prevent multiple initializations
-        if st.session_state.get('_core_initialized', False):
-            logger.debug("Core already initialized, skipping...")
-            return True
+        # Configure for cloud deployment if needed
+        configure_for_cloud()
 
-        logger.debug("Starting core initialization...")
-
-        # ALWAYS attempt to load user session on every initialization (critical for persistence)
-        logger.debug("Attempting to load user session...")
-        session_manager = get_session_manager()
-        session_loaded = session_manager.load_user_session()
-
-        if session_loaded:
-            logger.info(
-                f"Successfully restored user session: {st.session_state.get('username', 'Unknown')}")
-        else:
-            logger.debug("No valid user session found, starting fresh session")
-
-        # Initialize Database and Storage
+        # Initialize Database and Storage FIRST
         if "db" not in st.session_state or "storage" not in st.session_state:
             try:
                 db_pool, storage = connect_db()
@@ -67,6 +55,80 @@ def initialize_session_state() -> bool:
                 st.session_state.fs = None
                 st.session_state.auth = None
                 st.session_state.fs_config = None
+
+        # Initialize Cloud Session Storage Service (NEW - optimized for Streamlit Cloud)
+        if "cloud_session_storage" not in st.session_state:
+            try:
+                cloud_session_storage = get_cloud_session_storage(
+                    db_pool=st.session_state.get("db"),
+                    app_prefix="iconnet_app"
+                )
+                st.session_state.cloud_session_storage = cloud_session_storage
+                logger.info(
+                    "Cloud session storage service initialized successfully")
+            except Exception as e:
+                logger.error(
+                    f"Failed to initialize cloud session storage service: {e}")
+                st.session_state.cloud_session_storage = None
+
+        # Initialize Session Storage Service (Legacy fallback)
+        if "session_storage_service" not in st.session_state:
+            try:
+                session_storage_service = get_session_storage_service(
+                    db_pool=st.session_state.get("db"),
+                    firestore=st.session_state.get("fs")
+                )
+                st.session_state.session_storage_service = session_storage_service
+                logger.info("Session storage service initialized successfully")
+            except Exception as e:
+                logger.error(
+                    f"Failed to initialize session storage service: {e}")
+                st.session_state.session_storage_service = None
+
+        # Load user session data (prioritize cloud session storage for production)
+        if "username" not in st.session_state or not st.session_state.get("username"):
+            try:
+                # First try cloud session storage (optimized for Streamlit Cloud)
+                cloud_session_storage = st.session_state.get(
+                    "cloud_session_storage")
+                if cloud_session_storage:
+                    session_data = cloud_session_storage.load_session()
+                    if session_data:
+                        logger.info(
+                            f"User session loaded from cloud storage: {session_data.get('username')}")
+                    else:
+                        # Fallback to legacy methods
+                        load_cookie_to_session(st.session_state)
+
+                        # Then try legacy session storage service
+                        session_storage_service = st.session_state.get(
+                            "session_storage_service")
+                        if session_storage_service:
+                            session_data = session_storage_service.load_user_session()
+                            if session_data:
+                                logger.info(
+                                    f"User session loaded from legacy storage: {session_data.get('username')}")
+                else:
+                    # Fallback initialization if cloud storage failed
+                    load_cookie_to_session(st.session_state)
+
+            except Exception as e:
+                logger.error(f"Failed to load user session: {e}")
+                # Initialize default session state
+                st.session_state.username = ""
+                st.session_state.useremail = ""
+                st.session_state.role = ""
+                st.session_state.signout = True
+
+        # Ensure basic session state variables exist with defaults
+        if not hasattr(st.session_state, 'username'):
+            st.session_state.username = ""
+        if not hasattr(st.session_state, 'useremail'):
+            st.session_state.useremail = ""
+        if not hasattr(st.session_state, 'role'):
+            st.session_state.role = ""
+        if not hasattr(st.session_state, 'signout'):
+            st.session_state.signout = True
 
         # Initialize Services
         services_to_init = ["user_service", "user_data_service",
@@ -140,9 +202,6 @@ def initialize_session_state() -> bool:
                 except Exception as e:
                     logger.error(f"Failed to initialize AssetDataService: {e}")
 
-        # Mark initialization as complete
-        st.session_state._core_initialized = True
-        logger.info("Core initialization completed successfully")
         return True
 
     except Exception as e:

@@ -41,11 +41,16 @@ def get_firebase_app():
             creds = credentials.Certificate(key_dict)
             firebase_admin.initialize_app(creds)
 
+            # Access Firestore and Auth
             logger.info("Firebase app initialized successfully")
-
-        # Access Firestore and Auth
         fs = firestore.client()
-        return fs, auth, firestore
+
+        # Get Firebase API key from secrets
+        firebase_api = st.secrets["firebase"].get("firebase_api", None)
+        if not firebase_api:
+            logger.warning("Firebase API key not configured")
+
+        return fs, auth, firebase_api
 
     except (KeyError, AttributeError) as e:
         logger.warning(f"Firebase configuration not available: {e}")

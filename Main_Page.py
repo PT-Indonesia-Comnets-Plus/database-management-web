@@ -15,9 +15,7 @@ from core.services.UserService import UserService
 from core.services.EmailService import EmailService
 from core import initialize_session_state
 from core.utils.load_css import load_custom_css
-from core.utils.session_manager import get_session_manager
-from core.utils.persistent_session import get_persistent_session_manager
-from core.utils.session_restoration import ensure_session_persistence, debug_session_state
+from core.utils.cookies import get_cookie_manager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -37,18 +35,14 @@ class MainPageManager:
         self._initialize_services()
 
     def _initialize_services(self) -> None:
-        """Initialize required services with optimization to prevent multiple initializations."""
+        """Initialize required services."""
         try:
-            # Only initialize core if not already done (prevents multiple service creation)
-            if not st.session_state.get('_core_initialized', False):
-                logger.debug("Initializing core services...")
-                if not initialize_session_state():
-                    st.error(
-                        "Failed to initialize application services. Please refresh.")
-                    st.stop()
-            else:
-                logger.debug(
-                    "Core services already initialized, skipping re-initialization...")
+            # initialize_session_state() akan memanggil ServiceManager
+            # yang menangani pemuatan cookies dan inisialisasi semua layanan inti.
+            if not initialize_session_state():
+                st.error(
+                    "Failed to initialize application services. Please refresh.")
+                st.stop()
 
             # Ambil layanan dari session_state setelah inisialisasi berhasil
             self.user_service = st.session_state.get('user_service')
@@ -61,7 +55,7 @@ class MainPageManager:
                 st.error(
                     "Required services are not available. Application cannot proceed.")
                 st.stop()
-            logger.info("MainPageManager services ready.")
+            logger.info("MainPageManager services initialized successfully.")
 
         except Exception as e:
             logger.error(
@@ -148,27 +142,16 @@ class MainPageManager:
             logger.error(f"Error displaying header: {e}")
             # Fallback display in case of any error
             st.markdown(
-                "<p style='text-align: center; color: #666; font-size: 16px;'>Database Management & AI Assistant Platform</p>",
-                unsafe_allow_html=True)
+                "<p style='text-align: center; color: #666; font-size: 16px;'>Database Management & AI Assistant Platform</p>", unsafe_allow_html=True)
 
     def is_user_authenticated(self) -> bool:
-        """Check if user is currently authenticated using enhanced session manager."""
-        # Try persistent session manager first
-        persistent_manager = get_persistent_session_manager()
-        is_authenticated = persistent_manager.is_authenticated()
+        """Check if user is currently authenticated."""
+        # Simple check like your old working code
+        username_exists = bool(st.session_state.get("username", "").strip())
+        is_signed_out = st.session_state.get("signout", True)
 
-        if not is_authenticated:
-            # Fallback to legacy session manager
-            session_manager = get_session_manager()
-            is_authenticated = session_manager.is_user_authenticated()
-
-        # Additional debug logging
-        username = st.session_state.get('username', '')
-        signout = st.session_state.get('signout', True)
-        logger.debug(
-            f"Auth check - Username: '{username}', Signout: {signout}, Result: {is_authenticated}")
-
-        return is_authenticated
+        # User is authenticated if username exists and not signed out
+        return username_exists and not is_signed_out
 
     def display_authentication_form(self) -> None:
         """Display authentication forms (login/register)."""
@@ -207,8 +190,7 @@ class MainPageManager:
 
     def _display_registration_form(self) -> None:
         """Display registration form."""
-        st.subheader("📝 Register")
-        # Check if OTP verification is needed
+        st.subheader("📝 Register")        # Check if OTP verification is needed
         if st.session_state.get('show_otp_verification', False):
             self._display_otp_verification_form()
             return
@@ -270,20 +252,12 @@ class MainPageManager:
             try:
                 # UserService.login akan menangani st.success/st.warning/st.error
                 # dan pembaruan st.session_state serta cookies.
+                # Jika login berhasil, UserService akan mengatur session state
                 self.user_service.login(email, password)
-
-                # Check if login was successful, and only rerun if authenticated
-                if self.is_user_authenticated():
-                    # Clear session validation to force re-validation with new login
-                    from core.utils.session_restoration import clear_session_validation
-                    clear_session_validation()
-
-                    # Use session state flag to prevent infinite loops
-                    if not st.session_state.get('login_just_completed', False):
-                        st.session_state.login_just_completed = True
-                        st.rerun()
-
-            except Exception as e:
+                # dan kita bisa rerun untuk memperbarui UI
+                if self.is_user_authenticated():  # Cek lagi setelah login attempt
+                    st.rerun()
+            except Exception as e:  # Menangkap error tak terduga dari UserService.login
                 logger.error(f"Unexpected error during login handling: {e}")
                 st.error("An unexpected error occurred during login.")
 
@@ -428,18 +402,27 @@ class MainPageManager:
                 self._fallback_logout()  # Coba fallback jika service tidak ada
         except Exception as e:
             logger.error(f"Error during UserService logout: {e}")
-            # Coba fallback jika ada error di service logout    def _fallback_logout(self) -> None:
-            self._fallback_logout()
+            self._fallback_logout()  # Coba fallback jika ada error di service logout
+
+    def _fallback_logout(self) -> None:
         """Fallback logout method if UserService fails or is unavailable."""
         logger.warning("Executing fallback logout.")
         try:
-            # Clear user session using persistent session manager first
-            persistent_manager = get_persistent_session_manager()
-            persistent_manager.clear_session()
+            # Clear cookies
+            # Ini juga akan mencoba membersihkan session state
+            get_cookie_manager().clear_user()
 
-            # Also clear using legacy session manager as backup
-            session_manager = get_session_manager()
-            session_manager.clear_user_session()
+            # Eksplisit membersihkan session state yang relevan dengan sesi pengguna
+            # Hati-hati jangan menghapus state yang dibutuhkan oleh layanan inti jika mereka
+            # di-cache atau dimaksudkan untuk persisten antar sesi (meskipun jarang untuk data pengguna).
+            user_session_keys = ["username", "useremail",
+                                 "role", "signout", "messages", "thread_id"]
+            for key in user_session_keys:
+                if key in st.session_state:
+                    del st.session_state[key]
+
+            # Pastikan signout diatur ke True
+            st.session_state.signout = True
 
             st.success("Logged out successfully (fallback).")
             st.rerun()
@@ -527,33 +510,15 @@ class MainPageManager:
             st.warning("⚠️ Masukkan kode verifikasi terlebih dahulu.")
 
     def run(self) -> None:
-        """Main application entry point with enhanced session persistence."""
-
-        # Early session persistence check (before any UI rendering)
-        session_persistent = ensure_session_persistence()
-
-        if logger.isEnabledFor(logging.DEBUG):
-            debug_session_state()
-
-        # Clear login completion flag on each run to prevent loops
-        if st.session_state.get('login_just_completed', False):
-            st.session_state.login_just_completed = False
-
+        """Main application entry point."""
         self.configure_page()
         self.load_styles()
         self.display_header()
 
-        # Use persistent session status for authentication
-        if session_persistent:
-            username = st.session_state.get('username', 'Unknown')
-            logger.info(
-                f"✅ User authenticated (persistent session): {username} - Displaying dashboard")
+        if self.is_user_authenticated():
             self.display_user_dashboard()
         else:
-            logger.debug("❌ No persistent session - Showing login form")
             self.display_authentication_form()
-
-        logger.debug("=== PAGE RUN END ===")
 
 
 def main():
