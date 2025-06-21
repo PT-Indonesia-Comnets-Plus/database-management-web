@@ -4,3 +4,11 @@ primaryColor="#337ae8"
 secondaryBackgroundColor="#afdbf5"
 backgroundColor="#F9F8FC"
 textColor="#253639"
+
+[server]
+enableCORS=false
+enableXsrfProtection=false
+maxUploadSize=200
+
+[browser]
+gatherUsageStats=false
