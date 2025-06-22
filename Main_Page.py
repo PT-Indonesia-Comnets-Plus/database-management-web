@@ -16,6 +16,7 @@ from core.services.EmailService import EmailService
 from core import initialize_session_state
 from core.utils.load_css import load_custom_css
 from core.utils.cookies import clear_cookies, show_session_restore_notice
+from core.utils.session_debug import add_session_debugging, log_session_event
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -134,33 +135,37 @@ class MainPageManager:
                 <p style='text-align: center; color: #666; font-size: 16px; margin-top: 0px;'>
                     Database Management & AI Assistant Platform
                 </p>
-                """,
-                unsafe_allow_html=True
+                """,                unsafe_allow_html=True
             )
 
         except Exception as e:
             logger.error(f"Error displaying header: {e}")
             # Fallback display in case of any error
             st.markdown(
-                "<p style='text-align: center; color: #666; font-size: 16px;'>Database Management & AI Assistant Platform</p>", unsafe_allow_html=True)
+                "<p style='text-align: center; color: #666; font-size: 16px;'>Database Management & AI Assistant Platform</p>",
+                unsafe_allow_html=True
+            )
 
     def is_user_authenticated(self) -> bool:
         """Check if user is currently authenticated and session is valid."""
         # Check if user service is available for session validation
         if self.user_service:
-            # Use UserService to check session validity (includes timeout check)
-            if not self.user_service.is_session_valid():
-                # Session is invalid/expired, perform logout
-                if not st.session_state.get("signout", True):
-                    # User was logged in but session expired
-                    self.user_service.logout_if_expired()
-                return False
+            # Use enhanced session checking with activity update
+            if hasattr(self.user_service, 'check_and_update_session'):
+                return self.user_service.check_and_update_session()
+            else:
+                # Fallback to existing method
+                if not self.user_service.is_session_valid():
+                    # Session is invalid/expired, perform logout
+                    if not st.session_state.get("signout", True):
+                        # User was logged in but session expired
+                        self.user_service.logout_if_expired()
+                    return False
 
         # Fallback to simple check if UserService is not available
         username_exists = bool(st.session_state.get("username", "").strip())
-        is_signed_out = st.session_state.get("signout", True)
-
         # User is authenticated if username exists and not signed out
+        is_signed_out = st.session_state.get("signout", True)
         return username_exists and not is_signed_out
 
     def display_authentication_form(self) -> None:
@@ -519,7 +524,7 @@ class MainPageManager:
             if st.button("❌ Batal", use_container_width=True):
                 # Clean up verification state
                 if 'show_otp_verification' in st.session_state:
-                    del st.session_state.show_otp_verification               
+                    del st.session_state.show_otp_verification
                 if 'verification_email' in st.session_state:
                     del st.session_state.verification_email
                 if 'pending_registration' in st.session_state and verification_email in st.session_state.pending_registration:
@@ -546,9 +551,15 @@ class MainPageManager:
         self.load_styles()
         self.display_header()
 
+        # Add session debugging for development/debugging
+        add_session_debugging()
+
         if self.is_user_authenticated():
+            log_session_event("user_authenticated", {
+                              "username": st.session_state.get("username")})
             self.display_user_dashboard()
         else:
+            log_session_event("user_not_authenticated")
             self.display_authentication_form()
 
 

@@ -12,7 +12,13 @@ import requests
 import re
 import dns.resolver
 
-from core.utils.cookies import save_user_to_cookie, clear_cookies
+from core.utils.cookies import (
+    save_user_to_cookie,
+    clear_cookies,
+    setup_session_heartbeat,
+    update_session_activity,
+    check_session_timeout
+)
 
 # Session configuration
 SESSION_TIMEOUT_HOURS = 24  # 24 hours session timeout (same as cookies.py)
@@ -94,12 +100,12 @@ class UserService:
             # Password validation
             raise ValidationError("Invalid email format")
         if len(password) < 6:
+            # Additional password validation
             raise ValidationError("Password must be at least 6 characters")
-
-        # Additional password validation
         if len(password) > 30:
-            # Optional: Check for password strength
             raise ValidationError("Password must be less than 128 characters")
+
+        # Optional: Check for password strength
         has_upper = any(c.isupper() for c in password)
         has_lower = any(c.islower() for c in password)
         has_digit = any(c.isdigit() for c in password)
@@ -109,18 +115,25 @@ class UserService:
                 "Password must contain at least one uppercase letter, one lowercase letter, and one number")
 
     def _create_session(self, user, user_data: Dict[str, Any]) -> None:
-        """Create user session using cookies only."""
+        """Create user session with enhanced persistence."""
         try:
             username = user_data.get('username', user.uid)
             email = user.email
             role = user_data['role']
 
-            # Save to cookies with 24-hour timeout
-            cookie_result = save_user_to_cookie(username, email, role)            # Store user_uid for logout logging
-            st.session_state.user_uid = user.uid            
+            # Save to cookies with enhanced persistence
+            cookie_result = save_user_to_cookie(username, email, role)
+
+            # Store user_uid for logout logging
+            st.session_state.user_uid = user.uid
+
             if cookie_result['success']:
                 logger.info(
                     f"Session created successfully for user: {username} using {cookie_result['method']}")
+
+                # Setup session heartbeat for persistence
+                setup_session_heartbeat()
+
             else:
                 logger.warning("Failed to save user data")
 
@@ -804,3 +817,26 @@ class UserService:
         except Exception as e:
             logger.error(f"Failed to complete registration: {e}")
             return False, "An error occurred during verification."
+
+    def check_and_update_session(self) -> bool:
+        """Check session validity and update activity."""
+        try:
+            # Check if session has timed out
+            if check_session_timeout():
+                logger.info("Session timed out, user needs to login again")
+                return False
+
+            # Update session activity if user is logged in
+            if (hasattr(st.session_state, 'username') and
+                st.session_state.username and
+                    not st.session_state.get('signout', True)):
+
+                update_session_activity()
+                setup_session_heartbeat()
+                return True
+
+            return False
+
+        except Exception as e:
+            logger.error(f"Error checking session: {e}")
+            return False
