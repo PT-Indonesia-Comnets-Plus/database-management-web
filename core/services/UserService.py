@@ -138,15 +138,16 @@ class UserService:
             cookie_saved = self._save_user_to_cookie_with_timestamp(
                 username, email, role, login_timestamp)
             if not cookie_saved:
+                # Save to cloud session storage (primary) with timestamp
                 logger.warning("Failed to save user data to cookies")
-
-            # Save to cloud session storage (primary) with timestamp
             try:
                 cloud_session_storage = st.session_state.get(
                     "cloud_session_storage")
                 if cloud_session_storage:
                     session_saved = cloud_session_storage.save_session(
-                        username, email, role, login_timestamp=login_timestamp)
+                        username, email, role,
+                        login_timestamp=login_timestamp,
+                        session_expiry=session_expiry)
                     if session_saved:
                         logger.info(
                             "User session saved to cloud session storage")

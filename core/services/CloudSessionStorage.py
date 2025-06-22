@@ -102,23 +102,32 @@ class CloudSessionStorage:
                     self.storage_methods.append("legacy_cookies")
                     logger.info("Legacy cookies initialized")
             except Exception as e:
+                # Method 5: Session state (always available, temporary)
                 logger.error(f"Failed to initialize legacy cookies: {e}")
-
-        # Method 5: Session state (always available, temporary)
         self.storage_methods.append("session_state")
 
         logger.info(f"Available storage methods: {self.storage_methods}")
 
-    def save_session(self, username: str, email: str, role: str) -> bool:
+    def save_session(self, username: str, email: str, role: str,
+                     login_timestamp: Optional[str] = None, session_expiry: Optional[str] = None) -> bool:
         """Save user session using all available storage mechanisms."""
+        # Use provided timestamps or generate new ones
+        current_time = datetime.now()
+        login_time = datetime.fromisoformat(
+            login_timestamp) if login_timestamp else current_time
+        expiry_time = datetime.fromisoformat(session_expiry) if session_expiry else (
+            current_time + self.session_timeout)
+
         session_data = {
             "username": username,
             "email": email,
             "role": role,
             "signout": False,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": current_time.isoformat(),
+            "login_timestamp": login_time.isoformat(),
+            "session_expiry": expiry_time.isoformat(),
             "session_id": self._generate_session_id(username),
-            "expires_at": (datetime.now() + self.session_timeout).isoformat()
+            "expires_at": expiry_time.isoformat()
         }
 
         success_count = 0
@@ -603,19 +612,18 @@ class CloudSessionStorage:
                 return False
 
             if session_data.get("signout", True):
-                return False
-
-            # Check expiration
-            expires_at_str = session_data.get("expires_at")
-            if expires_at_str:
+                return False            # Check expiration - try both session_expiry and expires_at
+            expiry_str = session_data.get(
+                "session_expiry") or session_data.get("expires_at")
+            if expiry_str:
                 try:
-                    expires_at = datetime.fromisoformat(expires_at_str)
-                    if datetime.now() > expires_at:
+                    expiry_time = datetime.fromisoformat(expiry_str)
+                    if datetime.now() > expiry_time:
                         logger.info("Session expired")
                         return False
                 except (ValueError, TypeError) as e:
                     logger.warning(
-                        f"Invalid expires_at format: {expires_at_str}, error: {e}")
+                        f"Invalid expiry format: {expiry_str}, error: {e}")
                     return False
 
             return True
@@ -632,6 +640,14 @@ class CloudSessionStorage:
             st.session_state.role = session_data.get("role", "")
             st.session_state.signout = session_data.get("signout", True)
             st.session_state.session_id = session_data.get("session_id", "")
+
+            # Set session timing for timeout logic
+            st.session_state.login_timestamp = session_data.get(
+                "login_timestamp", "")
+            st.session_state.session_expiry = session_data.get(
+                "session_expiry", "")
+
+            logger.info("Session state updated with loaded session data")
         except Exception as e:
             logger.error(f"Failed to update session state: {e}")
 
