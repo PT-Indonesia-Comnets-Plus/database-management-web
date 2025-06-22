@@ -467,12 +467,24 @@ class CloudSessionStorage:
                     LIMIT 1
                 """, (session_id,))
                 result = cursor.fetchone()
-
                 if result:
                     session_data_str, expires_at = result
                     cursor.close()
                     self.db_pool.putconn(conn)
-                    return json.loads(session_data_str)
+                    try:
+                        # Handle both string and dict from database
+                        if isinstance(session_data_str, str):
+                            return json.loads(session_data_str)
+                        elif isinstance(session_data_str, dict):
+                            return session_data_str
+                        else:
+                            logger.warning(
+                                f"Unexpected session_data type from DB: {type(session_data_str)}")
+                            return None
+                    except (json.JSONDecodeError, TypeError) as e:
+                        logger.error(
+                            f"Failed to parse session data from database: {e}")
+                        return None
 
             # Fallback: try by username if session_id didn't work
             if username:
@@ -489,7 +501,20 @@ class CloudSessionStorage:
                     session_data_str, expires_at = result
                     cursor.close()
                     self.db_pool.putconn(conn)
-                    return json.loads(session_data_str)
+                    try:
+                        # Handle both string and dict from database
+                        if isinstance(session_data_str, str):
+                            return json.loads(session_data_str)
+                        elif isinstance(session_data_str, dict):
+                            return session_data_str
+                        else:
+                            logger.warning(
+                                f"Unexpected session_data type from DB: {type(session_data_str)}")
+                            return None
+                    except (json.JSONDecodeError, TypeError) as e:
+                        logger.error(
+                            f"Failed to parse session data from database: {e}")
+                        return None
 
             cursor.close()
             self.db_pool.putconn(conn)
@@ -558,13 +583,59 @@ class CloudSessionStorage:
 
     def _clear_session_state(self) -> None:
         """Clear Streamlit session state."""
-        st.session_state.username = ""
-        st.session_state.useremail = ""
-        st.session_state.role = ""
-        st.session_state.signout = True
-        if "session_id" in st.session_state:
-            del st.session_state.session_id    # Utility methods
+        try:
+            st.session_state.username = ""
+            st.session_state.useremail = ""
+            st.session_state.role = ""
+            st.session_state.signout = True
+            if "session_id" in st.session_state:
+                del st.session_state.session_id
+        except Exception as e:
+            logger.error(f"Failed to clear session state: {e}")
 
+    def _is_session_valid(self, session_data: Dict[str, Any]) -> bool:
+        """Check if session data is valid and not expired."""
+        try:
+            if not session_data or not isinstance(session_data, dict):
+                return False
+
+            if not session_data.get("username"):
+                return False
+
+            if session_data.get("signout", True):
+                return False
+
+            # Check expiration
+            expires_at_str = session_data.get("expires_at")
+            if expires_at_str:
+                try:
+                    expires_at = datetime.fromisoformat(expires_at_str)
+                    if datetime.now() > expires_at:
+                        logger.info("Session expired")
+                        return False
+                except (ValueError, TypeError) as e:
+                    logger.warning(
+                        f"Invalid expires_at format: {expires_at_str}, error: {e}")
+                    return False
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Session validation failed: {e}")
+            return False
+
+    def _update_session_state(self, session_data: Dict[str, Any]) -> None:
+        """Update Streamlit session state with loaded session data."""
+        try:
+            st.session_state.username = session_data.get("username", "")
+            st.session_state.useremail = session_data.get("email", "")
+            st.session_state.role = session_data.get("role", "")
+            st.session_state.signout = session_data.get("signout", True)
+            st.session_state.session_id = session_data.get("session_id", "")
+        except Exception as e:
+            logger.error(f"Failed to update session state: {e}")
+
+    # Utility methods
     def _generate_session_id(self, username: str) -> str:
         """Generate unique session ID."""
         timestamp = str(datetime.now().timestamp())
@@ -619,15 +690,28 @@ class CloudSessionStorage:
 
                     results = cursor.fetchall()
                     cursor.close()
-                    self.db_pool.putconn(conn)
-
                     # Try to match with stored sessions
+                    self.db_pool.putconn(conn)
                     for session_data_str, expires_at, username in results:
-                        session_data = json.loads(session_data_str)
-                        if self._is_session_valid(session_data):
-                            logger.info(
-                                f"Potential session found for browser fingerprint: {username}")
-                            return session_data
+                        try:
+                            # Handle both string and dict session_data from database
+                            if isinstance(session_data_str, str):
+                                session_data = json.loads(session_data_str)
+                            elif isinstance(session_data_str, dict):
+                                session_data = session_data_str
+                            else:
+                                logger.warning(
+                                    f"Unexpected session_data type: {type(session_data_str)}")
+                                continue
+
+                            if self._is_session_valid(session_data):
+                                logger.info(
+                                    f"Potential session found for browser fingerprint: {username}")
+                                return session_data
+                        except (json.JSONDecodeError, TypeError) as e:
+                            logger.error(
+                                f"Failed to parse session data for user {username}: {e}")
+                            continue
 
                 except Exception as e:
                     logger.error(f"Database fingerprint lookup failed: {e}")
@@ -692,6 +776,29 @@ class CloudSessionStorage:
                     self.db_pool.putconn(conn)
                 except:
                     pass
+
+    def _resave_to_persistent_storage(self, session_data: Dict[str, Any]) -> None:
+        """Re-save session data to persistent storage methods for backup."""
+        try:
+            # Try to save to STX cookies if available
+            if "stx_cookies" in self.storage_methods and hasattr(self, 'stx_cookie_manager'):
+                try:
+                    self._save_stx_cookies(session_data)
+                    logger.info("Session re-saved to STX cookies")
+                except Exception as e:
+                    logger.warning(f"Failed to re-save to STX cookies: {e}")
+
+            # Try to save to database if available
+            if "database" in self.storage_methods and self.db_pool:
+                try:
+                    self._save_database(session_data)
+                    logger.info("Session re-saved to database")
+                except Exception as e:
+                    logger.warning(f"Failed to re-save to database: {e}")
+
+        except Exception as e:
+            logger.error(
+                f"Failed to re-save session to persistent storage: {e}")
 
 
 # Global instance
