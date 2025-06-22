@@ -121,13 +121,11 @@ def initialize_session_state() -> bool:
         if not hasattr(st.session_state, 'role'):
             st.session_state.role = ""
         if not hasattr(st.session_state, 'signout'):
+            # Only check session expiry if user is actually logged in
             st.session_state.signout = True
-
-        # Only check session expiry if user is actually logged in
         username = st.session_state.get('username', '')
         if username and username.strip() and not st.session_state.get('signout', True):
             # Check if session has expired
-            import time
             from datetime import datetime
             current_time = time.time()
             session_expiry = st.session_state.get('session_expiry')

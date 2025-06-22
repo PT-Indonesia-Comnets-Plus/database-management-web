@@ -104,12 +104,11 @@ def _save_to_url_fallback(username: str, email: str, role: str, login_timestamp:
 
 def _load_from_url_fallback() -> Dict[str, Any]:
     """Load user data from URL parameters or prepared session data."""
-    try:
-        # First check URL parameters
+    try:        # First check URL parameters
         try:
-            query_params = st.experimental_get_query_params()
+            query_params = st.query_params
             if "s" in query_params:  # 's' for session
-                encoded_data = query_params["s"][0]
+                encoded_data = query_params["s"]
                 session_data = _decode_session_data(encoded_data)
                 if session_data and session_data.get("session_expiry", 0) > time.time():
                     logger.debug("Found valid session in URL parameters")
@@ -387,8 +386,9 @@ def load_cookie_to_session() -> bool:
             except Exception as e:
                 logger.debug(f"Failed to load from cookies: {e}")
         else:
-            # Strategy 2: Try URL parameter fallback
             logger.debug("Cookies not available")
+
+        # Strategy 2: Try URL parameter fallback
         logger.debug("Strategy 2: Attempting URL parameter restoration...")
         try:
             fallback_data = _load_from_url_fallback()
@@ -406,8 +406,9 @@ def load_cookie_to_session() -> bool:
             else:
                 logger.debug("URL fallback session expired or not found")
         except Exception as e:
-            # Strategy 3: Check if we already have valid session state
             logger.debug(f"Failed to load from URL fallback: {e}")
+
+        # Strategy 3: Check if we already have valid session state
         logger.debug("Strategy 3: Checking existing session state...")
         if (hasattr(st.session_state, 'username') and
             hasattr(st.session_state, 'useremail') and
@@ -499,12 +500,36 @@ def get_session_url() -> str:
         if "iconnet_url_session" in st.session_state:
             encoded_data = st.session_state["iconnet_url_session"]
             if encoded_data:
-                # Get current URL without query parameters
+                # Try to get the current URL from Streamlit
                 try:
-                    current_url = st.get_option("server.baseUrlPath") or ""
-                    return f"{current_url}?s={encoded_data}"
-                except:
+                    # For Streamlit Cloud, we need to build the URL differently
+                    import os
+
+                    # Check if we're on Streamlit Cloud
+                    if is_streamlit_cloud():
+                        # Get the app URL from environment or construct it
+                        app_name = os.getenv('STREAMLIT_APP_NAME', 'app')
+                        github_repo = os.getenv('GITHUB_REPOSITORY', '')
+
+                        if github_repo:
+                            # Format: https://[app-name]--[encoded-repo].streamlit.app
+                            repo_encoded = github_repo.replace(
+                                '/', '-').replace('_', '-').lower()
+                            base_url = f"https://{app_name}--{repo_encoded}.streamlit.app"
+                        else:
+                            # Fallback for Streamlit Cloud
+                            base_url = "https://share.streamlit.io"
+
+                        return f"{base_url}?s={encoded_data}"
+                    else:
+                        # Local development
+                        return f"http://localhost:8501?s={encoded_data}"
+
+                except Exception as e:
+                    logger.debug(f"Error building full URL: {e}")
+                    # Fallback to relative URL
                     return f"?s={encoded_data}"
+
         return ""
     except Exception as e:
         logger.debug(f"Error generating session URL: {e}")
@@ -514,13 +539,40 @@ def get_session_url() -> str:
 def show_session_restore_notice():
     """Show notice about session restoration with URL."""
     try:
+        # Check if we have a session URL to show
         session_url = get_session_url()
-        if session_url and is_session_valid():
+        is_valid = is_session_valid()
+
+        if is_valid:
             with st.sidebar:
-                st.info(
-                    "💡 **Session Tip**: To maintain your login after refresh, bookmark this URL or save it:")
-                st.code(session_url, language=None)
-                st.caption(
-                    "This URL contains your session data and will keep you logged in even after browser refresh.")
+                st.success("🔒 **Login Status**: Active session")
+
+                # Show session info
+                username = st.session_state.get("username", "")
+                remaining_time = st.session_state.get(
+                    "session_expiry", 0) - time.time()
+                remaining_hours = remaining_time / 3600 if remaining_time > 0 else 0
+
+                if remaining_hours > 1:
+                    st.info(
+                        f"⏱️ Session expires in {remaining_hours:.1f} hours")
+                elif remaining_hours > 0:
+                    remaining_minutes = remaining_time / 60
+                    st.warning(
+                        f"⏱️ Session expires in {remaining_minutes:.0f} minutes")
+
+                # Show persistent URL if available
+                if session_url and "s=" in session_url:
+                    st.markdown("---")
+                    st.info(
+                        "💡 **Persistent Login**: Bookmark this URL to stay logged in after refresh")
+                    st.code(session_url, language=None)
+                    st.caption(
+                        "⚠️ This URL expires in 24 hours. Don't share with others.")
+                else:
+                    st.markdown("---")
+                    st.info("💡 **Session Mode**: Cookie-based login active")
+                    st.caption(
+                        "Your session will persist normally with browser cookies.")
     except Exception as e:
         logger.debug(f"Error showing session restore notice: {e}")
