@@ -304,7 +304,7 @@ class CloudSessionStorage:
                 return None
 
             session_data = {}
-            for key in ["username", "email", "role", "signout", "timestamp", "session_id", "expires_at"]:
+            for key in ["username", "email", "role", "signout", "timestamp", "session_id", "expires_at", "login_timestamp", "session_expiry"]:
                 value = self.legacy_cookies.get(key)
                 if value:
                     session_data[key] = value
@@ -639,13 +639,28 @@ class CloudSessionStorage:
             st.session_state.useremail = session_data.get("email", "")
             st.session_state.role = session_data.get("role", "")
             st.session_state.signout = session_data.get("signout", True)
+            # Set session timing for timeout logic - only if they exist in session data
             st.session_state.session_id = session_data.get("session_id", "")
+            login_timestamp = session_data.get("login_timestamp")
+            session_expiry = session_data.get("session_expiry")
 
-            # Set session timing for timeout logic
-            st.session_state.login_timestamp = session_data.get(
-                "login_timestamp", "")
-            st.session_state.session_expiry = session_data.get(
-                "session_expiry", "")
+            if login_timestamp:
+                st.session_state.login_timestamp = login_timestamp
+            elif not hasattr(st.session_state, 'login_timestamp'):
+                # Set current time as fallback for new sessions
+                st.session_state.login_timestamp = datetime.now().timestamp()
+
+            if session_expiry:
+                st.session_state.session_expiry = session_expiry
+            elif not hasattr(st.session_state, 'session_expiry'):
+                # Set expiry time as fallback for new sessions
+                current_time = getattr(
+                    st.session_state, 'login_timestamp', datetime.now().timestamp())
+                if isinstance(current_time, str):
+                    current_time = datetime.fromisoformat(
+                        current_time).timestamp()
+                st.session_state.session_expiry = current_time + \
+                    (7 * 3600)  # 7 hours
 
             logger.info("Session state updated with loaded session data")
         except Exception as e:
