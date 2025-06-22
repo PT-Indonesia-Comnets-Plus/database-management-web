@@ -132,22 +132,28 @@ class UserService:
             st.session_state.session_expiry = session_expiry
 
             logger.info(
-                f"Session state set - username: {username}, role: {role}, signout: False, expires: {datetime.fromtimestamp(session_expiry)}")
-
-            # Save to cookies (legacy support) with timestamp
+                f"Session state set - username: {username}, role: {role}, signout: False, expires: {datetime.fromtimestamp(session_expiry)}")            # Save to cookies (legacy support) with timestamp
             cookie_saved = self._save_user_to_cookie_with_timestamp(
                 username, email, role, login_timestamp)
+
             if not cookie_saved:
-                # Save to cloud session storage (primary) with timestamp
                 logger.warning("Failed to save user data to cookies")
+
+            # Save to cloud session storage (primary) with timestamp
             try:
                 cloud_session_storage = st.session_state.get(
                     "cloud_session_storage")
                 if cloud_session_storage:
+                    # Convert timestamps to ISO format for cloud storage
+                    login_timestamp_iso = datetime.fromtimestamp(
+                        login_timestamp).isoformat()
+                    session_expiry_iso = datetime.fromtimestamp(
+                        session_expiry).isoformat()
+
                     session_saved = cloud_session_storage.save_session(
                         username, email, role,
-                        login_timestamp=login_timestamp,
-                        session_expiry=session_expiry)
+                        login_timestamp=login_timestamp_iso,
+                        session_expiry=session_expiry_iso)
                     if session_saved:
                         logger.info(
                             "User session saved to cloud session storage")
@@ -335,11 +341,22 @@ class UserService:
                 return False
 
             if not st.session_state.get('username'):
-                return False
-
-            # Check session expiry
+                return False            # Check session expiry
             current_time = time.time()
             session_expiry = st.session_state.get('session_expiry')
+
+            # Normalize session_expiry to Unix timestamp
+            if session_expiry is not None:
+                if isinstance(session_expiry, str):
+                    # Convert ISO format string to Unix timestamp
+                    try:
+                        session_expiry = datetime.fromisoformat(
+                            session_expiry).timestamp()
+                        st.session_state.session_expiry = session_expiry  # Store normalized value
+                    except (ValueError, TypeError) as e:
+                        logger.warning(
+                            f"Invalid session_expiry format: {session_expiry}, error: {e}")
+                        session_expiry = None
 
             if session_expiry is None:
                 # No expiry set - check login timestamp
@@ -348,6 +365,17 @@ class UserService:
                     logger.warning(
                         "No session timestamps found - session invalid")
                     return False
+
+                # Normalize login_timestamp to Unix timestamp
+                if isinstance(login_timestamp, str):
+                    try:
+                        login_timestamp = datetime.fromisoformat(
+                            login_timestamp).timestamp()
+                        st.session_state.login_timestamp = login_timestamp  # Store normalized value
+                    except (ValueError, TypeError) as e:
+                        logger.warning(
+                            f"Invalid login_timestamp format: {login_timestamp}, error: {e}")
+                        return False
 
                 # Calculate expiry from login timestamp
                 session_expiry = login_timestamp + SESSION_TIMEOUT_SECONDS
