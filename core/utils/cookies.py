@@ -13,6 +13,8 @@ SESSION_TIMEOUT_HOURS = 7
 SESSION_TIMEOUT_SECONDS = SESSION_TIMEOUT_HOURS * 3600
 
 # Check if running on Streamlit Cloud
+
+
 def is_streamlit_cloud() -> bool:
     """Detect if running on Streamlit Cloud."""
     import os
@@ -23,20 +25,23 @@ def is_streamlit_cloud() -> bool:
         "streamlit.app" in str(st.get_option("server.address"))
     )
 
+
 # Global variables for singleton pattern
 _cookies_instance = None
 _cookies_initialized = False
 _cookies_available = False
 
 # Initialize cookies with cloud-specific handling
+
+
 def _initialize_cookies():
     """Initialize cookie manager with cloud-specific configurations."""
     global _cookies_instance, _cookies_initialized, _cookies_available
-    
+
     # Return cached instance if already initialized
     if _cookies_initialized:
         return _cookies_instance, _cookies_available
-    
+
     try:
         # Check if we're in a proper Streamlit context
         try:
@@ -54,7 +59,7 @@ def _initialize_cookies():
         # Use a unique key to prevent duplicate key errors
         import uuid
         unique_key = f"CookieManager_{uuid.uuid4().hex[:8]}"
-        
+
         if is_streamlit_cloud():
             # On Streamlit Cloud, cookies might not work reliably
             logger.info(
@@ -77,7 +82,8 @@ def _initialize_cookies():
             try:
                 cookies = EncryptedCookieManager(
                     prefix="Iconnet_Corp_App_v1",
-                    password=st.secrets.get("cookie_password", "super_secret_key"),
+                    password=st.secrets.get(
+                        "cookie_password", "super_secret_key"),
                     key=unique_key
                 )
             except Exception as e:
@@ -122,7 +128,7 @@ def _initialize_cookies():
         _cookies_instance = cookies if cookies_available else None
         _cookies_initialized = True
         _cookies_available = cookies_available
-        
+
         return _cookies_instance, _cookies_available
 
     except Exception as e:
@@ -140,7 +146,7 @@ _initialize_cookies()
 def save_user_to_cookie(username: str, email: str, role: str) -> bool:
     """Save user to cookie (with enhanced cloud handling)."""
     global _cookies_instance, _cookies_available
-    
+
     # Always save to session state as primary storage
     login_timestamp = time.time()
     st.session_state.username = username
@@ -189,7 +195,7 @@ def save_user_to_cookie(username: str, email: str, role: str) -> bool:
 def clear_user_cookie() -> bool:
     """Clear user cookie (with enhanced cloud handling)."""
     global _cookies_instance, _cookies_available
-    
+
     # Always clear session state first (primary storage)
     st.session_state.username = ""
     st.session_state.useremail = ""
@@ -248,7 +254,7 @@ def load_cookie_to_session(session_state) -> bool:
             signout_status = _cookies_instance.get("signout", "True")
             login_timestamp_str = _cookies_instance.get("login_timestamp", "")
             session_expiry_str = _cookies_instance.get("session_expiry", "")
-            
+
             # Parse timestamps
             login_timestamp = None
             session_expiry = None

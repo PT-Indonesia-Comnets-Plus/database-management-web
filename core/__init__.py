@@ -96,7 +96,7 @@ def initialize_session_state() -> bool:
             st.session_state.role = ""
         if not hasattr(st.session_state, 'signout'):
             st.session_state.signout = True
-            
+
         # Only check session expiry if user is actually logged in
         username = st.session_state.get('username', '')
         if username and username.strip() and not st.session_state.get('signout', True):
