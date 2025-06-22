@@ -10,8 +10,13 @@ from firebase_admin import exceptions
 import requests
 import re
 import dns.resolver
+import time
 
 from core.utils.cookies import save_user_to_cookie, clear_user_cookie
+
+# Session configuration
+SESSION_TIMEOUT_HOURS = 7  # 7 hours session timeout
+SESSION_TIMEOUT_SECONDS = SESSION_TIMEOUT_HOURS * 3600
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -114,27 +119,34 @@ class UserService:
             email = user.email
             role = user_data['role']
 
-            # Set session state
+            # Create login timestamp for session timeout
+            login_timestamp = time.time()
+            session_expiry = login_timestamp + SESSION_TIMEOUT_SECONDS
+
+            # Set session state with timeout information
             st.session_state.username = username
             st.session_state.useremail = email
             st.session_state.role = role
             st.session_state.signout = False
+            st.session_state.login_timestamp = login_timestamp
+            st.session_state.session_expiry = session_expiry
 
             logger.info(
-                f"Session state set - username: {username}, role: {role}, signout: False")
+                f"Session state set - username: {username}, role: {role}, signout: False, expires: {datetime.fromtimestamp(session_expiry)}")
 
-            # Save to cookies (legacy support)
-            cookie_saved = save_user_to_cookie(username, email, role)
+            # Save to cookies (legacy support) with timestamp
+            cookie_saved = self._save_user_to_cookie_with_timestamp(
+                username, email, role, login_timestamp)
             if not cookie_saved:
                 logger.warning("Failed to save user data to cookies")
 
-            # Save to cloud session storage (primary)
+            # Save to cloud session storage (primary) with timestamp
             try:
                 cloud_session_storage = st.session_state.get(
                     "cloud_session_storage")
                 if cloud_session_storage:
                     session_saved = cloud_session_storage.save_session(
-                        username, email, role)
+                        username, email, role, login_timestamp=login_timestamp)
                     if session_saved:
                         logger.info(
                             "User session saved to cloud session storage")
@@ -288,6 +300,145 @@ class UserService:
         except Exception as e:
             logger.error(f"Error during logout: {e}")
             raise UserServiceError(f"Logout failed: {e}")
+
+    def _save_user_to_cookie_with_timestamp(self, username: str, email: str, role: str, login_timestamp: float) -> bool:
+        """Save user to cookie with login timestamp for session timeout."""
+        try:
+            # Use the existing cookie function but with additional timestamp handling
+            success = save_user_to_cookie(username, email, role)
+            if success and hasattr(st.session_state, 'cookies') and st.session_state.cookies:
+                # Also save timestamp to cookies if available
+                try:
+                    cookies = st.session_state.cookies
+                    cookies["login_timestamp"] = str(login_timestamp)
+                    cookies["session_expiry"] = str(
+                        login_timestamp + SESSION_TIMEOUT_SECONDS)
+                    cookies.save()
+                except Exception as e:
+                    logger.warning(f"Could not save timestamp to cookies: {e}")
+            return success
+        except Exception as e:
+            logger.error(f"Error saving user with timestamp: {e}")
+            return False
+
+    def is_session_valid(self) -> bool:
+        """
+        Check if current session is valid (not expired).
+
+        Returns:
+            bool: True if session is valid, False if expired or invalid
+        """
+        try:
+            # Check if user is logged in
+            if st.session_state.get('signout', True):
+                return False
+
+            if not st.session_state.get('username'):
+                return False
+
+            # Check session expiry
+            current_time = time.time()
+            session_expiry = st.session_state.get('session_expiry')
+
+            if session_expiry is None:
+                # No expiry set - check login timestamp
+                login_timestamp = st.session_state.get('login_timestamp')
+                if login_timestamp is None:
+                    logger.warning(
+                        "No session timestamps found - session invalid")
+                    return False
+
+                # Calculate expiry from login timestamp
+                session_expiry = login_timestamp + SESSION_TIMEOUT_SECONDS
+                st.session_state.session_expiry = session_expiry
+
+            if current_time > session_expiry:
+                logger.info(
+                    f"Session expired for user {st.session_state.get('username')} at {datetime.fromtimestamp(session_expiry)}")
+                return False
+
+            # Session is still valid
+            remaining_time = session_expiry - current_time
+            logger.debug(
+                f"Session valid for {st.session_state.get('username')}, {remaining_time/3600:.1f} hours remaining")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error checking session validity: {e}")
+            return False
+
+    def get_session_info(self) -> Dict[str, Any]:
+        """
+        Get information about current session including time remaining.
+
+        Returns:
+            Dict containing session information
+        """
+        try:
+            if not self.is_session_valid():
+                return {
+                    'is_valid': False,
+                    'message': 'Session expired or invalid'
+                }
+
+            current_time = time.time()
+            session_expiry = st.session_state.get('session_expiry')
+            login_timestamp = st.session_state.get('login_timestamp')
+
+            if session_expiry and login_timestamp:
+                remaining_seconds = session_expiry - current_time
+                remaining_hours = remaining_seconds / 3600
+
+                login_time = datetime.fromtimestamp(login_timestamp)
+                expiry_time = datetime.fromtimestamp(session_expiry)
+
+                return {
+                    'is_valid': True,
+                    'username': st.session_state.get('username'),
+                    'login_time': login_time,
+                    'expiry_time': expiry_time,
+                    'remaining_hours': remaining_hours,
+                    'remaining_minutes': remaining_seconds / 60,
+                    'session_timeout_hours': SESSION_TIMEOUT_HOURS
+                }
+            else:
+                return {
+                    'is_valid': False,
+                    'message': 'Session timing information not available'
+                }
+
+        except Exception as e:
+            logger.error(f"Error getting session info: {e}")
+            return {
+                'is_valid': False,
+                'message': f'Error retrieving session info: {e}'
+            }
+
+    def logout_if_expired(self) -> bool:
+        """
+        Check if session is expired and logout if needed.
+
+        Returns:
+            bool: True if session was expired and logout performed, False otherwise
+        """
+        try:
+            if not self.is_session_valid():
+                username = st.session_state.get('username', 'Unknown')
+                logger.info(
+                    f"Session expired for user {username}, logging out")
+
+                # Show expiry message before logout
+                st.warning(
+                    f"⏰ Sesi Anda telah berakhir setelah {SESSION_TIMEOUT_HOURS} jam. Silakan login kembali.")
+
+                # Perform logout
+                self.logout()
+                return True
+            return False
+
+        except Exception as e:
+            logger.error(f"Error during session expiry check: {e}")
+            return False
 
     def signup(self, username: str, email: str, password: str, confirm_password: str, role: str) -> None:
         """

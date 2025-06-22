@@ -8,6 +8,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Session timeout configuration (should match UserService)
+SESSION_TIMEOUT_HOURS = 7
+SESSION_TIMEOUT_SECONDS = SESSION_TIMEOUT_HOURS * 3600
+
 # Initialize cookies globally like in your old code
 try:
     cookies = EncryptedCookieManager(
@@ -30,12 +34,18 @@ def save_user_to_cookie(username: str, email: str, role: str) -> bool:
     """Save user to cookie (with fallback handling for Streamlit Cloud)."""
     if COOKIES_AVAILABLE and cookies and cookies.ready():
         try:
+            # Save user data with current timestamp
+            login_timestamp = time.time()
             cookies["username"] = username
             cookies["email"] = email
             cookies["role"] = role
             cookies["signout"] = "False"
+            cookies["login_timestamp"] = str(login_timestamp)
+            cookies["session_expiry"] = str(
+                login_timestamp + SESSION_TIMEOUT_SECONDS)
             cookies.save()
-            logger.info(f"User {username} saved to cookies successfully")
+            logger.info(
+                f"User {username} saved to cookies successfully with session timeout")
             return True
         except Exception as e:
             logger.error(f"Failed to save user to cookies: {e}")
@@ -43,11 +53,14 @@ def save_user_to_cookie(username: str, email: str, role: str) -> bool:
     else:
         logger.warning(
             "Cookies not available, session data saved to session state only")
-        # Update session state as fallback
+        # Update session state as fallback with timestamp
+        login_timestamp = time.time()
         st.session_state.username = username
         st.session_state.useremail = email
         st.session_state.role = role
         st.session_state.signout = False
+        st.session_state.login_timestamp = login_timestamp
+        st.session_state.session_expiry = login_timestamp + SESSION_TIMEOUT_SECONDS
         return False  # Return False to indicate cookies weren't used
 
 
@@ -59,6 +72,8 @@ def clear_user_cookie() -> bool:
             cookies["email"] = ""
             cookies["role"] = ""
             cookies["signout"] = "True"
+            cookies["login_timestamp"] = ""
+            cookies["session_expiry"] = ""
             cookies.save()
 
             # Clear session state immediately
@@ -66,6 +81,10 @@ def clear_user_cookie() -> bool:
             st.session_state.useremail = ""
             st.session_state.role = ""
             st.session_state.signout = True
+            if hasattr(st.session_state, 'login_timestamp'):
+                del st.session_state.login_timestamp
+            if hasattr(st.session_state, 'session_expiry'):
+                del st.session_state.session_expiry
 
             logger.info("User data cleared from cookies and session")
             return True
@@ -76,6 +95,10 @@ def clear_user_cookie() -> bool:
             st.session_state.useremail = ""
             st.session_state.role = ""
             st.session_state.signout = True
+            if hasattr(st.session_state, 'login_timestamp'):
+                del st.session_state.login_timestamp
+            if hasattr(st.session_state, 'session_expiry'):
+                del st.session_state.session_expiry
             return False
     else:
         # Clear session state as fallback
@@ -83,6 +106,10 @@ def clear_user_cookie() -> bool:
         st.session_state.useremail = ""
         st.session_state.role = ""
         st.session_state.signout = True
+        if hasattr(st.session_state, 'login_timestamp'):
+            del st.session_state.login_timestamp
+        if hasattr(st.session_state, 'session_expiry'):
+            del st.session_state.session_expiry
         logger.warning("Cookies not available, cleared session state only")
         return False
 
@@ -95,11 +122,43 @@ def load_cookie_to_session(session_state) -> bool:
             email = cookies.get("email", "") or ""
             role = cookies.get("role", "") or ""
             signout_status = cookies.get("signout", "True")
+            login_timestamp_str = cookies.get("login_timestamp", "")
+            session_expiry_str = cookies.get("session_expiry", "")
+
+            # Parse timestamps
+            login_timestamp = None
+            session_expiry = None
+
+            try:
+                if login_timestamp_str:
+                    login_timestamp = float(login_timestamp_str)
+                if session_expiry_str:
+                    session_expiry = float(session_expiry_str)
+            except (ValueError, TypeError):
+                logger.warning("Invalid timestamp format in cookies")
+                # If we can't parse timestamps, generate new ones if user data exists
+                if username and signout_status.lower() == "false":
+                    current_time = time.time()
+                    login_timestamp = current_time
+                    # Check session expiry before loading
+                    session_expiry = current_time + SESSION_TIMEOUT_SECONDS
+            current_time = time.time()
+            if session_expiry and current_time > session_expiry:
+                logger.info(
+                    f"Session expired for user {username}, clearing session")
+                clear_user_cookie()
+                return False
 
             session_state.username = username
             session_state.useremail = email
             session_state.role = role
             session_state.signout = signout_status == "True"
+
+            # Set timestamp information
+            if login_timestamp:
+                session_state.login_timestamp = login_timestamp
+            if session_expiry:
+                session_state.session_expiry = session_expiry
 
             # Log successful cookie load
             if username and email and signout_status == "False":

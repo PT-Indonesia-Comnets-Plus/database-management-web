@@ -10,6 +10,7 @@ from .views import dashboard, search, update_data, chatbot, add_column
 from core.services.AssetDataService import AssetDataService
 from psycopg2 import pool
 from core.utils.load_css import load_custom_css
+from core.utils.session_manager import ensure_valid_session, display_session_warning
 
 
 class HomePage:
@@ -46,7 +47,7 @@ class HomePage:
                 menu_title="Main Menu",
                 options=["Dashboard", "Search Assets", "Upload Assets", "Chatbot",
                          "Add Column"],                icons=["speedometer2", "search", "cloud-upload", "chat-dots",
-                       "pencil-square"],  # Sesuaikan ikon
+                                                              "pencil-square"],  # Sesuaikan ikon
                 menu_icon="house-door-fill",  # Ikon menu utama
                 default_index=0,
                 orientation="vertical",
@@ -76,14 +77,16 @@ class HomePage:
 
     def render(self):
         """Renders the complete Home Page."""
+        # Check session validity first
+        if not ensure_valid_session():
+            return
+
         self.configure_page()
         # Load custom CSS
         load_custom_css(os.path.join("static", "css", "style.css"))
 
-        # --- Authentication Check ---
-        if "username" not in st.session_state or not st.session_state.username:
-            st.warning("🔒 You must log in first to access this page.")
-            st.page_link("Main_Page.py", label="Go to Login", icon="🏠")
-            return
+        # Display session warning if needed
+        display_session_warning()
+
         selected_option = self.render_sidebar()
         self.render_page(selected_option)

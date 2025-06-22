@@ -7,6 +7,7 @@ from core import initialize_session_state
 from PIL import Image, ImageOps
 from .views import dashboard, rag, verify_users
 from core.services.RAG import RAGService
+from core.utils.session_manager import ensure_valid_session, display_session_warning
 
 
 class AdminPage:
@@ -70,8 +71,7 @@ class AdminPage:
                     "menu-title": {"font-size": "24px", "font-weight": "bold", "color": "#546E7A"},
                     "icon": {"color": "#546E7A", "font-size": "18px"},
                     "nav-link": {"color": "#546E7A", "font-size": "18px", "text-align": "left", "margin": "5px"},
-                    "nav-link-selected": {"background-color": "#42c2ff", "color": "#FFFFFF", "font-weight": "bold"},
-                }
+                    "nav-link-selected": {"background-color": "#42c2ff", "color": "#FFFFFF", "font-weight": "bold"}, }
             )
         return selected_option
 
@@ -86,17 +86,18 @@ class AdminPage:
 
     def render(self):
         """Renders the complete Admin Page."""
+        # Check session validity first
+        if not ensure_valid_session():
+            return
+
         self.configure_page()
         initialize_session_state()
         self.load_css("static/css/style.css")  # Pastikan path CSS benar
 
-        # --- Authentication and Authorization Check ---
-        # Pindahkan ini ke awal render untuk efisiensi
-        if "username" not in st.session_state or not st.session_state.username:
-            st.warning("🔒 You must log in first to access this page.")
-            st.page_link("Main_Page.py", label="Go to Login", icon="🏠")
-            return  # Stop rendering further
+        # Display session warning if needed
+        display_session_warning()
 
+        # --- Authorization Check for Admin Role ---
         if "role" not in st.session_state or st.session_state.role != "Admin":
             st.error("🚫 You are not authorized to view this page.")
             st.info(
