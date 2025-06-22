@@ -387,9 +387,7 @@ class UserService:
             if current_time > session_expiry:
                 logger.info(
                     f"Session expired for user {st.session_state.get('username')} at {datetime.fromtimestamp(session_expiry)}")
-                return False
-
-            # Session is still valid
+                return False            # Session is still valid
             remaining_time = session_expiry - current_time
             logger.debug(
                 f"Session valid for {st.session_state.get('username')}, {remaining_time/3600:.1f} hours remaining")
@@ -418,6 +416,31 @@ class UserService:
             login_timestamp = st.session_state.get('login_timestamp')
 
             if session_expiry and login_timestamp:
+                # Normalize timestamps to float before calculations
+                if isinstance(session_expiry, str):
+                    try:
+                        session_expiry = datetime.fromisoformat(
+                            session_expiry).timestamp()
+                    except (ValueError, TypeError) as e:
+                        logger.warning(
+                            f"Invalid session_expiry format in get_session_info: {session_expiry}, error: {e}")
+                        return {
+                            'is_valid': False,
+                            'message': 'Invalid session expiry format'
+                        }
+
+                if isinstance(login_timestamp, str):
+                    try:
+                        login_timestamp = datetime.fromisoformat(
+                            login_timestamp).timestamp()
+                    except (ValueError, TypeError) as e:
+                        logger.warning(
+                            f"Invalid login_timestamp format in get_session_info: {login_timestamp}, error: {e}")
+                        return {
+                            'is_valid': False,
+                            'message': 'Invalid login timestamp format'
+                        }
+
                 remaining_seconds = session_expiry - current_time
                 remaining_hours = remaining_seconds / 3600
 
