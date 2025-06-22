@@ -8,15 +8,6 @@ from .utils.firebase_config import get_firebase_app
 from .utils.database import connect_db
 from .utils.cloud_config import configure_for_cloud, is_streamlit_cloud
 
-# Import services
-from .services.UserService import UserService
-from .services.UserDataService import UserDataService
-from .services.EmailService import EmailService
-from .services.RAG import RAGService
-from .services.AssetDataService import AssetDataService
-from .services.SessionStorageService import get_session_storage_service
-from .services.CloudSessionStorage import get_cloud_session_storage
-
 logger = logging.getLogger(__name__)
 
 
@@ -58,11 +49,11 @@ def initialize_session_state() -> bool:
                 logger.error(f"Failed to initialize Firebase: {e}")
                 st.session_state.fs = None
                 st.session_state.auth = None
+                # Initialize Cloud Session Storage Service (NEW - optimized for Streamlit Cloud)
                 st.session_state.fs_config = None
-
-        # Initialize Cloud Session Storage Service (NEW - optimized for Streamlit Cloud)
         if "cloud_session_storage" not in st.session_state:
             try:
+                from .services.CloudSessionStorage import get_cloud_session_storage
                 cloud_session_storage = get_cloud_session_storage(
                     db_pool=st.session_state.get("db"),
                     app_prefix="iconnet_app"
@@ -78,6 +69,7 @@ def initialize_session_state() -> bool:
         # Initialize Session Storage Service (Legacy fallback)
         if "session_storage_service" not in st.session_state:
             try:
+                from .services.SessionStorageService import get_session_storage_service
                 session_storage_service = get_session_storage_service(
                     db_pool=st.session_state.get("db"),
                     firestore=st.session_state.get("fs")
@@ -191,11 +183,10 @@ def initialize_session_state() -> bool:
                               st.session_state.get("fs_config") is not None)
             db_ready = st.session_state.get("db") is not None
             storage_ready = st.session_state.get("storage") is not None
-            smtp_ready = "smtp" in st.secrets
-
-            # Initialize EmailService
+            smtp_ready = "smtp" in st.secrets            # Initialize EmailService
             if smtp_ready and "email_service" not in st.session_state:
                 try:
+                    from .services.EmailService import EmailService
                     st.session_state.email_service = EmailService(
                         smtp_server=st.secrets["smtp"]["server"],
                         smtp_port=st.secrets["smtp"]["port"],
@@ -204,11 +195,11 @@ def initialize_session_state() -> bool:
                     )
                     logger.info("EmailService initialized")
                 except Exception as e:
+                    # Initialize UserDataService
                     logger.error(f"Failed to initialize EmailService: {e}")
-
-            # Initialize UserDataService
             if firebase_ready and "user_data_service" not in st.session_state:
                 try:
+                    from .services.UserDataService import UserDataService
                     st.session_state.user_data_service = UserDataService(
                         firestore=st.session_state.fs
                     )
@@ -221,6 +212,7 @@ def initialize_session_state() -> bool:
                 st.session_state.get("email_service") is not None and
                     "user_service" not in st.session_state):
                 try:
+                    from .services.UserService import UserService
                     st.session_state.user_service = UserService(
                         firestore=st.session_state.fs,
                         auth=st.session_state.auth,
@@ -229,11 +221,11 @@ def initialize_session_state() -> bool:
                     )
                     logger.info("UserService initialized")
                 except Exception as e:
+                    # Initialize RAGService
                     logger.error(f"Failed to initialize UserService: {e}")
-
-            # Initialize RAGService
             if db_ready and storage_ready and "rag_service" not in st.session_state:
                 try:
+                    from .services.RAG import RAGService
                     st.session_state.rag_service = RAGService(
                         db_pool=st.session_state.db,
                         storage_client=st.session_state.storage
@@ -245,6 +237,7 @@ def initialize_session_state() -> bool:
             # Initialize AssetDataService
             if db_ready and "asset_data_service" not in st.session_state:
                 try:
+                    from .services.AssetDataService import AssetDataService
                     st.session_state.asset_data_service = AssetDataService(
                         db_pool=st.session_state.db
                     )

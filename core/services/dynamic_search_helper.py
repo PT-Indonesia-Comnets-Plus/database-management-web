@@ -6,8 +6,10 @@ Menyediakan unified search interface yang menggabungkan static dan dynamic colum
 
 import pandas as pd
 import logging
-from typing import Dict, List, Optional, Any, Tuple
-from core.services.AssetDataService import AssetDataService
+from typing import Dict, List, Optional, Any, Tuple, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.services.AssetDataService import AssetDataService
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +23,7 @@ class UnifiedSearchService:
     4. Fuzzy search dan exact match
     """
 
-    def __init__(self, asset_data_service: AssetDataService):
+    def __init__(self, asset_data_service: "AssetDataService"):
         self.asset_data_service = asset_data_service
         self._column_cache = {}
         self._search_cache = {}
@@ -631,7 +633,7 @@ class UnifiedSearchService:
 unified_search_service = None
 
 
-def get_unified_search_service(asset_data_service: AssetDataService) -> UnifiedSearchService:
+def get_unified_search_service(asset_data_service: "AssetDataService") -> UnifiedSearchService:
     """Get or create unified search service instance."""
     global unified_search_service
     if unified_search_service is None:
