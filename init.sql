@@ -175,3 +175,36 @@ VALUES
     ('user_terminals', 'maintenance_date', 'Tanggal Maintenance', 'Tanggal maintenance terakhir', 'DATE', true),
     ('user_terminals', 'priority_level', 'Level Prioritas', 'Level prioritas untuk maintenance', 'INTEGER', true)
 ON CONFLICT (table_name, column_name) DO NOTHING;
+
+-- Cloud User Sessions Table for Secure Session Management
+-- This table provides device-specific session isolation
+CREATE TABLE IF NOT EXISTS cloud_user_sessions (
+    id SERIAL PRIMARY KEY,
+    session_id VARCHAR(255) UNIQUE NOT NULL,
+    username VARCHAR(255) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    role VARCHAR(100) NOT NULL,
+    device_fingerprint VARCHAR(255) NOT NULL,
+    device_info TEXT DEFAULT '{}',
+    login_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    session_expiry TIMESTAMP NOT NULL,
+    last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Indexes for cloud_user_sessions table
+CREATE INDEX IF NOT EXISTS idx_cloud_user_sessions_session_id 
+ON cloud_user_sessions(session_id);
+
+CREATE INDEX IF NOT EXISTS idx_cloud_user_sessions_username 
+ON cloud_user_sessions(username);
+
+CREATE INDEX IF NOT EXISTS idx_cloud_user_sessions_device_fingerprint 
+ON cloud_user_sessions(device_fingerprint);
+
+CREATE INDEX IF NOT EXISTS idx_cloud_user_sessions_user_device 
+ON cloud_user_sessions(username, device_fingerprint);
+
+CREATE INDEX IF NOT EXISTS idx_cloud_user_sessions_expiry 
+ON cloud_user_sessions(session_expiry);

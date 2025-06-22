@@ -2,6 +2,7 @@
 
 import random
 import string
+import time
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 import logging
@@ -10,7 +11,6 @@ from firebase_admin import exceptions, auth as firebase_auth
 import requests
 import re
 import dns.resolver
-import time
 
 from core.utils.cookies import save_user_to_cookie, clear_user_cookie
 
@@ -18,22 +18,21 @@ from core.utils.cookies import save_user_to_cookie, clear_user_cookie
 SESSION_TIMEOUT_HOURS = 7  # 7 hours session timeout
 SESSION_TIMEOUT_SECONDS = SESSION_TIMEOUT_HOURS * 3600
 
-# Configure logging
 logger = logging.getLogger(__name__)
+
+
+class ValidationError(Exception):
+    """Custom exception for validation errors."""
+    pass
+
+
+class AuthenticationError(Exception):
+    """Custom exception for authentication errors."""
+    pass
 
 
 class UserServiceError(Exception):
     """Custom exception for user service errors."""
-    pass
-
-
-class ValidationError(UserServiceError):
-    """Exception raised for validation errors."""
-    pass
-
-
-class AuthenticationError(UserServiceError):
-    """Exception raised for authentication errors."""
     pass
 
 
@@ -66,37 +65,34 @@ class UserService:
 
     def _validate_login_input(self, email: str, password: str) -> None:
         """Validate login input parameters."""
-        if not email or not password:
-            raise ValidationError("Email and password are required")
+        if not email or not email.strip():
+            raise ValidationError("Email is required")
 
-        # Basic email format validation
-        if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
-            raise ValidationError("Invalid email format")
-
-        if len(password) < 6:
-            raise ValidationError("Password must be at least 6 characters")
-
-    def _validate_signup_input(self, username: str, email: str, password: str, confirm_password: str) -> None:
-        """Validate signup input parameters."""
-        if not all([username, email, password, confirm_password]):
-            raise ValidationError("All fields are required")
-
-        if password != confirm_password:
-            raise ValidationError("Passwords do not match")
-
-        # Username validation
-        if len(username) < 3 or len(username) > 30:
-            raise ValidationError("Username must be 3-30 characters")
-
-        if not re.match(r'^[a-zA-Z0-9_]+$', username):
-            raise ValidationError(
-                "Username can only contain letters, numbers, and underscores")
+        if not password or not password.strip():
+            raise ValidationError("Password is required")
 
         # Email format validation
         if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
             raise ValidationError("Invalid email format")
 
-        # Password validation
+    def _validate_signup_input(self, username: str, email: str, password: str, confirm_password: str) -> None:
+        """Validate signup input parameters."""
+        if not username or not username.strip():
+            raise ValidationError("Username is required")
+
+        if not email or not email.strip():
+            raise ValidationError("Email is required")
+
+        if not password or not password.strip():
+            raise ValidationError("Password is required")
+
+        if password != confirm_password:
+            raise ValidationError("Passwords do not match")
+
+        # Email format validation
+        if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
+            # Password validation
+            raise ValidationError("Invalid email format")
         if len(password) < 6:
             raise ValidationError("Password must be at least 6 characters")
 
@@ -113,83 +109,26 @@ class UserService:
                 "Password must contain at least one uppercase letter, one lowercase letter, and one number")
 
     def _create_session(self, user, user_data: Dict[str, Any]) -> None:
-        """Create user session after successful authentication."""
+        """Create user session using cookies only."""
         try:
             username = user_data.get('username', user.uid)
             email = user.email
             role = user_data['role']
 
-            # Create login timestamp for session timeout
-            login_timestamp = time.time()
-            session_expiry = login_timestamp + SESSION_TIMEOUT_SECONDS
+            # Save to cookies with 7-hour timeout
+            cookie_saved = save_user_to_cookie(username, email, role)
 
-            # Set session state with timeout information
-            st.session_state.username = username
-            st.session_state.useremail = email
-            st.session_state.role = role
-            st.session_state.signout = False
-            st.session_state.login_timestamp = login_timestamp
-            st.session_state.session_expiry = session_expiry
-            logger.info(
-                f"Session state set - username: {username}, role: {role}, signout: False, expires: {datetime.fromtimestamp(session_expiry)}")
+            # Store user_uid for logout logging
+            st.session_state.user_uid = user.uid
 
-            # Save to cookies (legacy support) with timestamp
-            cookie_saved = self._save_user_to_cookie_with_timestamp(
-                username, email, role, login_timestamp)
-
-            if not cookie_saved:
+            if cookie_saved:
+                logger.info(
+                    f"Session created successfully for user: {username}")
+            else:
                 logger.warning("Failed to save user data to cookies")
-
-            # Save to cloud session storage (primary) with timestamp
-            try:
-                cloud_session_storage = st.session_state.get(
-                    "cloud_session_storage")
-                if cloud_session_storage:
-                    # Convert timestamps to ISO format for cloud storage
-                    login_timestamp_iso = datetime.fromtimestamp(
-                        login_timestamp).isoformat()
-                    session_expiry_iso = datetime.fromtimestamp(
-                        session_expiry).isoformat()
-
-                    session_saved = cloud_session_storage.save_session(
-                        username, email, role,
-                        login_timestamp=login_timestamp_iso,
-                        session_expiry=session_expiry_iso)
-                    if session_saved:
-                        logger.info(
-                            "User session saved to cloud session storage")
-                    else:
-                        logger.warning(
-                            "Failed to save to cloud session storage")
-                else:
-                    logger.warning("Cloud session storage not available")
-            except Exception as e:
-                logger.error(f"Error saving to cloud session storage: {e}")
-
-            # Save to legacy session storage (fallback)
-            try:
-                session_storage_service = st.session_state.get(
-                    "session_storage_service")
-                if session_storage_service:
-                    session_saved = session_storage_service.save_user_session(
-                        username, email, role)
-                    if session_saved:
-                        logger.info(
-                            "User session saved to legacy session storage service")
-                    else:
-                        logger.warning(
-                            "Failed to save to legacy session storage service")
-                else:
-                    logger.warning(
-                        "Legacy session storage service not available")
-            except Exception as e:
-                logger.error(
-                    f"Error saving to legacy session storage service: {e}")
 
             # Log activity
             self.save_login_logout(user.uid, "login")
-
-            logger.info(f"Session created successfully for user: {username}")
 
         except Exception as e:
             logger.error(f"Failed to create session: {e}")
@@ -227,566 +166,646 @@ class UserService:
 
             # Check email verification status from Firestore (our custom OTP verification)
             if not user_doc_data.get("email_verified", False):
-                st.warning("Email not verified. Please check your inbox.")
+                st.warning(
+                    "Your email is not verified. Please check your email and verify your account.")
+                return            # Check if user is approved by admin
+            # Check both 'verified' (boolean) and 'status' (string) fields for compatibility
+            verified_field = user_doc_data.get("verified", False)
+            status_field = str(user_doc_data.get("status", "")).strip()
+
+            is_verified = (
+                verified_field is True or
+                status_field.lower() in ["verified", "approved", "active"]
+            )
+
+            logger.info(
+                f"User verification check - Email: {email}, verified field: {verified_field}, status field: '{status_field}', is_verified: {is_verified}")
+
+            if not is_verified:
+                logger.warning(
+                    f"User {email} login blocked - not verified. verified={verified_field}, status='{status_field}'")
+                st.warning(
+                    "Your account is pending admin approval. Please wait for verification.")
                 return
 
-            if user_doc_data.get("status") != "Verified":
-                st.warning("Your account is not verified by admin yet.")
-                return
-
-            # User is verified, create session and login
+            # Create session after successful validation
             self._create_session(user, user_doc_data)
-            st.success(f"Login successful as {user_doc_data['role']}!")
+
+            st.success(
+                f"Welcome back, {user_doc_data.get('username', user.uid)}!")
+
         except ValidationError as e:
+            logger.warning(f"Login validation failed: {e}")
             st.warning(str(e))
-        except exceptions.FirebaseError as e:
-            logger.error(f"Firebase error during login: {e}")
-            st.warning(f"A Firebase error occurred: {e}")
+        except AuthenticationError as e:
+            logger.warning(f"Authentication failed: {e}")
+            st.warning(str(e))
         except Exception as e:
-            logger.error(f"Unexpected error during login: {e}")
-            st.error(f"An unexpected error occurred: {e}")
+            logger.error(f"Login failed: {e}")
+            st.error("An error occurred during login. Please try again.")
 
     def logout(self) -> None:
-        """
-        Log out the current user and clean up session data.
-
-        Raises:
-            UserServiceError: If logout process fails
-        """
+        """Log out the current user and clear session."""
         try:
-            username = st.session_state.get('username', '')
-            if username:
-                self.save_login_logout(username, "logout")
+            username = st.session_state.get("username", "")
+            user_uid = st.session_state.get("user_uid", "")
 
-            # Clear legacy cookies
+            # Clear cookies and session state
             clear_user_cookie()
 
-            # Clear cloud session storage (primary)
-            try:
-                cloud_session_storage = st.session_state.get(
-                    "cloud_session_storage")
-                if cloud_session_storage:
-                    session_cleared = cloud_session_storage.clear_session(
-                        username)
-                    if session_cleared:
-                        logger.info(
-                            "User session cleared from cloud session storage")
-                    else:
-                        logger.warning("Failed to clear cloud session storage")
-                else:
-                    logger.warning(
-                        "Cloud session storage not available for logout")
-            except Exception as e:
-                logger.error(f"Error clearing cloud session storage: {e}")
+            # Log logout activity
+            if user_uid:
+                self.save_login_logout(user_uid, "logout")
 
-            # Clear legacy session storage service (fallback)
-            try:
-                session_storage_service = st.session_state.get(
-                    "session_storage_service")
-                if session_storage_service:
-                    session_cleared = session_storage_service.clear_user_session(
-                        username)
-                    if session_cleared:
-                        logger.info(
-                            "User session cleared from legacy session storage service")
-                    else:
-                        logger.warning(
-                            "Failed to clear legacy session storage service")
-                else:
-                    logger.warning(
-                        "Legacy session storage service not available for logout")
-            except Exception as e:
-                logger.error(
-                    f"Error clearing legacy session storage service: {e}")
-
-            # Clear session state
-            st.session_state.signout = True
-            st.session_state.username = ''
-            st.session_state.useremail = ''
-            st.session_state.role = ''
-
-            logger.info("User logged out successfully")
+            logger.info(f"User {username} logged out successfully")
 
         except Exception as e:
             logger.error(f"Error during logout: {e}")
-            raise UserServiceError(f"Logout failed: {e}")
-
-    def _save_user_to_cookie_with_timestamp(self, username: str, email: str, role: str, login_timestamp: float) -> bool:
-        """Save user to cookie with login timestamp for session timeout."""
-        try:
-            # Use the existing cookie function but with additional timestamp handling
-            success = save_user_to_cookie(username, email, role)
-            if success and hasattr(st.session_state, 'cookies') and st.session_state.cookies:
-                # Also save timestamp to cookies if available
-                try:
-                    cookies = st.session_state.cookies
-                    cookies["login_timestamp"] = str(login_timestamp)
-                    cookies["session_expiry"] = str(
-                        login_timestamp + SESSION_TIMEOUT_SECONDS)
-                    cookies.save()
-                except Exception as e:
-                    logger.warning(f"Could not save timestamp to cookies: {e}")
-            return success
-        except Exception as e:
-            logger.error(f"Error saving user with timestamp: {e}")
-            return False
-
-    def is_session_valid(self) -> bool:
-        """
-        Check if current session is valid (not expired).
-
-        Returns:
-            bool: True if session is valid, False if expired or invalid
-        """
-        try:
-            # Check if user is logged in
-            if st.session_state.get('signout', True):
-                return False
-
-            if not st.session_state.get('username'):
-                return False
-
-            # Check session expiry
-            current_time = time.time()
-            session_expiry = st.session_state.get('session_expiry')
-
-            # Normalize session_expiry to Unix timestamp
-            if session_expiry is not None:
-                if isinstance(session_expiry, str):
-                    # Convert ISO format string to Unix timestamp
-                    try:
-                        session_expiry = datetime.fromisoformat(
-                            session_expiry).timestamp()
-                        st.session_state.session_expiry = session_expiry  # Store normalized value
-                    except (ValueError, TypeError) as e:
-                        logger.warning(
-                            f"Invalid session_expiry format: {session_expiry}, error: {e}")
-                        session_expiry = None
-
-            if session_expiry is None:
-                # No expiry set - check login timestamp
-                login_timestamp = st.session_state.get('login_timestamp')
-                if login_timestamp is None:
-                    logger.warning(
-                        "No session timestamps found - session invalid")
-                    return False
-
-                # Normalize login_timestamp to Unix timestamp
-                if isinstance(login_timestamp, str):
-                    try:
-                        login_timestamp = datetime.fromisoformat(
-                            login_timestamp).timestamp()
-                        st.session_state.login_timestamp = login_timestamp  # Store normalized value
-                    except (ValueError, TypeError) as e:
-                        logger.warning(
-                            f"Invalid login_timestamp format: {login_timestamp}, error: {e}")
-                        return False
-
-                # Calculate expiry from login timestamp
-                session_expiry = login_timestamp + SESSION_TIMEOUT_SECONDS
-                st.session_state.session_expiry = session_expiry
-
-            if current_time > session_expiry:
-                logger.info(
-                    f"Session expired for user {st.session_state.get('username')} at {datetime.fromtimestamp(session_expiry)}")
-                return False            # Session is still valid
-            remaining_time = session_expiry - current_time
-            logger.debug(
-                f"Session valid for {st.session_state.get('username')}, {remaining_time/3600:.1f} hours remaining")
-            return True
-
-        except Exception as e:
-            logger.error(f"Error checking session validity: {e}")
-            return False
-
-    def get_session_info(self) -> Dict[str, Any]:
-        """
-        Get information about current session including time remaining.
-
-        Returns:
-            Dict containing session information
-        """
-        try:
-            if not self.is_session_valid():
-                return {
-                    'is_valid': False,
-                    'message': 'Session expired or invalid'
-                }
-
-            current_time = time.time()
-            session_expiry = st.session_state.get('session_expiry')
-            login_timestamp = st.session_state.get('login_timestamp')
-
-            if session_expiry and login_timestamp:
-                # Normalize timestamps to float before calculations
-                if isinstance(session_expiry, str):
-                    try:
-                        session_expiry = datetime.fromisoformat(
-                            session_expiry).timestamp()
-                    except (ValueError, TypeError) as e:
-                        logger.warning(
-                            f"Invalid session_expiry format in get_session_info: {session_expiry}, error: {e}")
-                        return {
-                            'is_valid': False,
-                            'message': 'Invalid session expiry format'
-                        }
-
-                if isinstance(login_timestamp, str):
-                    try:
-                        login_timestamp = datetime.fromisoformat(
-                            login_timestamp).timestamp()
-                    except (ValueError, TypeError) as e:
-                        logger.warning(
-                            f"Invalid login_timestamp format in get_session_info: {login_timestamp}, error: {e}")
-                        return {
-                            'is_valid': False,
-                            'message': 'Invalid login timestamp format'
-                        }
-
-                remaining_seconds = session_expiry - current_time
-                remaining_hours = remaining_seconds / 3600
-
-                login_time = datetime.fromtimestamp(login_timestamp)
-                expiry_time = datetime.fromtimestamp(session_expiry)
-
-                return {
-                    'is_valid': True,
-                    'username': st.session_state.get('username'),
-                    'login_time': login_time,
-                    'expiry_time': expiry_time,
-                    'remaining_hours': remaining_hours,
-                    'remaining_minutes': remaining_seconds / 60,
-                    'session_timeout_hours': SESSION_TIMEOUT_HOURS
-                }
-            else:
-                return {
-                    'is_valid': False,
-                    'message': 'Session timing information not available'
-                }
-
-        except Exception as e:
-            logger.error(f"Error getting session info: {e}")
-            return {
-                'is_valid': False,
-                'message': f'Error retrieving session info: {e}'
-            }
-
-    def logout_if_expired(self) -> bool:
-        """
-        Check if session is expired and logout if needed.
-
-        Returns:
-            bool: True if session was expired and logout performed, False otherwise
-        """
-        try:
-            if not self.is_session_valid():
-                username = st.session_state.get('username', 'Unknown')
-                logger.info(
-                    f"Session expired for user {username}, logging out")
-
-                # Show expiry message before logout
-                st.warning(
-                    f"⏰ Sesi Anda telah berakhir setelah {SESSION_TIMEOUT_HOURS} jam. Silakan login kembali.")
-
-                # Perform logout
-                self.logout()
-                return True
-            return False
-
-        except Exception as e:
-            logger.error(f"Error during session expiry check: {e}")
-            return False
-
-    def signup(self, username: str, email: str, password: str, confirm_password: str, role: str) -> None:
-        """
-        Register a new user account with OTP verification.
-        Note: Input validation should be done before calling this method.
-
-        Args:
-            username: Unique username
-            email: User email address
-            password: User password
-            confirm_password: Password confirmation
-            role: User role
-
-        Raises:
-            ValidationError: If input validation fails
-            AuthenticationError: If user already exists
-        """
-        try:
-            self._validate_signup_input(
-                username, email, password, confirm_password)
-
-            # Check if username already exists in Firestore
-            existing_users = self.fs.collection('users').where(
-                'username', '==', username).limit(1).get()
-            if existing_users:
-                st.warning("Username already taken. Please choose another.")
-                return            # Check if email already exists in Firebase Auth
-            try:
-                existing_user = self.auth.get_user_by_email(email)
-                if existing_user:
-                    st.warning(
-                        "Email already registered. Please use a different email or try logging in.")
-                    return
-            except firebase_auth.UserNotFoundError:
-                # This is good - email doesn't exist yet
-                pass
-            except Exception as e:
-                # Handle other potential Firebase errors
-                logger.warning(f"Error checking existing user: {e}")
-                pass
-
-            # Generate and send OTP
-            success, otp_message = self.send_verification_otp(email)
-
-            if not success:
-                st.error(otp_message)
-                return
-
-            # Store registration data in session for later completion
-            if 'pending_registration' not in st.session_state:
-                st.session_state.pending_registration = {}
-
-            # Debug: Log what we're storing
-            logger.info(
-                f"Storing registration data - Username: {username}, Email: {email}, Password length: {len(password)}")
-
-            st.session_state.pending_registration[email] = {
-                'username': username,
-                'password': password,
-                'role': role,
-                'timestamp': datetime.now()
-            }
-
-            # Debug: Verify what was stored
-            stored_data = st.session_state.pending_registration[email]
-            logger.info(
-                f"Verified stored data - Password length: {len(stored_data.get('password', ''))}")
-
-            # Set flag to show OTP verification form
-            st.success(otp_message)
-            st.session_state.show_otp_verification = True
-            st.session_state.verification_email = email
-
-        except ValidationError as e:
-            st.warning(str(e))
-        except firebase_auth.EmailAlreadyExistsError:
-            st.warning("Email or username already taken.")
-        except Exception as e:
-            logger.error(f"Error during signup: {e}")
-            st.error(f"An error occurred: {e}")
-
-    def complete_registration_after_otp(self, email: str, otp: str) -> None:
-        """
-        Complete user registration after OTP verification.
-
-        Args:
-            email: User email address
-            otp: OTP code entered by user
-        """
-        try:
-            # Verify OTP first
-            is_verified, message = self.verify_email_otp(email, otp)
-
-            if not is_verified:
-                st.error(message)
-                return
-
-            # Get stored registration data
-            if 'pending_registration' not in st.session_state or email not in st.session_state.pending_registration:
-                st.error(
-                    "Registration data not found. Please try registering again.")
-                return
-
-            registration_data = st.session_state.pending_registration[email]
-            username = registration_data['username']
-            password = registration_data['password']
-            role = registration_data['role']
-
-            # Debug: Log what we're retrieving
-            logger.info(
-                f"Retrieving registration data - Username: {username}, Password length: {len(password)}")
-
-            # Check registration data age (max 30 minutes)
-            registration_time = registration_data.get('timestamp')
-            if registration_time and (datetime.now() - registration_time).total_seconds() > 1800:
-                st.error("Registration session expired. Please try again.")
-                del st.session_state.pending_registration[email]
-                return
-
-            # Save user data to Firestore
-            self.auth.create_user(email=email, password=password, uid=username)
-            user_ref = self.fs.collection("users").document(username)
-            user_data = {
-                "username": username,
-                "email": email,
-                "role": role,
-                "status": "Pending",  # Still needs admin verification
-                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "email_verified": True,  # Email verified via OTP
-                "otp_verified_at": datetime.now().strftime("%Y-%m-%d %H:%M")
-            }
-            user_ref.set(user_data)            # Clean up pending registration
-            # Clean up verification UI state
-            del st.session_state.pending_registration[email]
-            if 'show_otp_verification' in st.session_state:
-                del st.session_state.show_otp_verification
-            if 'verification_email' in st.session_state:
-                del st.session_state.verification_email
-
-            st.success(
-                "Account created successfully! Your account is pending admin verification.")
-
-            logger.info(f"User {username} registered successfully")
-
-        except firebase_auth.EmailAlreadyExistsError:
-            st.error("User already exists.")
-        except Exception as e:
-            logger.error(f"Error completing registration: {e}")
-            st.error(f"Terjadi error saat menyelesaikan pendaftaran: {e}")
+            # Force clear session state even if other operations fail
+            clear_user_cookie()
 
     def verify_password(self, email: str, password: str) -> Optional[Dict[str, Any]]:
         """
         Verify user password using Firebase REST API.
 
         Args:
-            email: User email address
+            email: User email
             password: User password
 
         Returns:
             User data if verification successful, None otherwise
-
-        Raises:
-            AuthenticationError: If verification fails
         """
         try:
             url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={self.firebase_api}"
-            data = {
+            payload = {
                 "email": email,
                 "password": password,
                 "returnSecureToken": True
             }
 
-            response = requests.post(url, json=data)
-            response_data = response.json()
-
+            response = requests.post(url, json=payload)
             if response.status_code == 200:
-                return response_data
-            else:
-                error_message = response_data.get(
-                    "error", {}).get("message", "Unknown error")
-                logger.warning(
-                    f"Password verification failed for {email}: {error_message}")
-                return None
+                data = response.json()
+                user_uid = data.get("localId")
+
+                # Get user data from Firestore
+                user_doc = self.fs.collection('users').document(user_uid).get()
+                if user_doc.exists:
+                    return user_doc.to_dict()
+
+            return None
 
         except Exception as e:
-            logger.error(f"Error verifying password for {email}: {e}")
-            raise AuthenticationError(f"Password verification failed: {e}")
+            logger.error(f"Password verification failed: {e}")
+            return None
 
-    def send_verification_otp(self, email: str) -> tuple[bool, str]:
+    def save_login_logout(self, user_uid: str, action: str) -> None:
         """
-        Send OTP verification email to user.
+        Save login/logout activity to Firestore.
 
         Args:
-            email: User email address
-
-        Returns:
-            Tuple of (success: bool, message: str)
+            user_uid: User UID
+            action: 'login' or 'logout'
         """
         try:
-            # Generate OTP
-            otp = ''.join(random.choices(string.digits, k=6))
-
-            # Store OTP in session with timestamp
-            if 'otp_storage' not in st.session_state:
-                st.session_state.otp_storage = {}
-
-            st.session_state.otp_storage[email] = {
-                'otp': otp,
-                'timestamp': datetime.now()
+            activity_data = {
+                "user_uid": user_uid,
+                "action": action,
+                "timestamp": datetime.now(),
+                "ip_address": self._get_client_ip()
             }
 
-            # Send email
-            subject = "Verification Code for ICONNET Account"
-            body = f"""
-            Hi there!
-
-            Your verification code for ICONNET account registration is: {otp}
-
-            This code will expire in 10 minutes.
-
-            If you didn't request this code, please ignore this email.
-
-            Best regards,
-            ICONNET Team
-            """
-
-            success = self.email_service.send_email(email, subject, body)
-
-            if success:
-                return True, f"Verification code sent to {email}. Please check your inbox."
-            else:
-                return False, "Failed to send verification email. Please try again."
+            self.fs.collection('user_activities').add(activity_data)
+            logger.info(
+                f"{action.capitalize()} activity saved for user {user_uid}")
 
         except Exception as e:
-            logger.error(f"Error sending OTP to {email}: {e}")
-            return False, f"Error sending verification email: {e}"
+            logger.error(f"Failed to save {action} activity: {e}")
 
-    def verify_email_otp(self, email: str, user_otp: str) -> tuple[bool, str]:
+    def _get_client_ip(self) -> str:
+        """Get client IP address."""
+        try:
+            # In Streamlit Cloud, this might not work as expected
+            # You might need to use headers like X-Forwarded-For
+            return "Unknown"
+        except Exception:
+            return "Unknown"
+
+    def signup(self, username: str, email: str, password: str, confirm_password: str) -> None:
+        """
+        Register a new user.
+
+        Args:
+            username: Desired username
+            email: User email address
+            password: User password
+            confirm_password: Password confirmation
+
+        Raises:
+            ValidationError: If input validation fails
+        """
+        try:
+            self._validate_signup_input(
+                username, email, password, confirm_password)
+
+            # Create user in Firebase Auth
+            user = self.auth.create_user(
+                email=email,
+                password=password,
+                display_name=username
+            )
+
+            # Create user document in Firestore
+            user_data = {
+                'username': username,
+                'email': email,
+                'role': 'employee',  # Default role
+                'email_verified': False,
+                'verified': False,  # Admin approval required
+                'created_at': datetime.now(),
+                'otp_code': self._generate_otp_code(),
+                'otp_expires_at': datetime.now() + timedelta(minutes=10)
+            }
+
+            self.fs.collection('users').document(user.uid).set(user_data)
+
+            # Send verification email
+            if self.email_service:
+                self.email_service.send_verification_email(
+                    email, user_data['otp_code'])
+
+            st.success(
+                "Registration successful! Please check your email for verification code.")
+            logger.info(f"User registered successfully: {username} ({email})")
+
+        except ValidationError as e:
+            logger.warning(f"Signup validation failed: {e}")
+            st.warning(str(e))
+        except exceptions.FirebaseError as e:
+            logger.error(f"Firebase error during signup: {e}")
+            if "EMAIL_EXISTS" in str(e):
+                st.warning(
+                    "Email already exists. Please use a different email.")
+            else:
+                st.error("Registration failed. Please try again.")
+        except Exception as e:
+            logger.error(f"Signup failed: {e}")
+            st.error("An error occurred during registration. Please try again.")
+
+    def _generate_otp_code(self) -> str:
+        """Generate a 6-digit OTP code."""
+        return ''.join(random.choices(string.digits, k=6))
+
+    def verify_otp(self, email: str, otp_code: str) -> bool:
         """
         Verify OTP code for email verification.
 
         Args:
-            email: User email address
-            user_otp: OTP code entered by user
+            email: User email
+            otp_code: OTP code to verify
 
         Returns:
-            Tuple of (is_valid: bool, message: str)
+            True if verification successful, False otherwise
         """
         try:
-            if 'otp_storage' not in st.session_state or email not in st.session_state.otp_storage:
-                return False, "No verification code found. Please request a new code."
+            # Find user by email
+            users = self.fs.collection('users').where(
+                'email', '==', email).get()
 
-            stored_data = st.session_state.otp_storage[email]
-            stored_otp = stored_data['otp']
-            timestamp = stored_data['timestamp']
+            if not users:
+                st.warning("User not found.")
+                return False
 
-            # Check if OTP is expired (10 minutes)
-            if (datetime.now() - timestamp).total_seconds() > 600:
-                del st.session_state.otp_storage[email]
-                return False, "Verification code expired. Please request a new code."
+            user_doc = users[0]
+            user_data = user_doc.to_dict()
 
-            # Verify OTP
-            if user_otp == stored_otp:
-                # OTP is valid, remove it from storage
-                del st.session_state.otp_storage[email]
-                return True, "Email verified successfully!"
-            else:
-                return False, "Invalid verification code. Please try again."
+            # Check OTP validity
+            if user_data.get('otp_code') != otp_code:
+                st.warning("Invalid OTP code.")
+                return False
+
+            if datetime.now() > user_data.get('otp_expires_at'):
+                st.warning("OTP code has expired. Please request a new one.")
+                return False
+
+            # Mark email as verified
+            user_doc.reference.update({
+                'email_verified': True,
+                'otp_code': None,
+                'otp_expires_at': None
+            })
+
+            st.success(
+                "Email verified successfully! Please wait for admin approval.")
+            logger.info(f"Email verified for user: {email}")
+            return True
 
         except Exception as e:
-            logger.error(f"Error verifying OTP for {email}: {e}")
-            return False, f"Error verifying code: {e}"
+            logger.error(f"OTP verification failed: {e}")
+            st.error("Verification failed. Please try again.")
+            return False
 
-    def save_login_logout(self, username: str, action: str) -> None:
+    def resend_otp(self, email: str) -> None:
         """
-        Log user login/logout activity.
+        Resend OTP code to user email.
 
         Args:
-            username: User ID/username
-            action: Either 'login' or 'logout'
+            email: User email
         """
         try:
-            activity_doc = {
-                "username": username,
-                "action": action,
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "ip_address": "Unknown"  # Could be enhanced to get real IP
-            }
+            # Find user by email
+            users = self.fs.collection('users').where(
+                'email', '==', email).get()
 
-            self.fs.collection("user_activity").add(activity_doc)
-            logger.info(f"Activity logged: {username} - {action}")
+            if not users:
+                st.warning("User not found.")
+                return
+
+            user_doc = users[0]
+
+            # Generate new OTP
+            new_otp = self._generate_otp_code()
+
+            # Update user document
+            user_doc.reference.update({
+                'otp_code': new_otp,
+                'otp_expires_at': datetime.now() + timedelta(minutes=10)
+            })
+
+            # Send new OTP
+            if self.email_service:
+                self.email_service.send_verification_email(email, new_otp)
+
+            st.success("New OTP code sent to your email.")
+            logger.info(f"OTP resent for user: {email}")
 
         except Exception as e:
-            logger.error(f"Failed to log activity for {username}: {e}")
+            logger.error(f"Failed to resend OTP: {e}")
+            st.error("Failed to resend OTP. Please try again.")
+
+    def reset_password_request(self, email: str) -> None:
+        """
+        Send password reset email.
+
+        Args:
+            email: User email
+        """
+        try:
+            self.auth.generate_password_reset_link(email)
+            st.success("Password reset email sent. Please check your inbox.")
+            logger.info(f"Password reset requested for: {email}")
+
+        except exceptions.FirebaseError as e:
+            logger.error(f"Password reset failed: {e}")
+            if "USER_NOT_FOUND" in str(e):
+                st.warning("Email not found.")
+            else:
+                st.error("Failed to send password reset email.")
+        except Exception as e:
+            logger.error(f"Password reset failed: {e}")
+            st.error("An error occurred. Please try again.")
+
+    def is_session_valid(self) -> bool:
+        """
+        Check if the current session is valid and not expired (cookies only).
+
+        Returns:
+            bool: True if session is valid, False otherwise
+        """
+        try:
+            # Check if user is logged in from session state
+            username = st.session_state.get("username", "")
+            signout = st.session_state.get("signout", True)
+
+            if not username or signout:
+                logger.debug("No valid username or user is signed out")
+                return False
+
+            # Check session expiry from session state
+            session_expiry = st.session_state.get("session_expiry")
+            current_time = time.time()
+
+            if session_expiry:
+                try:
+                    if isinstance(session_expiry, str):
+                        # Convert ISO format to timestamp
+                        expiry_time = datetime.fromisoformat(
+                            session_expiry.replace('Z', '+00:00')).timestamp()
+                    else:
+                        expiry_time = float(session_expiry)
+
+                    if current_time > expiry_time:
+                        logger.info(f"Session expired for user {username}")
+                        clear_user_cookie()  # Clear expired session
+                        return False
+
+                except (ValueError, TypeError) as e:
+                    logger.warning(
+                        f"Invalid session expiry format: {session_expiry}, error: {e}")
+                    clear_user_cookie()  # Clear invalid session
+                    return False
+            else:
+                # No session_expiry set, check login_timestamp and create session_expiry
+                login_timestamp = st.session_state.get("login_timestamp")
+
+                if login_timestamp:
+                    try:
+                        if isinstance(login_timestamp, str):
+                            login_time = datetime.fromisoformat(
+                                login_timestamp.replace('Z', '+00:00')).timestamp()
+                        else:
+                            login_time = float(login_timestamp)
+
+                        # Calculate and set session_expiry
+                        expiry_time = login_time + SESSION_TIMEOUT_SECONDS
+                        st.session_state.session_expiry = expiry_time
+
+                        if current_time > expiry_time:
+                            logger.info(
+                                f"Session expired for user {username} (calculated from login_timestamp)")
+                            clear_user_cookie()  # Clear expired session
+                            return False
+
+                    except (ValueError, TypeError) as e:
+                        logger.warning(
+                            f"Invalid login_timestamp format: {login_timestamp}, error: {e}")
+                        clear_user_cookie()  # Clear invalid session
+                        return False
+                else:
+                    # No timestamps available - this shouldn't happen for valid sessions
+                    logger.warning(
+                        f"No session timestamps found for user {username} - session invalid")
+                    clear_user_cookie()  # Clear invalid session
+                    return False
+
+            # Session is valid
+            return True
+
+        except Exception as e:
+            logger.error(f"Session validation failed: {e}")
+            return False
+
+    def _clear_expired_session(self) -> None:
+        """Clear expired session data using cookies."""
+        try:
+            username = st.session_state.get("username", "")
+
+            # Clear cookies and session state
+            clear_user_cookie()
+
+            logger.info(f"Expired session cleared for user: {username}")
+
+        except Exception as e:
+            logger.error(f"Failed to clear expired session: {e}")
+
+    def is_user_authenticated(self) -> bool:
+        """
+        Check if user is currently authenticated with valid session.
+
+        Returns:
+            bool: True if user is authenticated, False otherwise
+        """
+        try:
+            # Quick check of session state
+            username = st.session_state.get("username", "")
+            signout = st.session_state.get("signout", True)
+
+            if not username or signout:
+                return False
+
+            # Validate session is still valid
+            return self.is_session_valid()
+
+        except Exception as e:
+            logger.error(f"Authentication check failed: {e}")
+            return False
+
+    def get_current_user(self) -> Optional[Dict[str, Any]]:
+        """
+        Get current authenticated user information.
+
+        Returns:
+            Dict with user info if authenticated, None otherwise
+        """
+        try:
+            if not self.is_user_authenticated():
+                return None
+
+            return {
+                "username": st.session_state.get("username", ""),
+                "email": st.session_state.get("useremail", ""),
+                "role": st.session_state.get("role", ""),
+                "login_timestamp": st.session_state.get("login_timestamp"),
+                "session_expiry": st.session_state.get("session_expiry")
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to get current user: {e}")
+            return None
+
+    def refresh_session(self) -> bool:
+        """
+        Refresh current session to extend expiry time (cookies only).
+
+        Returns:
+            bool: True if session refreshed successfully
+        """
+        try:
+            if not self.is_user_authenticated():
+                return False
+
+            username = st.session_state.get("username", "")
+            email = st.session_state.get("useremail", "")
+            role = st.session_state.get("role", "")
+
+            # Refresh session by saving to cookies again (extends 7-hour timeout)
+            cookie_saved = save_user_to_cookie(username, email, role)
+
+            if cookie_saved:
+                logger.info(f"Session refreshed for user: {username}")
+                return True
+            else:
+                logger.warning(
+                    f"Failed to refresh session for user: {username}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Session refresh failed: {e}")
+            return False
+
+    def logout_if_expired(self) -> None:
+        """
+        Log out user if session has expired.
+        """
+        try:
+            if not self.is_session_valid():
+                logger.info("Session expired, logging out user")
+                self.logout()
+        except Exception as e:
+            logger.error(f"Error checking session expiry: {e}")
+
+    def get_session_info(self) -> Optional[Dict[str, Any]]:
+        """
+        Get current session information.
+
+        Returns:
+            Dict with session info if valid, None otherwise
+        """
+        try:
+            if not self.is_user_authenticated():
+                return None
+
+            session_expiry = st.session_state.get("session_expiry")
+            login_timestamp = st.session_state.get("login_timestamp")
+
+            # Calculate remaining time
+            remaining_time_seconds = None
+            remaining_hours = 0
+            remaining_minutes = 0
+
+            if session_expiry:
+                try:
+                    if isinstance(session_expiry, str):
+                        expiry_time = datetime.fromisoformat(
+                            session_expiry.replace('Z', '+00:00')).timestamp()
+                    else:
+                        expiry_time = float(session_expiry)
+
+                    remaining_time_seconds = max(0, expiry_time - time.time())
+                    remaining_hours = remaining_time_seconds / 3600
+                    remaining_minutes = remaining_time_seconds / 60
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Error calculating remaining time: {e}")
+                    # If we can't calculate from session_expiry, try login_timestamp
+                    login_ts = st.session_state.get("login_timestamp")
+                    if login_ts:
+                        try:
+                            if isinstance(login_ts, str):
+                                login_time = datetime.fromisoformat(
+                                    login_ts.replace('Z', '+00:00')).timestamp()
+                            else:
+                                login_time = float(login_ts)
+
+                            expiry_time = login_time + SESSION_TIMEOUT_SECONDS
+                            remaining_time_seconds = max(
+                                0, expiry_time - time.time())
+                            remaining_hours = remaining_time_seconds / 3600
+                            remaining_minutes = remaining_time_seconds / 60
+
+                            # Update session_expiry for future use
+                            st.session_state.session_expiry = expiry_time
+                        except (ValueError, TypeError):
+                            pass
+
+            return {
+                "username": st.session_state.get("username", ""),
+                "email": st.session_state.get("useremail", ""),
+                "role": st.session_state.get("role", ""),
+                "login_timestamp": login_timestamp,
+                "session_expiry": session_expiry,
+                "remaining_time_seconds": remaining_time_seconds,
+                "remaining_hours": remaining_hours,
+                "remaining_minutes": remaining_minutes,
+                "is_valid": self.is_session_valid()
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to get session info: {e}")
+            return None
+
+    def send_verification_otp(self, email: str) -> tuple[bool, str]:
+        """
+        Send verification OTP to email.
+
+        Args:
+            email: User email address
+
+        Returns:
+            Tuple of (success, message)
+        """
+        try:
+            # Find user by email
+            users = self.fs.collection('users').where(
+                'email', '==', email).get()
+
+            if not users:
+                return False, "User not found."
+
+            user_doc = users[0]
+            user_data = user_doc.to_dict()
+
+            # Check if email is already verified
+            if user_data.get('email_verified', False):
+                return False, "Email is already verified."
+
+            # Generate new OTP
+            new_otp = self._generate_otp_code()
+
+            # Update user document
+            user_doc.reference.update({
+                'otp_code': new_otp,
+                'otp_expires_at': datetime.now() + timedelta(minutes=10)
+            })
+
+            # Send OTP via email
+            if self.email_service:
+                try:
+                    self.email_service.send_verification_email(email, new_otp)
+                    logger.info(f"Verification OTP sent to: {email}")
+                    return True, "Verification code sent to your email."
+                except Exception as e:
+                    logger.error(f"Failed to send verification email: {e}")
+                    return False, "Failed to send verification email."
+            else:
+                logger.warning("Email service not available")
+                return False, "Email service not available."
+
+        except Exception as e:
+            logger.error(f"Failed to send verification OTP: {e}")
+            return False, "An error occurred while sending verification code."
+
+    def complete_registration_after_otp(self, email: str, otp_code: str) -> tuple[bool, str]:
+        """
+        Complete user registration after OTP verification.
+
+        Args:
+            email: User email address
+            otp_code: OTP verification code
+
+        Returns:
+            Tuple of (success, message)
+        """
+        try:
+            # Find user by email
+            users = self.fs.collection('users').where(
+                'email', '==', email).get()
+
+            if not users:
+                return False, "User not found."
+
+            user_doc = users[0]
+            user_data = user_doc.to_dict()
+
+            # Verify OTP
+            if user_data.get('otp_code') != otp_code:
+                return False, "Invalid verification code."
+
+            # Check OTP expiry
+            otp_expires_at = user_data.get('otp_expires_at')
+            if otp_expires_at and datetime.now() > otp_expires_at:
+                return False, "Verification code has expired."
+
+            # Mark email as verified
+            user_doc.reference.update({
+                'email_verified': True,
+                'otp_code': None,
+                'otp_expires_at': None,
+                'verified_at': datetime.now()
+            })
+
+            logger.info(f"Registration completed for user: {email}")
+            return True, "Email verified successfully! Your account is now pending admin approval."
+
+        except Exception as e:
+            logger.error(f"Failed to complete registration: {e}")
+            return False, "An error occurred during verification."

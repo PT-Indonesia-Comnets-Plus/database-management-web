@@ -59,21 +59,28 @@ def _initialize_cookies():
                 password=st.secrets.get("cookie_password", "super_secret_key")
             )
 
-        # Check if cookies are ready with timeout
+        # Check if cookies are ready with extended timeout and retry
         import time
         start_time = time.time()
-        while not cookies.ready() and (time.time() - start_time) < 3:  # 3 second timeout
-            time.sleep(0.1)
+        max_wait_time = 5  # Increased to 5 seconds
+        retry_count = 0
+        max_retries = 3
+
+        while retry_count < max_retries and (time.time() - start_time) < max_wait_time:
+            if cookies.ready():
+                break
+            time.sleep(0.2)  # Slightly longer sleep
+            retry_count += 1
 
         cookies_available = cookies.ready()
 
         if not cookies_available:
             if is_streamlit_cloud():
                 logger.info(
-                    "Cookies not available on Streamlit Cloud - using cloud session storage")
+                    "Cookies not available on Streamlit Cloud - using session state fallback")
             else:
                 logger.warning(
-                    "Cookies not ready - using fallback session storage")
+                    "Cookies not ready after retries - using session state fallback")
         else:
             logger.info("Cookie manager initialized successfully")
 
@@ -91,9 +98,7 @@ cookies, COOKIES_AVAILABLE = _initialize_cookies()
 
 def save_user_to_cookie(username: str, email: str, role: str) -> bool:
     """Save user to cookie (with enhanced cloud handling)."""
-    global cookies, COOKIES_AVAILABLE
-
-    # Always save to session state as primary storage
+    global cookies, COOKIES_AVAILABLE    # Always save to session state as primary storage
     login_timestamp = time.time()
     st.session_state.username = username
     st.session_state.useremail = email
@@ -103,6 +108,18 @@ def save_user_to_cookie(username: str, email: str, role: str) -> bool:
     st.session_state.session_expiry = login_timestamp + SESSION_TIMEOUT_SECONDS
 
     # Try to save to cookies as secondary storage (best effort)
+    # First check if cookies are available
+    if not (COOKIES_AVAILABLE and cookies and cookies.ready()):
+        # Try to re-initialize cookies if they weren't ready before
+        try:
+            new_cookies, new_available = _initialize_cookies()
+            if new_available and new_cookies and new_cookies.ready():
+                cookies = new_cookies
+                COOKIES_AVAILABLE = new_available
+                logger.info("Cookies re-initialized successfully")
+        except Exception as e:
+            logger.debug(f"Failed to re-initialize cookies: {e}")
+
     if COOKIES_AVAILABLE and cookies and cookies.ready():
         try:
             cookies["username"] = username
@@ -130,9 +147,7 @@ def save_user_to_cookie(username: str, email: str, role: str) -> bool:
 
 def clear_user_cookie() -> bool:
     """Clear user cookie (with enhanced cloud handling)."""
-    global cookies, COOKIES_AVAILABLE
-
-    # Always clear session state first (primary storage)
+    global cookies, COOKIES_AVAILABLE    # Always clear session state first (primary storage)
     st.session_state.username = ""
     st.session_state.useremail = ""
     st.session_state.role = ""
@@ -141,6 +156,8 @@ def clear_user_cookie() -> bool:
         del st.session_state.login_timestamp
     if hasattr(st.session_state, 'session_expiry'):
         del st.session_state.session_expiry
+    if hasattr(st.session_state, 'user_uid'):
+        del st.session_state.user_uid
 
     # Try to clear cookies as well (best effort)
     if COOKIES_AVAILABLE and cookies and cookies.ready():
@@ -169,6 +186,19 @@ def clear_user_cookie() -> bool:
 
 def load_cookie_to_session(session_state) -> bool:
     """Load cookie to session (with fallback handling for Streamlit Cloud)."""
+    global cookies, COOKIES_AVAILABLE
+
+    # Try to re-initialize cookies if they weren't ready before
+    if not (COOKIES_AVAILABLE and cookies and cookies.ready()):
+        try:
+            new_cookies, new_available = _initialize_cookies()
+            if new_available and new_cookies and new_cookies.ready():
+                cookies = new_cookies
+                COOKIES_AVAILABLE = new_available
+                logger.info("Cookies re-initialized for session loading")
+        except Exception as e:
+            logger.debug(f"Failed to re-initialize cookies during load: {e}")
+
     if COOKIES_AVAILABLE and cookies and cookies.ready():
         try:
             username = cookies.get("username", "") or ""
@@ -176,9 +206,8 @@ def load_cookie_to_session(session_state) -> bool:
             role = cookies.get("role", "") or ""
             signout_status = cookies.get("signout", "True")
             login_timestamp_str = cookies.get("login_timestamp", "")
-            session_expiry_str = cookies.get("session_expiry", "")
-
-            # Parse timestamps
+            session_expiry_str = cookies.get(
+                "session_expiry", "")            # Parse timestamps
             login_timestamp = None
             session_expiry = None
 
@@ -189,12 +218,27 @@ def load_cookie_to_session(session_state) -> bool:
                     session_expiry = float(session_expiry_str)
             except (ValueError, TypeError):
                 logger.warning("Invalid timestamp format in cookies")
-                # If we can't parse timestamps, generate new ones if user data exists
-                if username and signout_status.lower() == "false":
-                    current_time = time.time()
-                    login_timestamp = current_time
-                    # Check session expiry before loading
-                    session_expiry = current_time + SESSION_TIMEOUT_SECONDS
+                login_timestamp = None
+                session_expiry = None
+
+            # If we can't parse timestamps or they don't exist, generate new ones for valid users
+            if username and signout_status.lower() == "false" and (not login_timestamp or not session_expiry):
+                current_time = time.time()
+                login_timestamp = current_time
+                session_expiry = current_time + SESSION_TIMEOUT_SECONDS
+                logger.info(
+                    f"Generated new session timestamps for user {username}")
+
+                # Save the new timestamps back to cookies for consistency
+                try:
+                    cookies["login_timestamp"] = str(login_timestamp)
+                    cookies["session_expiry"] = str(session_expiry)
+                    cookies.save()
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to update timestamps in cookies: {e}")
+
+            # Check session expiry before loading
             current_time = time.time()
             if session_expiry and current_time > session_expiry:
                 logger.info(

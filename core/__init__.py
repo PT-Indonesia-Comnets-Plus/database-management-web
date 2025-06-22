@@ -51,20 +51,9 @@ def initialize_session_state() -> bool:
                 st.session_state.auth = None
                 # Initialize Cloud Session Storage Service (NEW - optimized for Streamlit Cloud)
                 st.session_state.fs_config = None
-        if "cloud_session_storage" not in st.session_state:
-            try:
-                from .services.CloudSessionStorage import get_cloud_session_storage
-                cloud_session_storage = get_cloud_session_storage(
-                    db_pool=st.session_state.get("db"),
-                    app_prefix="iconnet_app"
-                )
-                st.session_state.cloud_session_storage = cloud_session_storage
-                logger.info(
-                    "Cloud session storage service initialized successfully")
-            except Exception as e:
-                logger.error(
-                    f"Failed to initialize cloud session storage service: {e}")
-                st.session_state.cloud_session_storage = None
+
+        # Cloud session storage removed - using cookies-only approach
+        st.session_state.cloud_session_storage = None
 
         # Initialize Session Storage Service (Legacy fallback)
         if "session_storage_service" not in st.session_state:
@@ -79,39 +68,17 @@ def initialize_session_state() -> bool:
             except Exception as e:
                 logger.error(
                     f"Failed to initialize session storage service: {e}")
-                # Load user session data (prioritize cloud session storage for production)
-                st.session_state.session_storage_service = None
+
+        # Load user session data from cookies only (simplified approach)
         if "username" not in st.session_state or not st.session_state.get("username"):
             try:
-                # First try cloud session storage (optimized for Streamlit Cloud)
-                cloud_session_storage = st.session_state.get(
-                    "cloud_session_storage")
-                if cloud_session_storage:
-                    session_data = cloud_session_storage.load_session()
-                    if session_data:
-                        logger.info(
-                            f"User session loaded from cloud storage: {session_data.get('username')}")
-                    else:
-                        # Try loading by browser fingerprint as fallback
-                        session_data = cloud_session_storage.load_session_by_fingerprint()
-                        if session_data:
-                            logger.info(
-                                f"User session restored from fingerprint: {session_data.get('username')}")
-                        else:
-                            # Fallback to legacy methods
-                            load_cookie_to_session(st.session_state)
+                # Load session from cookies
+                load_cookie_to_session(st.session_state)
 
-                            # Then try legacy session storage service
-                            session_storage_service = st.session_state.get(
-                                "session_storage_service")
-                            if session_storage_service:
-                                session_data = session_storage_service.load_user_session()
-                                if session_data:
-                                    logger.info(
-                                        f"User session loaded from legacy storage: {session_data.get('username')}")
-                else:
-                    # Fallback initialization if cloud storage failed
-                    load_cookie_to_session(st.session_state)
+                username = st.session_state.get("username", "")
+                if username:
+                    logger.info(
+                        f"User session loaded from cookies: {username}")
 
             except Exception as e:
                 logger.error(f"Failed to load user session: {e}")

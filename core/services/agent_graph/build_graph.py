@@ -264,8 +264,7 @@ Tugas: Buat jawaban yang informatif, on-point, dan enak dibaca dengan gaya yang 
 """
                 from langchain_core.messages import SystemMessage
                 final_messages = [SystemMessage(
-                    content=final_response_prompt)] + current_messages
-                # Use LLM without tools for final response
+                    content=final_response_prompt)] + current_messages                # Use LLM without tools for final response
                 response = primary_llm.invoke(final_messages)
 
                 return {
@@ -276,7 +275,9 @@ Tugas: Buat jawaban yang informatif, on-point, dan enak dibaca dengan gaya yang 
                 }
 
             else:
-                # Regular tool execution flow                # Smart guidance logic - only use reflection guidance if context hasn't changed                guidance_prompt = ""
+                # Regular tool execution flow
+                # Smart guidance logic - only use reflection guidance if context hasn't changed
+                guidance_prompt = ""
                 # Only provide guidance if:
                 current_query = last_message.content.lower() if last_message else ""
                 # 1. We have reflection and it indicates RETRY (tool was wrong)
@@ -318,15 +319,24 @@ Make sure to use the suggested tool if it's relevant to the user's question.
                         # Reset reflection since it's no longer relevant
                         reflection = None
                         retry_count = 0
+                        # Ensure guidance_prompt is empty when not using guidance
+                        guidance_prompt = ""
                 elif reflection and reflection.is_sufficient:
                     print(
                         f"✅ No guidance needed - reflection indicates tool selection was correct: {reflection.critique}")
+                    guidance_prompt = ""
                 elif reflection and reflection.next_action == "FINISH":
                     # Increment retry count only if we're actually retrying due to wrong tool
                     print(
                         f"🏁 No guidance needed - reflection indicates task is complete: {reflection.critique}")
+                    guidance_prompt = ""
+                else:
+                    # No reflection guidance applicable
+                    guidance_prompt = ""
                 new_retry_count = retry_count + \
-                    1 if reflection and reflection.next_action == "RETRY" and not reflection.is_sufficient else retry_count  # Enhanced system prompt with intelligent tool selection guidance
+                    1 if reflection and reflection.next_action == "RETRY" and not reflection.is_sufficient else retry_count
+
+                # Enhanced system prompt with intelligent tool selection guidance
                 # Define behavioral rules and tool config inline
                 CORE_BEHAVIORAL_RULES = """
 KARAKTERISTIK MAYA (ICONNET Assistant):
