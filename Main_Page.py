@@ -15,7 +15,7 @@ from core.services.UserService import UserService
 from core.services.EmailService import EmailService
 from core import initialize_session_state
 from core.utils.load_css import load_custom_css
-from core.utils.cookies import get_cookie_manager
+from core.utils.cookies import clear_cookies
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -440,7 +440,7 @@ class MainPageManager:
         try:
             # Clear cookies
             # Ini juga akan mencoba membersihkan session state
-            get_cookie_manager().clear_user()
+            clear_cookies()
 
             # Eksplisit membersihkan session state yang relevan dengan sesi pengguna
             # Hati-hati jangan menghapus state yang dibutuhkan oleh layanan inti jika mereka

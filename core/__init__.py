@@ -71,7 +71,7 @@ def initialize_session_state() -> bool:
         if "username" not in st.session_state or not st.session_state.get("username"):
             try:
                 # Load session from cookies or fallback storage
-                session_loaded = load_cookie_to_session(st.session_state)
+                session_loaded = load_cookie_to_session()
 
                 username = st.session_state.get("username", "")
                 if username and session_loaded:
