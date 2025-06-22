@@ -208,18 +208,14 @@ class UserService:
             AuthenticationError: If authentication fails
         """
         try:
-            self._validate_login_input(email, password)
-
             # Verify password through Firebase REST API
+            self._validate_login_input(email, password)
             user_data = self.verify_password(email, password)
             if not user_data:
                 st.warning("Invalid email or password")
                 return
 
             user = self.auth.get_user_by_email(email)
-            if not user.email_verified:
-                st.warning("Email not verified. Please check your inbox.")
-                return
 
             # Validate user in Firestore
             user_doc = self.fs.collection('users').document(user.uid).get()
@@ -228,6 +224,12 @@ class UserService:
                 return
 
             user_doc_data = user_doc.to_dict()
+
+            # Check email verification status from Firestore (our custom OTP verification)
+            if not user_doc_data.get("email_verified", False):
+                st.warning("Email not verified. Please check your inbox.")
+                return
+
             if user_doc_data.get("status") != "Verified":
                 st.warning("Your account is not verified by admin yet.")
                 return
