@@ -187,6 +187,31 @@ def get_session_time_remaining() -> Dict[str, Any]:
         login_timestamp = st.session_state.get('login_timestamp')
 
         if session_expiry and login_timestamp:
+            # Normalize timestamps to float before calculations
+            if isinstance(session_expiry, str):
+                try:
+                    session_expiry = datetime.fromisoformat(
+                        session_expiry).timestamp()
+                except (ValueError, TypeError) as e:
+                    logger.warning(
+                        f"Invalid session_expiry format in get_session_time_remaining: {session_expiry}, error: {e}")
+                    return {
+                        'is_valid': False,
+                        'message': 'Invalid session expiry format'
+                    }
+
+            if isinstance(login_timestamp, str):
+                try:
+                    login_timestamp = datetime.fromisoformat(
+                        login_timestamp).timestamp()
+                except (ValueError, TypeError) as e:
+                    logger.warning(
+                        f"Invalid login_timestamp format in get_session_time_remaining: {login_timestamp}, error: {e}")
+                    return {
+                        'is_valid': False,
+                        'message': 'Invalid login timestamp format'
+                    }
+
             remaining_seconds = session_expiry - current_time
             remaining_hours = remaining_seconds / 3600
             remaining_minutes = remaining_seconds / 60

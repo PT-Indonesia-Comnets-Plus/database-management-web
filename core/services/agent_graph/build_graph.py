@@ -276,17 +276,18 @@ Tugas: Buat jawaban yang informatif, on-point, dan enak dibaca dengan gaya yang 
                 }
 
             else:
-                # Regular tool execution flow                # Smart guidance logic - only use reflection guidance if context hasn't changed
-                guidance_prompt = ""
+                # Regular tool execution flow                # Smart guidance logic - only use reflection guidance if context hasn't changed                guidance_prompt = ""
                 # Only provide guidance if:
                 current_query = last_message.content.lower() if last_message else ""
                 # 1. We have reflection and it indicates RETRY (tool was wrong)
-                # 2. Context hasn't changed (same type of request)                # 3. The suggested tool is still relevant to current query
+                # 2. Context hasn't changed (same type of request)
+                # 3. The suggested tool is still relevant to current query
                 if reflection and reflection.suggested_tool and reflection.next_action == "RETRY" and not reflection.is_sufficient and not context_changed:
                     print(
                         f"🔍 Evaluating guidance application - suggested_tool: {reflection.suggested_tool}, next_action: {reflection.next_action}, is_sufficient: {reflection.is_sufficient}")
+
                     tool_relevance_map = {
-                        'query_asset_database': ['berapa', 'total', 'jumlah', 'pelanggan', 'brand', 'data', 'kota', 'berada', 'fat id', 'dimana', 'lokasi', 'fat', 'fdt', 'olt', 'ada', 'di', 'mana', 'where', 'location', 'bdwa', 'bjng', 'asset', 'aset'],
+                        'query_asset_database': ['berapa', 'total', 'jumlah', 'pelanggan', 'brand', 'data', 'kota', 'berada', 'fat id', 'dimana', 'lokasi', 'fat', 'fdt', 'olt', 'ada', 'di', 'mana', 'where', 'location', 'bdwa', 'bjng', 'asset', 'aset', 'hc', 'hc per', 'hc di', 'total hc', 'berapa hc', 'home connected'],
                         'create_visualization': ['grafik', 'chart', 'visualisasi', 'pie', 'bar', 'diagram'],
                         'search_internal_documents': ['panduan', 'dokumentasi', 'sop', 'cara', 'apa itu', 'iconnet', 'icon', 'plus', 'pln', 'telkom', 'perusahaan', 'profil', 'definisi', 'jelaskan', 'adalah'],
                         'tools_web_search': ['informasi', 'berita', 'terbaru', 'internet', 'siapa', 'apa', 'kapan', 'mengapa', 'bagaimana', 'pemenang', 'juara', 'update', 'news']
@@ -313,7 +314,8 @@ Make sure to use the suggested tool if it's relevant to the user's question.
 """
                     else:
                         print(
-                            f"🚫 Ignoring previous reflection guidance - suggested tool '{suggested_tool}' not relevant to current query")                        # Reset reflection since it's no longer relevant
+                            f"🚫 Ignoring previous reflection guidance - suggested tool '{suggested_tool}' not relevant to current query")
+                        # Reset reflection since it's no longer relevant
                         reflection = None
                         retry_count = 0
                 elif reflection and reflection.is_sufficient:
@@ -324,7 +326,7 @@ Make sure to use the suggested tool if it's relevant to the user's question.
                     print(
                         f"🏁 No guidance needed - reflection indicates task is complete: {reflection.critique}")
                 new_retry_count = retry_count + \
-                    1 if reflection and reflection.next_action == "RETRY" and not reflection.is_sufficient else retry_count                # Enhanced system prompt with intelligent tool selection guidance
+                    1 if reflection and reflection.next_action == "RETRY" and not reflection.is_sufficient else retry_count  # Enhanced system prompt with intelligent tool selection guidance
                 # Define behavioral rules and tool config inline
                 CORE_BEHAVIORAL_RULES = """
 KARAKTERISTIK MAYA (ICONNET Assistant):
@@ -332,6 +334,13 @@ KARAKTERISTIK MAYA (ICONNET Assistant):
 - 🔍 Tidak pernah memberikan jawaban langsung dari pengetahuan internal
 - 📊 Prioritaskan akurasi data dengan menggunakan tools yang tepat
 - 🌟 Responsif dan membantu dengan bahasa yang ramah dan profesional
+
+🔑 IMPORTANT ICONNET TERMINOLOGY:
+- HC adalah jumlah pelanggan yang terhubung dengan layanan ICONNET
+- HC per kota = jumlah pelanggan ICONNET aktif di kota tersebut
+- FAT = Fiber Access Terminal, titik distribusi utama dalam jaringan fiber optik ICONNET
+- OLT = Optical Line Terminal, perangkat utama dalam jaringan fiber optik ICONNET
+- FDT = Fiber Distribution Terminal, titik distribusi fiber optik
 """
 
                 AVAILABLE_TOOLS_CONFIG = """
@@ -389,10 +398,10 @@ CRITICAL TOOL SELECTION FOR THIS QUERY:
 Current Query: "{current_query}"
 
 🎯 IMMEDIATE ANALYSIS:
-- Query type: {'LOCATION/DATA QUERY (use query_asset_database)' if any(word in current_query.lower() for word in ['berada', 'kota', 'fat id', 'dimana', 'lokasi', 'berapa pelanggan', 'total pelanggan', 'jumlah pelanggan', 'data pelanggan', 'berapa hc', 'hc per', 'headcount']) else 'COMPANY/INFO QUERY (use search_internal_documents)' if any(word in current_query.lower() for word in ['apa itu', 'iconnet', 'icon', 'plus', 'pln', 'telkom', 'perusahaan', 'profil', 'perbedaan', 'tahun', 'berdiri', 'sejarah', 'didirikan', 'kapan']) else 'GENERAL QUERY (use search_internal_documents)'}
+- Query type: {'LOCATION/DATA QUERY (use query_asset_database)' if any(word in current_query.lower() for word in ['berada', 'kota', 'fat id', 'dimana', 'lokasi', 'berapa pelanggan', 'total pelanggan', 'jumlah pelanggan', 'data pelanggan', 'berapa hc', 'hc per', 'total hc', 'hc di', 'home connected']) else 'COMPANY/INFO QUERY (use search_internal_documents)' if any(word in current_query.lower() for word in ['apa itu', 'iconnet', 'icon', 'plus', 'pln', 'telkom', 'perusahaan', 'profil', 'perbedaan', 'tahun', 'berdiri', 'sejarah', 'didirikan', 'kapan']) else 'GENERAL QUERY (use search_internal_documents)'}
 
 MULTI-TOOL DETECTION:
-- Needs data query: {'YES' if any(word in current_query.lower() for word in ['berapa', 'data', 'jumlah', 'total', 'hc per', 'headcount']) else 'NO'}
+- Needs data query: {'YES' if any(word in current_query.lower() for word in ['berapa', 'data', 'jumlah', 'total', 'hc per', 'hc di', 'total hc', 'berapa hc', 'home connected']) else 'NO'}
 - Needs visualization: {'YES' if any(word in current_query.lower() for word in ['grafik', 'chart', 'visualisasi', 'pie', 'bar', 'diagram', 'buatkan grafik', 'buat grafik']) else 'NO'}
 
 🚨 MULTI-TOOL STRATEGY:
@@ -577,9 +586,7 @@ This is a FORCED CORRECTION based on system analysis. Do NOT use any other tool 
                                 visualization_success = True
                                 break
                         except:
-                            pass
-
-            # Generate final response prompt
+                            pass            # Generate final response prompt
             if has_visualization and visualization_success:
                 final_response_prompt = """Anda adalah ICONNET Assistant yang ramah dan informatif.
 
@@ -591,7 +598,7 @@ KATAKAN bahwa grafik sudah berhasil dibuat dan ditampilkan.
 Berdasarkan hasil tools yang telah dijalankan, buatlah response yang:
 1. ✅ KONFIRMASI bahwa grafik sudah berhasil dibuat dan ditampilkan
 2. 📊 Jelaskan apa yang terlihat di grafik berdasarkan data
-3. 📍 Berikan informasi spesifik tentang data HC per kota
+3. 📍 Berikan informasi spesifik tentang data HC per kota (HC = Home Connected/pelanggan)
 4. 💡 Tambahkan insight atau analisis dari data
 5. 🤝 Gunakan bahasa yang ramah dan mudah dipahami
 
@@ -791,11 +798,10 @@ Pastikan response Anda berdasarkan data faktual dari tools dan memberikan value 
 
         print(f"🔄 Multi-Tool Router:")
         print(f"   Query: {user_query[:100]}...")
-        print(f"   Tools used: {tools_used}")
-
         # Detect if user wants both data and visualization
+        print(f"   Tools used: {tools_used}")
         needs_data = any(word in user_query for word in [
-            'berapa', 'data', 'jumlah', 'total', 'hc per', 'headcount'
+            'berapa', 'data', 'jumlah', 'total', 'hc per', 'hc di', 'total hc', 'berapa hc', 'home connected'
         ])
         needs_visualization = any(word in user_query for word in [
             'grafik', 'chart', 'visualisasi', 'pie', 'bar', 'diagram',
@@ -948,11 +954,10 @@ FORCE USE: query_asset_database first."""
                 if hasattr(msg, 'type') and msg.type == 'human':
                     user_query = msg.content.lower()
                 elif hasattr(msg, 'type') and msg.type == 'tool' and hasattr(msg, 'name'):
+                    # Multi-tool detection logic (same as in multi_tool_router)
                     tools_used.append(msg.name)
-
-            # Multi-tool detection logic (same as in multi_tool_router)
             needs_data = any(word in user_query for word in [
-                'berapa', 'data', 'jumlah', 'total', 'hc per', 'headcount'
+                'berapa', 'data', 'jumlah', 'total', 'hc per', 'hc di', 'total hc', 'berapa hc', 'home connected'
             ])
             needs_visualization = any(word in user_query for word in [
                 'grafik', 'chart', 'visualisasi', 'pie', 'bar', 'diagram',
