@@ -519,12 +519,14 @@ class MainPageManager:
             if st.button("❌ Batal", use_container_width=True):
                 # Clean up verification state
                 if 'show_otp_verification' in st.session_state:
-                    del st.session_state.show_otp_verification
+                    del st.session_state.show_otp_verification               
                 if 'verification_email' in st.session_state:
                     del st.session_state.verification_email
                 if 'pending_registration' in st.session_state and verification_email in st.session_state.pending_registration:
                     del st.session_state.pending_registration[verification_email]
-                st.rerun()        # Handle verification
+                st.rerun()
+
+        # Handle verification
         if verify_button and otp_input:
             if self.user_service:
                 if len(otp_input) != 6 or not otp_input.isdigit():
@@ -538,22 +540,6 @@ class MainPageManager:
         elif verify_button:
             st.warning("⚠️ Masukkan kode verifikasi terlebih dahulu.")
 
-    def _check_and_show_persistent_login_prompt(self) -> None:
-        """Check if we need to show the persistent login prompt after login."""
-        try:
-            # Check if the flag is set
-            if st.session_state.get("show_persistent_login_prompt", False):
-                # Clear the flag first to avoid showing it repeatedly
-                st.session_state.show_persistent_login_prompt = False
-                logger.info("🔗 Displaying persistent login prompt after login...")
-                
-                # Import and call the prompt function
-                from core.utils.cookies import show_persistent_login_prompt
-                show_persistent_login_prompt()
-                
-        except Exception as e:
-            logger.error(f"Error checking persistent login prompt: {e}")
-
     def run(self) -> None:
         """Main application entry point."""
         self.configure_page()
@@ -561,8 +547,6 @@ class MainPageManager:
         self.display_header()
 
         if self.is_user_authenticated():
-            # Check if we need to show the persistent login prompt
-            self._check_and_show_persistent_login_prompt()
             self.display_user_dashboard()
         else:
             self.display_authentication_form()

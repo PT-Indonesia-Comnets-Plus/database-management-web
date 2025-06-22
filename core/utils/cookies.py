@@ -256,29 +256,40 @@ def _initialize_cookies(force_reinit: bool = False):
             logger.warning(f"Failed to initialize cookie manager: {e}")
             _cookies_initialized = True
             _cookies_available = False
-            return None, False
-
-        # Test cookie availability with shorter timeout
+            return None, False        # Test cookie availability with multiple attempts for better reliability
         start_time = time.time()
-        max_wait_time = 3  # 3 seconds max
+        max_wait_time = 5  # 5 seconds max - more time for cloud
+        attempt = 0
+        max_attempts = 3
 
-        try:
-            # Check if cookies are ready
-            cookies_available = cookies.ready()
-
-            # If not ready immediately, wait a bit
-            if not cookies_available and (time.time() - start_time) < max_wait_time:
-                time.sleep(1)
+        cookies_available = False
+        
+        while not cookies_available and attempt < max_attempts and (time.time() - start_time) < max_wait_time:
+            try:
+                attempt += 1
+                logger.debug(f"Cookie availability check attempt {attempt}/{max_attempts}")
+                
+                # Check if cookies are ready
                 cookies_available = cookies.ready()
-
-        except Exception as e:
-            logger.debug(f"Cookie ready check failed: {e}")
-            cookies_available = False
+                
+                if not cookies_available:
+                    # Wait between attempts, with increasing delay
+                    wait_time = min(1.0 * attempt, 2.0)
+                    logger.debug(f"Cookies not ready, waiting {wait_time}s before retry...")
+                    time.sleep(wait_time)
+                else:
+                    logger.debug("Cookies are ready!")
+                    break
+                    
+            except Exception as e:
+                logger.debug(f"Cookie ready check attempt {attempt} failed: {e}")
+                if attempt < max_attempts:
+                    time.sleep(1)
 
         if not cookies_available:
-            logger.info("Cookies not available - using session state fallback")
+            logger.info("Cookies not available after multiple attempts - using session state fallback")
         else:
-            logger.info("Cookie manager initialized successfully")
+            logger.info("✅ Cookie manager initialized successfully")
 
         _cookies_instance = cookies if cookies_available else None
         _cookies_initialized = True
@@ -295,13 +306,13 @@ def _initialize_cookies(force_reinit: bool = False):
 
 
 def save_user_to_cookie(username: str, email: str, role: str) -> dict:
-    """Save user to cookie (with enhanced cloud handling).
+    """Save user to cookie - SIMPLIFIED VERSION for automatic persistence.
 
     Returns:
         dict: {
             'success': bool,
-            'method': str ('cookies', 'url_fallback', 'session_only'),
-            'requires_url_click': bool
+            'method': str ('cookies', 'session_only'),
+            'requires_url_click': bool (always False now)
         }
     """
     global _cookies_instance, _cookies_available
@@ -315,16 +326,22 @@ def save_user_to_cookie(username: str, email: str, role: str) -> dict:
     st.session_state.login_timestamp = login_timestamp
     st.session_state.session_expiry = login_timestamp + SESSION_TIMEOUT_SECONDS
 
-    # Try to initialize cookies if not available
+    # Try to save to cookies - simplified approach
+    cookies_saved = False
+    
+    # Initialize cookies if needed
     if not (_cookies_available and _cookies_instance):
         try:
             logger.info("Attempting to initialize cookies for login")
             new_cookies, new_available = _initialize_cookies(force_reinit=True)
             if new_available and new_cookies:
+                _cookies_instance = new_cookies
+                _cookies_available = new_available
                 logger.info("Cookies successfully initialized for login")
         except Exception as e:
-            # Try to save to cookies as secondary storage (best effort)
             logger.debug(f"Failed to initialize cookies: {e}")
+
+    # Save to cookies if available
     if _cookies_available and _cookies_instance:
         try:
             _cookies_instance["username"] = username
@@ -332,10 +349,11 @@ def save_user_to_cookie(username: str, email: str, role: str) -> dict:
             _cookies_instance["role"] = role
             _cookies_instance["signout"] = "False"
             _cookies_instance["login_timestamp"] = str(login_timestamp)
-            _cookies_instance["session_expiry"] = str(
-                login_timestamp + SESSION_TIMEOUT_SECONDS)
+            _cookies_instance["session_expiry"] = str(login_timestamp + SESSION_TIMEOUT_SECONDS)
 
-            logger.info(f"User {username} saved to cookies successfully")
+            logger.info(f"✅ User {username} saved to cookies successfully")
+            cookies_saved = True
+            
             return {
                 'success': True,
                 'method': 'cookies',
@@ -343,29 +361,24 @@ def save_user_to_cookie(username: str, email: str, role: str) -> dict:
             }
 
         except Exception as e:
-            # Fallback to URL parameter storage
             logger.warning(f"Failed to save to cookies: {e}")
 
-    url_saved = _save_to_url_fallback(
-        username, email, role, login_timestamp)
-    if url_saved:
-        logger.info(f"User {username} saved using URL fallback")
-        return {
-            'success': True,
-            'method': 'url_fallback',
-            'requires_url_click': True
-        }
+    # If cookies not available, just use session state
+    if cookies_saved:
+        method = 'cookies'
+    else:
+        method = 'session_only'
+        logger.info(f"User {username} saved to session state only (cookies not available)")
 
-    logger.info(f"User {username} saved to session state only")
     return {
         'success': True,
-        'method': 'session_only',
-        'requires_url_click': False
+        'method': method,
+        'requires_url_click': False  # No URL click needed anymore
     }
 
 
 def load_cookie_to_session() -> bool:
-    """Load user data from cookies to session state."""
+    """Load user data from cookies to session state - SIMPLIFIED VERSION."""
     global _cookies_instance, _cookies_available
 
     logger.info("=== Starting session restoration process ===")
@@ -374,20 +387,18 @@ def load_cookie_to_session() -> bool:
         # Try to initialize cookies if not available
         if not (_cookies_available and _cookies_instance):
             try:
-                logger.debug(
-                    "Attempting to initialize cookies for session restoration")
-                new_cookies, new_available = _initialize_cookies(
-                    force_reinit=False)
+                logger.debug("Attempting to initialize cookies for session restoration")
+                new_cookies, new_available = _initialize_cookies(force_reinit=False)
                 if new_available and new_cookies:
+                    _cookies_instance = new_cookies
+                    _cookies_available = new_available
                     logger.debug("Cookies available for session restoration")
                 else:
-                    logger.debug(
-                        "Cookies not available - will use fallback methods")
+                    logger.debug("Cookies not available")
             except Exception as e:
-                logger.debug(
-                    f"Failed to initialize cookies for session restoration: {e}")
+                logger.debug(f"Failed to initialize cookies for session restoration: {e}")
 
-        # Strategy 1: Try cookies first
+        # Strategy 1: Try cookies first (MAIN METHOD)
         logger.debug("Strategy 1: Attempting cookie restoration...")
         if _cookies_available and _cookies_instance:
             try:
@@ -398,8 +409,7 @@ def load_cookie_to_session() -> bool:
                 login_timestamp = _cookies_instance.get("login_timestamp")
                 session_expiry = _cookies_instance.get("session_expiry")
 
-                logger.debug(
-                    f"Cookie data found: username={username}, email={email}, signout={signout}")
+                logger.debug(f"Cookie data found: username={username}, email={email}, signout={signout}")
 
                 if username and email and role and signout == "False":
                     # Check if session is still valid
@@ -408,15 +418,15 @@ def load_cookie_to_session() -> bool:
                         st.session_state.useremail = email
                         st.session_state.role = role
                         st.session_state.signout = False
-                        st.session_state.login_timestamp = float(
-                            login_timestamp) if login_timestamp else time.time()
+                        st.session_state.login_timestamp = float(login_timestamp) if login_timestamp else time.time()
                         st.session_state.session_expiry = float(session_expiry)
 
-                        logger.info(
-                            f"✅ Session restored from cookies for user: {username}")
+                        logger.info(f"✅ Session restored from cookies for user: {username}")
                         return True
                     else:
                         logger.debug("Cookie session expired")
+                        # Clear expired cookies
+                        _cookies_instance["signout"] = "True"
                 else:
                     logger.debug("Incomplete cookie data")
             except Exception as e:
@@ -424,50 +434,30 @@ def load_cookie_to_session() -> bool:
         else:
             logger.debug("Cookies not available")
 
-        # Strategy 2: Try URL parameter fallback
-        logger.debug("Strategy 2: Attempting URL parameter restoration...")
-        try:
-            fallback_data = _load_from_url_fallback()
-            if fallback_data and fallback_data.get("session_expiry", 0) > time.time():
-                st.session_state.username = fallback_data["username"]
-                st.session_state.useremail = fallback_data["email"]
-                st.session_state.role = fallback_data["role"]
-                st.session_state.signout = False
-                st.session_state.login_timestamp = fallback_data["login_timestamp"]
-                st.session_state.session_expiry = fallback_data["session_expiry"]
-
-                logger.info(
-                    f"✅ Session restored from URL fallback for user: {fallback_data['username']}")
-                return True
-            else:
-                logger.debug("URL fallback session expired or not found")
-        except Exception as e:
-            logger.debug(f"Failed to load from URL fallback: {e}")
-
-        # Strategy 3: Check if we already have valid session state
-        logger.debug("Strategy 3: Checking existing session state...")
+        # Strategy 2: Check if we already have valid session state
+        logger.debug("Strategy 2: Checking existing session state...")
         if (hasattr(st.session_state, 'username') and
             hasattr(st.session_state, 'useremail') and
             hasattr(st.session_state, 'session_expiry') and
-                not st.session_state.get('signout', True)):
+            not st.session_state.get('signout', True)):
 
-            logger.debug(
-                f"Found existing session: username={st.session_state.username}, expiry={st.session_state.session_expiry}")
+            logger.debug(f"Found existing session: username={st.session_state.username}, expiry={st.session_state.session_expiry}")
 
             if st.session_state.session_expiry > time.time():
-                logger.info(
-                    f"✅ Session already active for user: {st.session_state.username}")
+                logger.info(f"✅ Session already active for user: {st.session_state.username}")
                 return True
             else:
                 logger.debug("Session state expired")
+                # Clear expired session
+                st.session_state.signout = True
         else:
             logger.debug("No valid existing session state")
 
-        logger.info("❌ No valid session found in any storage method")
+        logger.info("❌ No valid session found - user needs to login")
         return False
 
     except Exception as e:
-        logger.error(f"Error loading session: {e}")
+        logger.error(f"Error during session restoration: {e}")
         return False
 
 

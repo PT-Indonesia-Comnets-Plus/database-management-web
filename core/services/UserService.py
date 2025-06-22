@@ -117,16 +117,10 @@ class UserService:
 
             # Save to cookies with 24-hour timeout
             cookie_result = save_user_to_cookie(username, email, role)            # Store user_uid for logout logging
-            st.session_state.user_uid = user.uid
-
+            st.session_state.user_uid = user.uid            
             if cookie_result['success']:
                 logger.info(
                     f"Session created successfully for user: {username} using {cookie_result['method']}")
-
-                # Set flag to show persistent login prompt after page rerun if URL fallback was used
-                if cookie_result['requires_url_click']:
-                    st.session_state.show_persistent_login_prompt = True
-                    logger.info("🔗 Persistent login prompt flag set - will show after rerun")
             else:
                 logger.warning("Failed to save user data")
 
