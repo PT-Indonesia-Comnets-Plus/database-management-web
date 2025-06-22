@@ -3,7 +3,7 @@ import streamlit as st
 # Import with error handling
 try:
     from core import initialize_session_state
-    from core.utils.session_manager import check_session_timeout
+    from core.utils.session_manager import ensure_valid_session, display_session_warning
 except ImportError as e:
     st.error(f"Import error: {e}")
     st.error("Please ensure all required modules are installed and accessible.")
@@ -13,23 +13,20 @@ from features.admin.controller import AdminPage
 
 initialize_session_state()
 
-# Check session timeout first
-if check_session_timeout():
-    st.error("Your session has expired. Please login again.")
-    st.switch_page("Main_Page.py")
+# Ensure valid session - this handles all session checks and redirects
+if not ensure_valid_session():
     st.stop()
 
-# Check if user is authenticated and has admin role
-if not st.session_state.get("username") or st.session_state.get("signout", True):
-    st.error("Please login to access this page.")
-    st.switch_page("Main_Page.py")
-    st.stop()
-
+# Check admin role specifically
 user_role = st.session_state.get("role", "")
 if user_role.lower() != "admin":
-    st.error("Access denied. Admin privileges required.")
+    st.error("🚫 Access denied. Admin privileges required.")
+    st.info("Please contact administrator if you believe this is an error.")
     st.switch_page("pages/1 Home Page.py")
     st.stop()
+
+# Display session warning if needed
+display_session_warning()
 
 # Display session info in sidebar
 with st.sidebar:
