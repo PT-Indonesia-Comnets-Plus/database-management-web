@@ -150,15 +150,13 @@ def _initialize_cookies(force_reinit: bool = False):
                 return None, False
         except (ImportError, AttributeError):
             # If we can't check context, proceed anyway
-            pass
-
-        # Detect environment
+            pass        # Detect environment
         is_cloud = is_streamlit_cloud()
         logger.info(
             f"Environment detected: {'Streamlit Cloud' if is_cloud else 'Local Development'}")
 
         try:
-            # Use unique key to prevent duplicate element issues
+            # Use unique prefix to prevent duplicate element issues
             unique_suffix = hashlib.md5(
                 f"{time.time()}_{is_cloud}".encode()).hexdigest()[:8]
 
@@ -166,18 +164,16 @@ def _initialize_cookies(force_reinit: bool = False):
                 # On Streamlit Cloud, use cloud-optimized settings
                 logger.info("Initializing cookies for Streamlit Cloud")
                 cookies = EncryptedCookieManager(
-                    prefix="IconnetCloud",
+                    prefix=f"IconnetCloud_{unique_suffix}",
                     password=st.secrets.get(
-                        "cookie_password", "iconnet_cloud_secure_2025"),
-                    key=f"cloud_cookies_{unique_suffix}"
+                        "cookie_password", "iconnet_cloud_secure_2025")
                 )
             else:
                 # Local development
                 logger.info("Initializing cookies for local development")
                 cookies = EncryptedCookieManager(
-                    prefix="IconnetLocal",
-                    password="iconnet_local_dev_key",
-                    key=f"local_cookies_{unique_suffix}"
+                    prefix=f"IconnetLocal_{unique_suffix}",
+                    password="iconnet_local_dev_key"
                 )
         except Exception as e:
             logger.warning(f"Failed to initialize cookie manager: {e}")

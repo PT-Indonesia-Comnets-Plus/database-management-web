@@ -15,7 +15,7 @@ import dns.resolver
 from core.utils.cookies import save_user_to_cookie, clear_cookies
 
 # Session configuration
-SESSION_TIMEOUT_HOURS = 7  # 7 hours session timeout
+SESSION_TIMEOUT_HOURS = 24  # 24 hours session timeout (same as cookies.py)
 SESSION_TIMEOUT_SECONDS = SESSION_TIMEOUT_HOURS * 3600
 
 logger = logging.getLogger(__name__)
