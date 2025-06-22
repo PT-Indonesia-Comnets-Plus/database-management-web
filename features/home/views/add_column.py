@@ -579,8 +579,7 @@ class ColumnManager:
 def render_add_column_ui():
     """Main UI for adding columns."""
 
-    st.markdown("# 🔧 Kelola Kolom Database")
-    st.markdown("Tambah kolom baru ke database tanpa mengubah kode aplikasi.")
+    st.title("🔧 Management Column")
 
     # Initialize database connection
     try:
@@ -770,8 +769,7 @@ def render_add_column_form(column_manager):
                 "Dibuat oleh",
                 value="admin",
                 placeholder="Nama user yang membuat"
-            )        # Preview section
-        st.markdown("### 👁️ Preview")
+            )
         if display_name:
             internal_name = display_name.lower().replace(' ', '_').replace('-', '_')
             internal_name = ''.join(

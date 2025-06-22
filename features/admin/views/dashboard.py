@@ -91,8 +91,3 @@ def app(user_data_service: UserDataService):
         except Exception as e:
             st.error(
                 f"An error occurred while displaying the login/logout activity: {e}")
-
-    # Placeholder for more interactive elements or charts
-    st.divider()
-    st.subheader("Further Analysis (Placeholder)")
-    st.info("More interactive charts and data tables can be added here, e.g., user demographics, content engagement, etc.")

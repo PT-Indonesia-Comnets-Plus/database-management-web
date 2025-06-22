@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 import logging
 import streamlit as st
-from firebase_admin import exceptions
+from firebase_admin import exceptions, auth as firebase_auth
 import requests
 import re
 import dns.resolver
@@ -520,17 +520,19 @@ class UserService:
                 'username', '==', username).limit(1).get()
             if existing_users:
                 st.warning("Username already taken. Please choose another.")
-                return
-
-            # Check if email already exists in Firebase Auth
+                return            # Check if email already exists in Firebase Auth
             try:
                 existing_user = self.auth.get_user_by_email(email)
                 if existing_user:
                     st.warning(
                         "Email already registered. Please use a different email or try logging in.")
                     return
-            except exceptions.UserNotFoundError:
+            except firebase_auth.UserNotFoundError:
                 # This is good - email doesn't exist yet
+                pass
+            except Exception as e:
+                # Handle other potential Firebase errors
+                logger.warning(f"Error checking existing user: {e}")
                 pass
 
             # Generate and send OTP
@@ -560,15 +562,14 @@ class UserService:
             logger.info(
                 f"Verified stored data - Password length: {len(stored_data.get('password', ''))}")
 
-            st.success(otp_message)
-
             # Set flag to show OTP verification form
+            st.success(otp_message)
             st.session_state.show_otp_verification = True
             st.session_state.verification_email = email
 
         except ValidationError as e:
             st.warning(str(e))
-        except exceptions.AlreadyExistsError:
+        except firebase_auth.EmailAlreadyExistsError:
             st.warning("Email or username already taken.")
         except Exception as e:
             logger.error(f"Error during signup: {e}")
@@ -624,9 +625,7 @@ class UserService:
                 "email_verified": True,  # Email verified via OTP
                 "otp_verified_at": datetime.now().strftime("%Y-%m-%d %H:%M")
             }
-            user_ref.set(user_data)
-
-            # Clean up pending registration
+            user_ref.set(user_data)            # Clean up pending registration
             # Clean up verification UI state
             del st.session_state.pending_registration[email]
             if 'show_otp_verification' in st.session_state:
@@ -639,7 +638,7 @@ class UserService:
 
             logger.info(f"User {username} registered successfully")
 
-        except exceptions.AlreadyExistsError:
+        except firebase_auth.EmailAlreadyExistsError:
             st.error("User already exists.")
         except Exception as e:
             logger.error(f"Error completing registration: {e}")
