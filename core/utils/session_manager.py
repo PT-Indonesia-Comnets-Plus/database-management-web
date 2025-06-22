@@ -155,12 +155,11 @@ def clear_expired_session() -> None:
 
         # Clear timestamp information
         _safe_session_state_delete('login_timestamp')
-        _safe_session_state_delete('session_expiry')
-
         # Clear cookies if available
+        _safe_session_state_delete('session_expiry')
         try:
-            from core.utils.cookies import clear_user_cookie
-            clear_user_cookie()
+            from core.utils.cookies import clear_cookies
+            clear_cookies()
         except Exception as e:
             logger.warning(f"Could not clear cookies: {e}")
 

@@ -12,7 +12,7 @@ import requests
 import re
 import dns.resolver
 
-from core.utils.cookies import save_user_to_cookie, clear_user_cookie
+from core.utils.cookies import save_user_to_cookie, clear_cookies
 
 # Session configuration
 SESSION_TIMEOUT_HOURS = 7  # 7 hours session timeout
@@ -211,9 +211,7 @@ class UserService:
             user_uid = st.session_state.get("user_uid", "")
 
             # Clear cookies and session state
-            clear_user_cookie()
-
-            # Log logout activity
+            clear_cookies()            # Log logout activity
             if user_uid:
                 self.save_login_logout(user_uid, "logout")
 
@@ -222,7 +220,7 @@ class UserService:
         except Exception as e:
             logger.error(f"Error during logout: {e}")
             # Force clear session state even if other operations fail
-            clear_user_cookie()
+            clear_cookies()
 
     def verify_password(self, email: str, password: str) -> Optional[Dict[str, Any]]:
         """
@@ -496,13 +494,13 @@ class UserService:
 
                     if current_time > expiry_time:
                         logger.info(f"Session expired for user {username}")
-                        clear_user_cookie()  # Clear expired session
+                        clear_cookies()  # Clear expired session
                         return False
 
                 except (ValueError, TypeError) as e:
                     logger.warning(
                         f"Invalid session expiry format: {session_expiry}, error: {e}")
-                    clear_user_cookie()  # Clear invalid session
+                    clear_cookies()  # Clear invalid session
                     return False
             else:
                 # No session_expiry set, check login_timestamp and create session_expiry
@@ -523,19 +521,19 @@ class UserService:
                         if current_time > expiry_time:
                             logger.info(
                                 f"Session expired for user {username} (calculated from login_timestamp)")
-                            clear_user_cookie()  # Clear expired session
+                            clear_cookies()  # Clear expired session
                             return False
 
                     except (ValueError, TypeError) as e:
                         logger.warning(
                             f"Invalid login_timestamp format: {login_timestamp}, error: {e}")
-                        clear_user_cookie()  # Clear invalid session
+                        clear_cookies()  # Clear invalid session
                         return False
                 else:
                     # No timestamps available - this shouldn't happen for valid sessions
                     logger.warning(
                         f"No session timestamps found for user {username} - session invalid")
-                    clear_user_cookie()  # Clear invalid session
+                    clear_cookies()  # Clear invalid session
                     return False
 
             # Session is valid
@@ -551,7 +549,7 @@ class UserService:
             username = st.session_state.get("username", "")
 
             # Clear cookies and session state
-            clear_user_cookie()
+            clear_cookies()
 
             logger.info(f"Expired session cleared for user: {username}")
 

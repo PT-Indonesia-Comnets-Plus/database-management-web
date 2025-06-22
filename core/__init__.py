@@ -129,11 +129,11 @@ def initialize_session_state() -> bool:
                         if hasattr(st.session_state, 'login_timestamp'):
                             del st.session_state.login_timestamp
                         if hasattr(st.session_state, 'session_expiry'):
+                            # Also clear cookies if available
                             del st.session_state.session_expiry
-                        # Also clear cookies if available
                         try:
-                            from core.utils.cookies import clear_user_cookie
-                            clear_user_cookie()
+                            from core.utils.cookies import clear_cookies
+                            clear_cookies()
                         except Exception as e:
                             logger.warning(
                                 f"Could not clear cookies on session expiry: {e}")
