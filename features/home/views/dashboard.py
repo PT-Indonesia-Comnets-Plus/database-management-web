@@ -679,18 +679,57 @@ def app(asset_data_service: AssetDataService):
             f"✅ Verifikasi filtering: {len(df_for_map)} aset ditemukan untuk {kota_filter}")
     else:
         # Prepare map data with enhanced caching and sampling
+        # ENHANCED FAT ID SEARCH: Search full dataset first if user is searching for specific FAT ID
         df_for_map = df_filtered_selection.copy()
+
+    df_search_specific = None
+    if fat_id_search:
+        # Search in the full filtered dataset (before map sampling/limiting)
+        df_search_full = df_for_map[
+            df_for_map['fat_id'].astype(str).str.contains(
+                fat_id_search, case=False, na=False)
+        ]
+
+        if not df_search_full.empty:
+            # Ensure searched FAT IDs have valid coordinates for map display
+            df_search_specific = df_search_full[
+                df_search_full['latitude_fat'].notna() &
+                df_search_full['longitude_fat'].notna()
+            ].copy()
+
+            if df_search_specific.empty:
+                st.warning(
+                    f"⚠️ FAT ID '{fat_id_search}' ditemukan tapi tidak memiliki koordinat valid untuk peta")
+            else:
+                st.success(
+                    f"✅ Ditemukan {len(df_search_specific)} FAT ID '{fat_id_search}' dengan koordinat valid")
+        else:
+            st.warning(
+                f"❌ FAT ID '{fat_id_search}' tidak ditemukan di dataset")
+
     with st.spinner("Preparing optimized map data..."):
+        # Prepare base map data with normal limits
         df_map_ready = prepare_map_data_enhanced(
             df_for_map,
             max_markers=max_markers_limit,
             kota_filter=kota_filter
-        )
+        )        # If we have specific search results, ensure they're included in map data
+        if df_search_specific is not None and not df_search_specific.empty:
+            # Merge search results with map data, giving priority to search results
+            search_fat_ids = df_search_specific['fat_id'].unique()
+
+            # Remove any existing search results from map_ready to avoid duplicates
+            df_map_ready = df_map_ready[~df_map_ready['fat_id'].isin(
+                search_fat_ids)]
+
+            # Add search results at the beginning
+            df_map_ready = pd.concat(
+                [df_search_specific, df_map_ready], ignore_index=True)
 
     if df_map_ready.empty:
         st.info(
             f"Tidak ada data aset dengan koordinat valid untuk peta ({kota_filter}).")
-        return    # Cek kolom penting untuk peta
+        return  # Cek kolom penting untuk peta
     required_map_cols_search = [
         'latitude_fat', 'longitude_fat', 'fat_id', 'kota_kab', 'total_hc', 'olt', 'fat_id_x', 'link_dokumen_feeder']
 
@@ -703,22 +742,27 @@ def app(asset_data_service: AssetDataService):
 
     # Initialize map with better performance settings
     map_center_default = [-7.5, 112.7]  # East Java
-    map_zoom_default = 8
-
-    # Calculate optimal center based on data and selected filter
+    map_zoom_default = 8    # Calculate optimal center based on data and selected filter
     if not df_map_ready.empty:
-        if kota_filter != 'All':
+        # If searching for specific FAT ID, center on search results
+        if df_search_specific is not None and not df_search_specific.empty:
+            map_center_default = [
+                df_search_specific['latitude_fat'].mean(),
+                df_search_specific['longitude_fat'].mean()
+            ]
+            map_zoom_default = 14 if len(df_search_specific) == 1 else 12
+        elif kota_filter != 'All':
             # For specific city, center on that city's data
             map_center_default = [
                 df_map_ready['latitude_fat'].mean(),
                 df_map_ready['longitude_fat'].mean()
             ]
-            map_zoom_default = 12  # Zoom closer for specific city        else:
+            map_zoom_default = 12  # Zoom closer for specific city
+        else:
             # For 'All', use broader view but still center on data
             map_center_default = [
                 df_map_ready['latitude_fat'].mean(),
-                df_map_ready['longitude_fat'].mean()
-            ]
+                df_map_ready['longitude_fat'].mean()]
             map_zoom_default = 8
 
     with st.spinner("Memuat peta..."):
@@ -726,43 +770,37 @@ def app(asset_data_service: AssetDataService):
         m = folium.Map(
             location=map_center_default,
             zoom_start=map_zoom_default,
-            tiles="OpenStreetMap",  # Faster than CartoDB
-            prefer_canvas=True  # Better performance for many markers
+            # Faster than CartoDB            prefer_canvas=True  # Better performance for many markers
+            tiles="OpenStreetMap",
         )
 
-        if fat_id_search:
-            # Search functionality
-            df_search_result = df_map_ready[
-                df_map_ready['fat_id'].astype(str).str.contains(
-                    fat_id_search, case=False, na=False)
-            ]
+        if fat_id_search and df_search_specific is not None and not df_search_specific.empty:
+            # Add search result markers first (highlighted, no clustering)
+            _add_markers_to_map_helper(m, df_search_specific.head(50),
+                                       f"🔍 Search: {fat_id_search}",
+                                       use_cluster=False, performance_limit=50)
 
-            if not df_search_result.empty:
-                st.success(
-                    f"Ditemukan {len(df_search_result)} aset dengan FAT ID mengandung: '{fat_id_search}'")
-
-                # Center on first result
-                first_asset = df_search_result.iloc[0]
-                m.location = [first_asset['latitude_fat'],
-                              first_asset['longitude_fat']]
-                m.zoom_start = 15
-
-                # Add search result markers (no clustering for search results)
-                _add_markers_to_map_helper(m, df_search_result.head(
-                    50), f"search: {fat_id_search}", use_cluster=False, performance_limit=50)
-            else:
-                st.warning(
-                    f"FAT ID '{fat_id_search}' tidak ditemukan. Menampilkan peta umum.")
-                # Fall back to general view
+            # Add other markers with clustering if there are more
+            other_markers = df_map_ready[~df_map_ready['fat_id'].isin(
+                df_search_specific['fat_id'])]
+            if not other_markers.empty and len(other_markers) > 10:
                 marker_cluster = MarkerCluster(
-                    name=f"Assets in {kota_filter}",
+                    name=f"Other Assets in {kota_filter}",
                     options={'maxClusterRadius': 50,
                              'spiderfyOnMaxZoom': False}
                 ).add_to(m)
                 _add_markers_to_map_helper(
-                    marker_cluster, df_map_ready, kota_filter, performance_limit=performance_limit)
+                    marker_cluster, other_markers, kota_filter, performance_limit=performance_limit)
+            elif not other_markers.empty:
+                _add_markers_to_map_helper(m, other_markers, kota_filter,
+                                           use_cluster=False, performance_limit=performance_limit)
         else:
-            # General view with clustering for performance
+            # Normal map view without specific search
+            if fat_id_search:
+                st.warning(
+                    f"FAT ID '{fat_id_search}' tidak ditemukan. Menampilkan peta umum.")
+
+            # Standard clustering logic for general view
             if len(df_map_ready) > 100:
                 marker_cluster = MarkerCluster(
                     name=f"Assets in {kota_filter}",

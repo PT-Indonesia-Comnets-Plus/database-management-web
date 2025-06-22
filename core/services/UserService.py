@@ -2,6 +2,7 @@
 
 import random
 import string
+import os
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 import logging
@@ -44,8 +45,7 @@ class UserService:
     This service handles:
     - User login and logout
     - User registration and verification
-    - Password validation
-    - Session management
+    - Password validation    - Session management
     - Activity logging
     """
 
@@ -62,7 +62,41 @@ class UserService:
         self.fs = firestore
         self.auth = auth
         self.firebase_api = firebase_api
+        # Initialize secure session manager (lazy import to avoid circular dependency)
         self.email_service = email_service
+        self._secure_session_manager = None
+        self._enhanced_cookies_session = None
+
+        # Session strategy: 'cloud', 'cookies', atau 'hybrid'
+        self.session_strategy = os.getenv(
+            'ICONNET_SESSION_STRATEGY', 'hybrid')    @ property
+
+    def secure_session_manager(self):
+        """Lazy initialize secure session manager"""
+        if self._secure_session_manager is None:
+            try:
+                from core.services.SecureSessionManager import get_secure_session_manager
+                db_pool = st.session_state.get("db_pool")
+                self._secure_session_manager = get_secure_session_manager(
+                    db_pool)
+                logger.info("🔐 Secure session manager initialized")
+            except ImportError as e:
+                logger.warning(f"SecureSessionManager not available: {e}")
+                self._secure_session_manager = None
+        return self._secure_session_manager
+
+    @property
+    def enhanced_cookies_session(self):
+        """Lazy initialize enhanced cookies session manager"""
+        if self._enhanced_cookies_session is None:
+            try:
+                from core.services.EnhancedCookiesSession import get_enhanced_cookies_session
+                self._enhanced_cookies_session = get_enhanced_cookies_session()
+                logger.info("🍪 Enhanced cookies session manager initialized")
+            except ImportError as e:
+                logger.warning(f"EnhancedCookiesSession not available: {e}")
+                self._enhanced_cookies_session = None
+        return self._enhanced_cookies_session
 
     def _validate_login_input(self, email: str, password: str) -> None:
         """Validate login input parameters."""
@@ -104,6 +138,7 @@ class UserService:
         if len(password) > 30:
             # Optional: Check for password strength
             raise ValidationError("Password must be less than 128 characters")
+
         has_upper = any(c.isupper() for c in password)
         has_lower = any(c.islower() for c in password)
         has_digit = any(c.isdigit() for c in password)
@@ -119,77 +154,121 @@ class UserService:
             email = user.email
             role = user_data['role']
 
-            # Create login timestamp for session timeout
-            login_timestamp = time.time()
-            session_expiry = login_timestamp + SESSION_TIMEOUT_SECONDS
-
-            # Set session state with timeout information
-            st.session_state.username = username
-            st.session_state.useremail = email
-            st.session_state.role = role
-            st.session_state.signout = False
-            st.session_state.login_timestamp = login_timestamp
-            st.session_state.session_expiry = session_expiry
             logger.info(
-                f"Session state set - username: {username}, role: {role}, signout: False, expires: {datetime.fromtimestamp(session_expiry)}")
+                f"Creating session using strategy: {self.session_strategy}")
 
-            # Save to cookies (legacy support) with timestamp
-            cookie_saved = self._save_user_to_cookie_with_timestamp(
-                username, email, role, login_timestamp)
-
-            if not cookie_saved:
-                logger.warning("Failed to save user data to cookies")
-
-            # Save to cloud session storage (primary) with timestamp
-            try:
-                cloud_session_storage = st.session_state.get(
-                    "cloud_session_storage")
-                if cloud_session_storage:
-                    # Convert timestamps to ISO format for cloud storage
-                    login_timestamp_iso = datetime.fromtimestamp(
-                        login_timestamp).isoformat()
-                    session_expiry_iso = datetime.fromtimestamp(
-                        session_expiry).isoformat()
-
-                    session_saved = cloud_session_storage.save_session(
-                        username, email, role,
-                        login_timestamp=login_timestamp_iso,
-                        session_expiry=session_expiry_iso)
-                    if session_saved:
+            # STRATEGY 1: Cloud Session (Paling aman untuk public deployment)
+            if self.session_strategy in ['cloud', 'hybrid']:
+                if self.secure_session_manager:
+                    success, message = self.secure_session_manager.create_secure_session(
+                        username, email, role, user.uid
+                    )
+                    if success:
                         logger.info(
-                            "User session saved to cloud session storage")
+                            f"🔐 Secure cloud session created for user: {username}")
+                        self.save_login_logout(user.uid, "login")
+                        logger.info(
+                            f"Enhanced secure session created successfully for user: {username}")
+                        return
                     else:
                         logger.warning(
-                            "Failed to save to cloud session storage")
-                else:
-                    logger.warning("Cloud session storage not available")
-            except Exception as e:
-                logger.error(f"Error saving to cloud session storage: {e}")
+                            f"Secure session creation failed: {message}")
+                        if self.session_strategy == 'cloud':
+                            raise UserServiceError(
+                                f"Cloud session creation failed: {message}")
 
-            # Save to legacy session storage (fallback)
-            try:
-                session_storage_service = st.session_state.get(
-                    "session_storage_service")
-                if session_storage_service:
-                    session_saved = session_storage_service.save_user_session(
+            # STRATEGY 2: Enhanced Cookies (Alternatif yang lebih aman dari cookies biasa)
+            if self.session_strategy in ['cookies', 'hybrid']:
+                if self.enhanced_cookies_session:
+                    success = self.enhanced_cookies_session.create_session(
                         username, email, role)
-                    if session_saved:
+                    if success:
                         logger.info(
-                            "User session saved to legacy session storage service")
+                            f"🍪 Enhanced cookies session created for user: {username}")
+                        self.save_login_logout(user.uid, "login")
+                        return
                     else:
                         logger.warning(
-                            "Failed to save to legacy session storage service")
-                else:
-                    logger.warning(
-                        "Legacy session storage service not available")
-            except Exception as e:
-                logger.error(
-                    f"Error saving to legacy session storage service: {e}")
+                            "Enhanced cookies session creation failed")
+                        if self.session_strategy == 'cookies':
+                            raise UserServiceError(
+                                "Enhanced cookies session creation failed")
 
-            # Log activity
-            self.save_login_logout(user.uid, "login")
+            # FALLBACK: Legacy session creation (hanya untuk hybrid mode)
+            if self.session_strategy == 'hybrid':
+                logger.warning("Falling back to legacy session creation")
+                # Create login timestamp for session timeout
+                login_timestamp = time.time()
+                session_expiry = login_timestamp + SESSION_TIMEOUT_SECONDS
 
-            logger.info(f"Session created successfully for user: {username}")
+                # Set session state with timeout information
+                st.session_state.username = username
+                st.session_state.useremail = email
+                st.session_state.role = role
+                st.session_state.signout = False
+                st.session_state.login_timestamp = login_timestamp
+                st.session_state.session_expiry = session_expiry
+                st.session_state.session_type = 'legacy'
+                logger.info(
+                    f"Legacy session state set - username: {username}, role: {role}, signout: False, expires: {datetime.fromtimestamp(session_expiry)}")
+
+                # Save to cookies (legacy support) with timestamp
+                cookie_saved = self._save_user_to_cookie_with_timestamp(
+                    username, email, role, login_timestamp)
+
+                if not cookie_saved:
+                    logger.warning("Failed to save user data to cookies")
+
+                # Save to cloud session storage (primary) with timestamp
+                try:
+                    cloud_session_storage = st.session_state.get(
+                        "cloud_session_storage")
+                    if cloud_session_storage:
+                        # Convert timestamps to ISO format for cloud storage
+                        login_timestamp_iso = datetime.fromtimestamp(
+                            login_timestamp).isoformat()
+                        session_expiry_iso = datetime.fromtimestamp(
+                            session_expiry).isoformat()
+
+                        session_saved = cloud_session_storage.save_session(
+                            username, email, role,
+                            login_timestamp=login_timestamp_iso,
+                            session_expiry=session_expiry_iso)
+                        if session_saved:
+                            logger.info(
+                                "User session saved to cloud session storage")
+                        else:
+                            logger.warning(
+                                "Failed to save to cloud session storage")
+                    else:
+                        logger.warning("Cloud session storage not available")
+                except Exception as e:
+                    # Save to legacy session storage (fallback)
+                    logger.error(f"Error saving to cloud session storage: {e}")
+                try:
+                    session_storage_service = st.session_state.get(
+                        "session_storage_service")
+                    if session_storage_service:
+                        session_saved = session_storage_service.save_user_session(
+                            username, email, role)
+                        if session_saved:
+                            logger.info(
+                                "User session saved to legacy session storage service")
+                        else:
+                            logger.warning(
+                                "Failed to save to legacy session storage service")
+                    else:
+                        logger.warning(
+                            "Legacy session storage service not available")
+                except Exception as e:
+                    logger.error(
+                        f"Error saving to legacy session storage service: {e}")
+
+                # Log activity
+                self.save_login_logout(user.uid, "login")
+
+                logger.info(
+                    f"Session created successfully for user: {username}")
 
         except Exception as e:
             logger.error(f"Failed to create session: {e}")
@@ -255,6 +334,41 @@ class UserService:
         """
         try:
             username = st.session_state.get('username', '')
+
+            # Use secure session manager for logout if available (NEW ENHANCED SECURITY)
+            if self.secure_session_manager and username:
+                try:
+                    # Revoke all user sessions for security
+                    revoked = self.secure_session_manager.revoke_all_user_sessions(
+                        username)
+                    if revoked:
+                        logger.info(
+                            f"🔐 All secure sessions revoked for user: {username}")
+
+                    # Clear current session state
+                    if "session_id" in st.session_state:
+                        del st.session_state["session_id"]
+
+                    # Log activity for secure session
+                    if username:
+                        self.save_login_logout(username, "logout")
+
+                    # Clear session state
+                    st.session_state.signout = True
+                    st.session_state.username = ''
+                    st.session_state.useremail = ''
+                    st.session_state.role = ''
+                    st.session_state.security_violations = 0  # Reset security violations
+
+                    logger.info(
+                        f"🔐 Enhanced secure logout completed for user: {username}")
+                    return
+
+                except Exception as e:
+                    logger.warning(
+                        f"Secure logout failed, falling back to legacy logout: {e}")
+
+            # FALLBACK: Legacy logout process
             if username:
                 self.save_login_logout(username, "logout")
 
@@ -346,6 +460,28 @@ class UserService:
             if not st.session_state.get('username'):
                 return False
 
+            # Use secure session validation if available (NEW ENHANCED SECURITY)
+            if self.secure_session_manager:
+                session_id = st.session_state.get('session_id')
+                if session_id:
+                    is_valid, message = self.secure_session_manager.validate_session(
+                        session_id)
+                    if is_valid:
+                        logger.debug(
+                            f"🔐 Secure session validation passed for user: {st.session_state.get('username')}")
+                        return True
+                    else:
+                        logger.warning(
+                            f"🔐 Secure session validation failed: {message}")
+                        # Clear invalid session data
+                        if "session_id" in st.session_state:
+                            del st.session_state["session_id"]
+                        return False
+                else:
+                    logger.debug(
+                        "No secure session ID found, falling back to legacy validation")
+
+            # FALLBACK: Legacy session validation
             # Check session expiry
             current_time = time.time()
             session_expiry = st.session_state.get('session_expiry')
