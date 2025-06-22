@@ -601,10 +601,8 @@ def render_add_column_ui():
 
     except Exception as e:
         st.error(f"❌ Error initialize: {e}")
-        return
-
-    # Tabs for different functions
-    tab1, tab2, tab3, tab4 = st.tabs(
+        return    # Tabs for different functions
+    tab1, tab2, tab3 = st.tabs(
         ["📋 Daftar Kolom", "➕ Tambah Kolom", "🔗 Status Integrasi"])
 
     # Tab 1: List existing columns
@@ -615,8 +613,8 @@ def render_add_column_ui():
     with tab2:
         render_add_column_form(column_manager)
 
-    # Tab 4: Integration status
-    with tab4:
+    # Tab 3: Integration status
+    with tab3:
         render_integration_status(column_manager)
 
 
