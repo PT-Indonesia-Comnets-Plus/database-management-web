@@ -67,18 +67,21 @@ def initialize_session_state() -> bool:
                 logger.info("Session storage service initialized successfully")
             except Exception as e:
                 logger.error(
-                    f"Failed to initialize session storage service: {e}")
-
-        # Load user session data from cookies only (simplified approach)
+                    f"Failed to initialize session storage service: {e}")        # Load user session data from cookies and fallback storage
         if "username" not in st.session_state or not st.session_state.get("username"):
             try:
-                # Load session from cookies
-                load_cookie_to_session(st.session_state)
+                # Load session from cookies or fallback storage
+                session_loaded = load_cookie_to_session(st.session_state)
 
                 username = st.session_state.get("username", "")
-                if username:
+                if username and session_loaded:
                     logger.info(
-                        f"User session loaded from cookies: {username}")
+                        f"User session restored successfully: {username}")
+                elif username:
+                    logger.info(
+                        f"User session loaded from session state: {username}")
+                else:
+                    logger.debug("No previous session found")
 
             except Exception as e:
                 logger.error(f"Failed to load user session: {e}")
