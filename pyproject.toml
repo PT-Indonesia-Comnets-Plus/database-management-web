@@ -176,4 +176,5 @@ dependencies = [
     "dnspython>=2.7.0",
     "streamlit-js-eval==0.1.7",
     "extra-streamlit-components==0.1.60",
+    "tavily-python>=0.7.7",
 ]

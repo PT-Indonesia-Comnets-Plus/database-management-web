@@ -9,7 +9,6 @@ import json
 from core.services.agent_graph.build_graph import build_graph
 from core.services.agent_graph.prompts.system_prompts import get_chatbot_ui_system_prompt
 from core.services.agent_graph.debug_logger import debug_logger
-from core.services.agent_graph.debug_ui import display_agent_debug_panel
 from typing import Any
 # from static.load_css import load_custom_css # Akan didefinisikan di sini jika tidak ada
 
@@ -355,19 +354,15 @@ def app() -> None:
     """
     Fungsi utama untuk menjalankan aplikasi Streamlit Integrated ICONNET Assistant.
     """
-    st.title("🤖 ICONNET Assistant")
-
-    # Load custom CSS
-    load_custom_css(os.path.join("static", "css", "style.css"))
-
-    # Display debug panel in sidebar
-    display_agent_debug_panel()
-
-    # Cek database pool
+    st.title("🤖 ICONNET Assistant")    # Load custom CSS
+    load_custom_css(os.path.join("static", "css", "style.css")
+                    )    # Cek database pool
     db_pool = st.session_state.get("db")
     if not db_pool:
-        st.error(
-            "Koneksi Database Pool tidak tersedia. Fitur RAG dan SQL tidak akan berfungsi.")  # Build atau load agent graph dengan cache version baru untuk visualization fix
+        st.warning(
+            "⚠️ Database connection tidak tersedia. Fitur RAG dan SQL search mungkin tidak berfungsi optimal. "
+            "Sistem akan tetap mencoba menggunakan tools lain yang tersedia."
+        )  # Build atau load agent graph dengan cache version baru untuk visualization fix
 
     @st.cache_resource
     def get_graph(_graph_version="v2.3"):

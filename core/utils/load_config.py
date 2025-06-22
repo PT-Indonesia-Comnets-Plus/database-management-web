@@ -124,6 +124,15 @@ class LoadToolsConfig:
             "max_research_loops")
         self.max_retries = web_search_config.get("max_retries")
 
+        # Tavily configuration
+        tavily_config = self.app_config.get("tavily_search_api", {})
+        self.tavily_max_results = tavily_config.get(
+            "tavily_search_max_results", 2)
+
+        # Get Tavily API key from environment or secrets
+        self.tavily_api_key = os.getenv(
+            "TAVILY_API_KEY") or st.secrets.get("tavily", {}).get("api_key")
+
     def _load_rag_config(self) -> None:
         """Load Retrieval Augmented Generation (RAG) configuration."""
         rag_config = self.app_config.get("rag_configs", {})

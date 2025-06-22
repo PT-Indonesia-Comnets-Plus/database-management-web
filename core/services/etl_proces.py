@@ -2,7 +2,6 @@ from psycopg2 import pool, Error as Psycopg2Error
 from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
 import re
-import re
 import pandas as pd
 
 

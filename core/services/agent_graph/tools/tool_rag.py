@@ -128,15 +128,44 @@ def search_internal_documents(query: str) -> str:
     Best suited for questions like "how to", "what is the policy on", or "explain the procedure for".
 
     Args:
-        query (str): The user’s question or topic to search for.
+        query (str): The user's question or topic to search for.
 
     Returns:
         str: A summarized or relevant snippet from internal documents.
-    """
+    """    # Get database pool from session state
     db_pool = st.session_state.get("db")
     k_results = TOOLS_CFG.rag_k
 
+    # Check if database connection is available
+    if db_pool is None:
+        # Try to reinitialize database connection as fallback
+        try:
+            from ....utils.database import connect_db
+            db_pool, _ = connect_db()
+            if db_pool is not None:
+                st.session_state.db = db_pool  # Update session state
+                print("✅ Database connection reestablished successfully")
+            else:
+                error_msg = "Database connection not available and could not be reestablished. RAG search cannot be performed."
+                print(f"❌ {error_msg}")
+                return f"Error: {error_msg}"
+        except Exception as e:
+            error_msg = f"Database connection failed and could not be reestablished: {e}"
+            print(f"❌ {error_msg}")
+            return f"Error: {error_msg}"
+
     try:
+        # Validate database pool is functional
+        test_conn = None
+        try:
+            test_conn = db_pool.getconn()
+            if test_conn is None or test_conn.closed != 0:
+                raise Exception("Database connection is closed or invalid")
+            db_pool.putconn(test_conn)
+        except Exception as e:
+            print(f"❌ Database connection validation failed: {e}")
+            return f"Error: Database connection is not functional. Details: {e}"
+
         search_results = _search_similar_documents_in_db(
             query=query,
             db_pool=db_pool,

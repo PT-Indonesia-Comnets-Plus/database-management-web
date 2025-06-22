@@ -24,18 +24,22 @@ def initialize_session_state() -> bool:
     """Initialize all session state and services."""
     try:
         # Configure for cloud deployment if needed
-        configure_for_cloud()
-
-        # Initialize Database and Storage FIRST
+        configure_for_cloud()        # Initialize Database and Storage FIRST
         if "db" not in st.session_state or "storage" not in st.session_state:
             try:
                 db_pool, storage = connect_db()
                 st.session_state.db = db_pool
                 st.session_state.storage = storage
                 if db_pool is None:
-                    logger.warning("Database connection not available")
+                    logger.error(
+                        "Database connection failed - RAG and SQL tools will not function")
+                else:
+                    logger.info(
+                        "Database connection pool created successfully")
                 if storage is None:
                     logger.warning("Storage connection not available")
+                else:
+                    logger.info("Storage connection created successfully")
             except Exception as e:
                 logger.error(f"Failed to connect to database: {e}")
                 st.session_state.db = None

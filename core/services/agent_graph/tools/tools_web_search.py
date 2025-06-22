@@ -1,7 +1,7 @@
 """
-Tools Web Search - Backend-Compatible Implementation
-Uses the exact same architecture and configuration as the backend project
-for optimal quota efficiency and robust research capabilities.
+Tools Web Search - Tavily-Compatible Implementation
+Uses Tavily for web search while maintaining the exact same architecture 
+and workflow as the backend project for robust research capabilities.
 """
 
 import os
@@ -10,7 +10,12 @@ from pydantic import BaseModel, Field
 from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
 from datetime import datetime
-from google.genai import Client
+
+# Import Tavily for web search
+try:
+    from tavily import TavilyClient
+except ImportError:
+    TavilyClient = None
 
 # Import configuration
 from core.utils.load_config import TOOLS_CFG
@@ -38,111 +43,20 @@ def get_current_date() -> str:
 
 def get_research_topic(messages) -> str:
     """Extract research topic from messages"""
-    if isinstance(messages, str):
-        return messages
-    elif isinstance(messages, list) and messages:
-        # Get the last human message content
-        for message in reversed(messages):
-            if hasattr(message, 'content'):
-                return message.content
-            elif isinstance(message, str):
-                return message
-    return "General research topic"
-
-
-def resolve_urls(grounding_chunks: List[Any], id: int) -> Dict[str, str]:
-    """Create short URLs map - exact backend implementation"""
-    prefix = f"https://vertexaisearch.cloud.google.com/id/"
-    urls = []
-
-    for chunk in grounding_chunks:
-        if hasattr(chunk, 'web') and hasattr(chunk.web, 'uri'):
-            urls.append(chunk.web.uri)
-
-    resolved_map = {}
-    for idx, url in enumerate(urls):
-        if url not in resolved_map:
-            resolved_map[url] = f"{prefix}{id}-{idx}"
-
-    return resolved_map
-
-
-def get_citations(response, resolved_urls_map: Dict[str, str]) -> List[Dict]:
-    """Extract citations from response - exact backend implementation"""
-    citations = []
-
-    if not response or not response.candidates:
-        return citations
-
-    candidate = response.candidates[0]
-    if (not hasattr(candidate, "grounding_metadata") or
-        not candidate.grounding_metadata or
-            not hasattr(candidate.grounding_metadata, "grounding_supports")):
-        return citations
-
-    for support in candidate.grounding_metadata.grounding_supports:
-        citation = {}
-
-        if not hasattr(support, "segment") or support.segment is None:
-            continue
-
-        start_index = (support.segment.start_index
-                       if support.segment.start_index is not None else 0)
-
-        if support.segment.end_index is None:
-            continue
-
-        citation["start_index"] = start_index
-        citation["end_index"] = support.segment.end_index
-        citation["segments"] = []
-
-        if (hasattr(support, "grounding_chunk_indices") and
-                support.grounding_chunk_indices):
-            for ind in support.grounding_chunk_indices:
-                try:
-                    chunk = candidate.grounding_metadata.grounding_chunks[ind]
-                    resolved_url = resolved_urls_map.get(chunk.web.uri, None)
-
-                    title = "Source"
-                    if hasattr(chunk.web, 'title') and chunk.web.title:
-                        title = chunk.web.title.split(
-                            ".")[0] if "." in chunk.web.title else chunk.web.title
-
-                    citation["segments"].append({
-                        "label": title,
-                        "short_url": resolved_url,
-                        "value": chunk.web.uri,
-                    })
-                except (IndexError, AttributeError):
-                    pass
-
-        citations.append(citation)
-
-    return citations
-
-
-def insert_citation_markers(text: str, citations_list: List[Dict]) -> str:
-    """Insert citation markers - exact backend implementation"""
-    if not citations_list:
-        return text
-
-    # Sort citations by end_index in descending order
-    sorted_citations = sorted(
-        citations_list, key=lambda c: (c["end_index"], c["start_index"]), reverse=True
-    )
-
-    modified_text = text
-    for citation_info in sorted_citations:
-        end_idx = citation_info["end_index"]
-        marker_to_insert = ""
-        for segment in citation_info["segments"]:
-            marker_to_insert += f" [{segment['label']}]({segment['short_url']})"
-        modified_text = (
-            modified_text[:end_idx] +
-            marker_to_insert + modified_text[end_idx:]
-        )
-
-    return modified_text
+    try:
+        if isinstance(messages, str):
+            return messages
+        elif isinstance(messages, list) and messages:
+            # Get the last human message content
+            for message in reversed(messages):
+                if hasattr(message, 'content') and message.content:
+                    return message.content
+                elif isinstance(message, str):
+                    return message
+        return "General research topic"
+    except Exception as e:
+        print(f"Warning: Error extracting research topic: {e}")
+        return "General research topic"
 
 
 # Core Research Functions with Backend Architecture
@@ -189,57 +103,101 @@ Context:
 
 
 def web_research(search_query: str, query_id: int = 0) -> Dict[str, Any]:
-    """Perform web research using backend's exact approach"""
+    """Perform web research using Tavily API"""
     try:
-        # Initialize client exactly as backend
-        genai_client = Client(api_key=TOOLS_CFG.gemini_api_key)
+        # Check if Tavily is available and configured
+        if TavilyClient is None:
+            raise ImportError("Tavily client not available")
 
-        # Backend's exact web searcher instructions
-        current_date = get_current_date()
-        web_searcher_instructions = """Conduct targeted Google Searches to gather the most recent, credible information on "{research_topic}" and synthesize it into a verifiable text artifact.
+        if not hasattr(TOOLS_CFG, 'tavily_api_key') or not TOOLS_CFG.tavily_api_key:
+            raise ValueError("Tavily API key not configured")
 
-Instructions:
-- Query should ensure that the most current information is gathered. The current date is {current_date}.
-- Conduct multiple, diverse searches to gather comprehensive information.
-- Consolidate key findings while meticulously tracking the source(s) for each specific piece of information.
-- The output should be a well-written summary or report based on your search findings. 
-- Only include the information found in the search results, don't make up any information.
+        # Initialize Tavily client
+        tavily_client = TavilyClient(api_key=TOOLS_CFG.tavily_api_key)
 
-Research Topic:
-{research_topic}"""
-
-        formatted_prompt = web_searcher_instructions.format(
-            current_date=current_date,
-            research_topic=search_query,
+        # Perform search using Tavily
+        search_result = tavily_client.search(
+            query=search_query,
+            max_results=TOOLS_CFG.tavily_max_results,
+            include_domains=None,
+            exclude_domains=None,
+            include_answer=True,
+            include_raw_content=False,
+            include_images=False
         )
 
-        # Use exact same API call as backend
-        response = genai_client.models.generate_content(
-            model=TOOLS_CFG.query_generator_model,
-            contents=formatted_prompt,
-            config={
-                "tools": [{"google_search": {}}],
-                "temperature": 0,
-            },
-        )
+        # Process Tavily results to match backend format
+        sources_gathered = []
+        web_research_result = []
 
-        # Process exactly as backend does
-        resolved_urls = resolve_urls(
-            response.candidates[0].grounding_metadata.grounding_chunks, query_id
-        )
-        citations = get_citations(response, resolved_urls)
-        modified_text = insert_citation_markers(response.text, citations)
-        sources_gathered = [
-            item for citation in citations for item in citation["segments"]]
+        if search_result and 'results' in search_result:
+            # Create summary from search results
+            summary_parts = []
+
+            for idx, result in enumerate(search_result['results']):
+                title = result.get('title', 'Source')
+                url = result.get('url', '')
+                content = result.get('content', '')
+
+                if content:
+                    summary_parts.append(f"**{title}**: {content}")
+
+                # Add to sources in backend-compatible format
+                sources_gathered.append({
+                    "label": title,
+                    "short_url": f"https://tavily.com/id/{query_id}-{idx}",
+                    "value": url,
+                })
+
+            # Create research summary
+            if summary_parts:
+                research_summary = "\n\n".join(summary_parts)
+            else:
+                research_summary = f"Search completed for: {search_query}"
+
+            # Add Tavily's answer if available
+            if search_result.get('answer'):
+                research_summary = f"{search_result['answer']}\n\n{research_summary}"
+
+            web_research_result = [research_summary]
+
+        else:
+            web_research_result = [
+                f"No detailed results found for: {search_query}"]
 
         return {
             "sources_gathered": sources_gathered,
             "search_query": [search_query],
-            "web_research_result": [modified_text],
+            "web_research_result": web_research_result,
+        }
+
+    except ImportError:
+        print(f"Tavily not available, using fallback for: {search_query}")
+        return {
+            "sources_gathered": [],
+            "search_query": [search_query],
+            "web_research_result": [f"Web search unavailable for: {search_query}. Please install tavily-python package."],
+        }
+
+    except ValueError as e:
+        print(f"Configuration error: {e}")
+        return {
+            "sources_gathered": [],
+            "search_query": [search_query],
+            "web_research_result": [f"Configuration error for search: {search_query}. {str(e)}"],
         }
 
     except Exception as e:
-        print(f"Web research error for '{search_query}': {e}")
+        print(f"Tavily search error for '{search_query}': {e}")
+
+        # Handle rate limiting gracefully
+        if "rate limit" in str(e).lower() or "429" in str(e):
+            return {
+                "sources_gathered": [],
+                "search_query": [search_query],
+                "web_research_result": [f"Rate limit reached for: {search_query}. Please try again later."],
+            }
+
         return {
             "sources_gathered": [],
             "search_query": [search_query],
@@ -303,17 +261,17 @@ Provide your analysis in the requested format focusing on completeness and quali
 @tool
 def tools_web_search(query: str) -> str:
     """
-    Backend-compatible advanced web research tool with optimal quota efficiency.
+    Advanced web research tool using Tavily API with backend-compatible architecture.
 
-    Uses the exact same architecture as the sophisticated backend research system:
+    Uses Tavily for robust web search while maintaining the exact same workflow 
+    as the sophisticated backend research system:
     - Professional query generation with atomic, specific searches
-    - Native Google Search API with grounding metadata
-    - Citation handling with URL resolution and source tracking  
+    - Tavily API for comprehensive web search with source tracking
     - Intelligent reflection to identify knowledge gaps
     - Iterative research with follow-up queries when needed
     - Comprehensive result formatting with proper citations
 
-    Optimized for quota efficiency while maintaining research quality.
+    Optimized for research quality and reliability.
 
     Args:
         query: The research topic or question to investigate
@@ -322,7 +280,7 @@ def tools_web_search(query: str) -> str:
         Comprehensive research results with citations and sources
     """
     try:
-        print(f"🔍 Starting backend-compatible web research for: {query}")
+        print(f"🔍 Starting Tavily-powered web research for: {query}")
 
         # Backend-style state tracking
         state = {
@@ -338,8 +296,8 @@ def tools_web_search(query: str) -> str:
         search_queries = generate_query(query)
         print(f"Generated {len(search_queries)} search queries")
 
-        # Phase 2: Execute searches (backend parallel approach simulation)
-        print("🌐 Executing web research...")
+        # Phase 2: Execute searches using Tavily
+        print("🌐 Executing web research with Tavily...")
         for i, search_query in enumerate(search_queries):
             try:
                 result = web_research(search_query, i)
@@ -349,8 +307,8 @@ def tools_web_search(query: str) -> str:
                 state["sources_gathered"].extend(result["sources_gathered"])
 
             except Exception as e:
-                if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-                    print("⚠️ API quota reached - using collected results")
+                if "rate limit" in str(e).lower() or "429" in str(e):
+                    print("⚠️ Tavily rate limit reached - using collected results")
                     break
                 print(f"Search error: {e}")
                 continue
@@ -364,13 +322,13 @@ def tools_web_search(query: str) -> str:
                 reflection_result = reflection(
                     query, state["web_research_result"])
 
-                # Follow-up research if needed (limited for quota efficiency)
+                # Follow-up research if needed
                 if (not reflection_result.is_sufficient and
                     reflection_result.follow_up_queries and
                         len(reflection_result.follow_up_queries) > 0):
 
                     print("🔄 Performing follow-up research...")
-                    # Only one follow-up
+                    # Only one follow-up to manage API usage
                     follow_up_query = reflection_result.follow_up_queries[0]
 
                     try:
@@ -383,14 +341,14 @@ def tools_web_search(query: str) -> str:
                             result["sources_gathered"])
 
                     except Exception as e:
-                        if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-                            print("⚠️ Quota limit reached during follow-up")
+                        if "rate limit" in str(e).lower() or "429" in str(e):
+                            print("⚠️ Rate limit reached during follow-up")
                         else:
                             print(f"Follow-up error: {e}")
 
             except Exception as e:
-                if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-                    print("⚠️ Quota limit reached during reflection")
+                if "rate limit" in str(e).lower() or "429" in str(e):
+                    print("⚠️ Rate limit reached during reflection")
                 else:
                     print(f"Reflection error: {e}")
 
@@ -434,16 +392,16 @@ def tools_web_search(query: str) -> str:
         final_content += f"- **Research iterations:** {state['research_loop_count']}\n"
         final_content += f"- **Sources found:** {len(unique_sources) if state['sources_gathered'] else 0}\n"
         final_content += f"- **Research completed:** {get_current_date()}\n"
-        final_content += f"- **Architecture:** Backend-compatible iterative research\n"
+        final_content += f"- **Search engine:** Tavily API\n"
 
-        print("✅ Backend-compatible research completed successfully")
+        print("✅ Tavily-powered research completed successfully")
         return final_content
 
     except Exception as e:
         error_msg = f"Research error: {str(e)}"
         print(f"❌ {error_msg}")
 
-        if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-            return f"⚠️ API quota exceeded during research for '{query}'. Please try again later."
+        if "rate limit" in str(e).lower() or "429" in str(e):
+            return f"⚠️ API rate limit exceeded during research for '{query}'. Please try again later."
 
         return f"I encountered an error during research for '{query}': {error_msg}"

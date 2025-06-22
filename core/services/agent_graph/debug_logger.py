@@ -361,6 +361,59 @@ class AgentDebugLogger:
         except Exception as e:
             return f"Error summarizing result: {str(e)}"
 
+    # Agent-specific logging methods
+    def log_prompt_generation(self, prompt_type: str, query: str = "", context: Dict[str, Any] = None):
+        """Log prompt generation with context"""
+        self.log_step(
+            node_name="prompt_system",
+            step_type="PROMPT_GENERATION",
+            description=f"Generated {prompt_type} prompt",
+            data={
+                "prompt_type": prompt_type,
+                "query": query[:100] if query else "",
+                "context": context or {}
+            }
+        )
+
+    def log_tool_selection(self, suggested_tool: str, query: str, relevance_score: float = None):
+        """Log tool selection decisions"""
+        self.log_step(
+            node_name="tool_selector",
+            step_type="TOOL_SELECTION",
+            description=f"Selected tool: {suggested_tool}",
+            data={
+                "selected_tool": suggested_tool,
+                "query": query[:100],
+                "relevance_score": relevance_score
+            }
+        )
+
+    def log_context_change(self, current_query: str, previous_context: str, change_detected: bool):
+        """Log context change detection"""
+        self.log_step(
+            node_name="context_analyzer",
+            step_type="CONTEXT_ANALYSIS",
+            description="Context change analysis",
+            data={
+                "current_query": current_query[:100],
+                "previous_context": previous_context[:100] if previous_context else "",
+                "context_changed": change_detected
+            }
+        )
+
+    def log_reflection_decision(self, reflection_result: str, suggested_action: str, reasoning: str):
+        """Log reflection and retry decisions"""
+        self.log_step(
+            node_name="reflection_node",
+            step_type="REFLECTION",
+            description="Agent reflection completed",
+            data={
+                "result": reflection_result,
+                "suggested_action": suggested_action,
+                "reasoning": reasoning[:200]
+            }
+        )
+
 
 # Global logger instance
 debug_logger = AgentDebugLogger()
