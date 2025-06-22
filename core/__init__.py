@@ -88,17 +88,18 @@ def initialize_session_state() -> bool:
                 st.session_state.role = ""
                 st.session_state.signout = True
 
-        # Ensure basic session state variables exist with defaults
-        if not hasattr(st.session_state, 'username'):
+        # Ensure basic session state variables exist with defaults        if not hasattr(st.session_state, 'username'):
             st.session_state.username = ""
         if not hasattr(st.session_state, 'useremail'):
             st.session_state.useremail = ""
         if not hasattr(st.session_state, 'role'):
             st.session_state.role = ""
         if not hasattr(st.session_state, 'signout'):
-            # Check session timeout after loading session data
             st.session_state.signout = True
-        if st.session_state.get('username') and not st.session_state.get('signout', True):
+            
+        # Only check session expiry if user is actually logged in
+        username = st.session_state.get('username', '')
+        if username and username.strip() and not st.session_state.get('signout', True):
             # Check if session has expired
             import time
             from datetime import datetime
@@ -116,7 +117,7 @@ def initialize_session_state() -> bool:
 
                     if current_time > session_expiry:
                         logger.info(
-                            f"Session expired for user {st.session_state.get('username')}, clearing session")
+                            f"Session expired for user {username}, clearing session")
                         # Clear expired session
                         st.session_state.username = ""
                         st.session_state.useremail = ""

@@ -115,16 +115,22 @@ def logout_if_expired() -> bool:
     Check if session is expired and logout if needed.
 
     Returns:
-        bool: True if session was expired and logout performed, False otherwise    """
+        bool: True if session was expired and logout performed, False otherwise
+    """
     try:
         if not check_session_timeout():
-            username = _safe_session_state_access('username', 'Unknown')
-            logger.info(f"Session expired for user {username}, logging out")
+            username = _safe_session_state_access('username', '')
+            
+            # Only log if there's actually a username (avoid logging empty users)
+            if username and username.strip():
+                logger.info(f"Session expired for user {username}, logging out")
 
-            # Show expiry message (only if in Streamlit context)
-            if _is_in_streamlit_context():
-                st.warning(
-                    f"⏰ Sesi Anda telah berakhir setelah {SESSION_TIMEOUT_HOURS} jam. Silakan login kembali.")
+                # Show expiry message (only if in Streamlit context and user was logged in)
+                if _is_in_streamlit_context():
+                    st.warning(
+                        f"⏰ Sesi Anda telah berakhir setelah {SESSION_TIMEOUT_HOURS} jam. Silakan login kembali.")
+            else:
+                logger.debug("Session timeout check triggered for user with no active session")
 
             # Clear session
             clear_expired_session()

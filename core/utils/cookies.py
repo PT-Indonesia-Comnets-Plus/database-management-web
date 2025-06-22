@@ -13,8 +13,6 @@ SESSION_TIMEOUT_HOURS = 7
 SESSION_TIMEOUT_SECONDS = SESSION_TIMEOUT_HOURS * 3600
 
 # Check if running on Streamlit Cloud
-
-
 def is_streamlit_cloud() -> bool:
     """Detect if running on Streamlit Cloud."""
     import os
@@ -25,11 +23,20 @@ def is_streamlit_cloud() -> bool:
         "streamlit.app" in str(st.get_option("server.address"))
     )
 
+# Global variables for singleton pattern
+_cookies_instance = None
+_cookies_initialized = False
+_cookies_available = False
+
 # Initialize cookies with cloud-specific handling
-
-
 def _initialize_cookies():
     """Initialize cookie manager with cloud-specific configurations."""
+    global _cookies_instance, _cookies_initialized, _cookies_available
+    
+    # Return cached instance if already initialized
+    if _cookies_initialized:
+        return _cookies_instance, _cookies_available
+    
     try:
         # Check if we're in a proper Streamlit context
         try:
@@ -37,42 +44,70 @@ def _initialize_cookies():
             if sr.get_script_run_ctx() is None:
                 logger.debug(
                     "Not in Streamlit context - skipping cookie initialization")
+                _cookies_initialized = True
+                _cookies_available = False
                 return None, False
         except (ImportError, AttributeError):
             # If we can't check context, proceed anyway
             pass
 
+        # Use a unique key to prevent duplicate key errors
+        import uuid
+        unique_key = f"CookieManager_{uuid.uuid4().hex[:8]}"
+        
         if is_streamlit_cloud():
             # On Streamlit Cloud, cookies might not work reliably
             logger.info(
                 "Running on Streamlit Cloud - using limited cookie support")
             # Still try to initialize but with different expectations
-            cookies = EncryptedCookieManager(
-                prefix="Iconnet_Corp_Cloud_v1",
-                password=st.secrets.get(
-                    "cookie_password", "fallback_cloud_key_2025")
-            )
+            try:
+                cookies = EncryptedCookieManager(
+                    prefix="Iconnet_Corp_Cloud_v1",
+                    password=st.secrets.get(
+                        "cookie_password", "fallback_cloud_key_2025"),
+                    key=unique_key
+                )
+            except Exception as e:
+                logger.warning(f"Failed to initialize cookies on cloud: {e}")
+                _cookies_initialized = True
+                _cookies_available = False
+                return None, False
         else:
             # Local development
-            cookies = EncryptedCookieManager(
-                prefix="Iconnet_Corp_App_v1",
-                password=st.secrets.get("cookie_password", "super_secret_key")
-            )
+            try:
+                cookies = EncryptedCookieManager(
+                    prefix="Iconnet_Corp_App_v1",
+                    password=st.secrets.get("cookie_password", "super_secret_key"),
+                    key=unique_key
+                )
+            except Exception as e:
+                logger.warning(f"Failed to initialize cookies locally: {e}")
+                _cookies_initialized = True
+                _cookies_available = False
+                return None, False
 
         # Check if cookies are ready with extended timeout and retry
         import time
         start_time = time.time()
-        max_wait_time = 5  # Increased to 5 seconds
+        max_wait_time = 3  # Reduced to 3 seconds to avoid long waits
         retry_count = 0
-        max_retries = 3
+        max_retries = 2  # Reduced retries
 
         while retry_count < max_retries and (time.time() - start_time) < max_wait_time:
-            if cookies.ready():
+            try:
+                if cookies.ready():
+                    break
+            except Exception as e:
+                logger.debug(f"Cookie ready check failed: {e}")
                 break
-            time.sleep(0.2)  # Slightly longer sleep
+            time.sleep(0.1)
             retry_count += 1
 
-        cookies_available = cookies.ready()
+        cookies_available = False
+        try:
+            cookies_available = cookies.ready()
+        except Exception as e:
+            logger.debug(f"Final cookie ready check failed: {e}")
 
         if not cookies_available:
             if is_streamlit_cloud():
@@ -84,21 +119,29 @@ def _initialize_cookies():
         else:
             logger.info("Cookie manager initialized successfully")
 
-        return cookies, cookies_available
+        _cookies_instance = cookies if cookies_available else None
+        _cookies_initialized = True
+        _cookies_available = cookies_available
+        
+        return _cookies_instance, _cookies_available
 
     except Exception as e:
         logger.warning(
             f"Failed to initialize cookies: {e} - using fallback storage")
+        _cookies_initialized = True
+        _cookies_available = False
         return None, False
 
 
-# Initialize cookies globally
-cookies, COOKIES_AVAILABLE = _initialize_cookies()
+# Initialize cookies globally (using singleton pattern)
+_initialize_cookies()
 
 
 def save_user_to_cookie(username: str, email: str, role: str) -> bool:
     """Save user to cookie (with enhanced cloud handling)."""
-    global cookies, COOKIES_AVAILABLE    # Always save to session state as primary storage
+    global _cookies_instance, _cookies_available
+    
+    # Always save to session state as primary storage
     login_timestamp = time.time()
     st.session_state.username = username
     st.session_state.useremail = email
@@ -109,27 +152,25 @@ def save_user_to_cookie(username: str, email: str, role: str) -> bool:
 
     # Try to save to cookies as secondary storage (best effort)
     # First check if cookies are available
-    if not (COOKIES_AVAILABLE and cookies and cookies.ready()):
+    if not (_cookies_available and _cookies_instance):
         # Try to re-initialize cookies if they weren't ready before
         try:
             new_cookies, new_available = _initialize_cookies()
-            if new_available and new_cookies and new_cookies.ready():
-                cookies = new_cookies
-                COOKIES_AVAILABLE = new_available
+            if new_available and new_cookies:
                 logger.info("Cookies re-initialized successfully")
         except Exception as e:
             logger.debug(f"Failed to re-initialize cookies: {e}")
 
-    if COOKIES_AVAILABLE and cookies and cookies.ready():
+    if _cookies_available and _cookies_instance:
         try:
-            cookies["username"] = username
-            cookies["email"] = email
-            cookies["role"] = role
-            cookies["signout"] = "False"
-            cookies["login_timestamp"] = str(login_timestamp)
-            cookies["session_expiry"] = str(
+            _cookies_instance["username"] = username
+            _cookies_instance["email"] = email
+            _cookies_instance["role"] = role
+            _cookies_instance["signout"] = "False"
+            _cookies_instance["login_timestamp"] = str(login_timestamp)
+            _cookies_instance["session_expiry"] = str(
                 login_timestamp + SESSION_TIMEOUT_SECONDS)
-            cookies.save()
+            _cookies_instance.save()
             logger.info(f"User {username} saved to cookies and session state")
             return True
         except Exception as e:
@@ -147,7 +188,9 @@ def save_user_to_cookie(username: str, email: str, role: str) -> bool:
 
 def clear_user_cookie() -> bool:
     """Clear user cookie (with enhanced cloud handling)."""
-    global cookies, COOKIES_AVAILABLE    # Always clear session state first (primary storage)
+    global _cookies_instance, _cookies_available
+    
+    # Always clear session state first (primary storage)
     st.session_state.username = ""
     st.session_state.useremail = ""
     st.session_state.role = ""
@@ -160,15 +203,15 @@ def clear_user_cookie() -> bool:
         del st.session_state.user_uid
 
     # Try to clear cookies as well (best effort)
-    if COOKIES_AVAILABLE and cookies and cookies.ready():
+    if _cookies_available and _cookies_instance:
         try:
-            cookies["username"] = ""
-            cookies["email"] = ""
-            cookies["role"] = ""
-            cookies["signout"] = "True"
-            cookies["login_timestamp"] = ""
-            cookies["session_expiry"] = ""
-            cookies.save()
+            _cookies_instance["username"] = ""
+            _cookies_instance["email"] = ""
+            _cookies_instance["role"] = ""
+            _cookies_instance["signout"] = "True"
+            _cookies_instance["login_timestamp"] = ""
+            _cookies_instance["session_expiry"] = ""
+            _cookies_instance.save()
             logger.info("User data cleared from cookies and session state")
             return True
         except Exception as e:
@@ -186,28 +229,27 @@ def clear_user_cookie() -> bool:
 
 def load_cookie_to_session(session_state) -> bool:
     """Load cookie to session (with fallback handling for Streamlit Cloud)."""
-    global cookies, COOKIES_AVAILABLE
+    global _cookies_instance, _cookies_available
 
     # Try to re-initialize cookies if they weren't ready before
-    if not (COOKIES_AVAILABLE and cookies and cookies.ready()):
+    if not (_cookies_available and _cookies_instance):
         try:
             new_cookies, new_available = _initialize_cookies()
-            if new_available and new_cookies and new_cookies.ready():
-                cookies = new_cookies
-                COOKIES_AVAILABLE = new_available
+            if new_available and new_cookies:
                 logger.info("Cookies re-initialized for session loading")
         except Exception as e:
             logger.debug(f"Failed to re-initialize cookies during load: {e}")
 
-    if COOKIES_AVAILABLE and cookies and cookies.ready():
+    if _cookies_available and _cookies_instance:
         try:
-            username = cookies.get("username", "") or ""
-            email = cookies.get("email", "") or ""
-            role = cookies.get("role", "") or ""
-            signout_status = cookies.get("signout", "True")
-            login_timestamp_str = cookies.get("login_timestamp", "")
-            session_expiry_str = cookies.get(
-                "session_expiry", "")            # Parse timestamps
+            username = _cookies_instance.get("username", "") or ""
+            email = _cookies_instance.get("email", "") or ""
+            role = _cookies_instance.get("role", "") or ""
+            signout_status = _cookies_instance.get("signout", "True")
+            login_timestamp_str = _cookies_instance.get("login_timestamp", "")
+            session_expiry_str = _cookies_instance.get("session_expiry", "")
+            
+            # Parse timestamps
             login_timestamp = None
             session_expiry = None
 
@@ -227,13 +269,11 @@ def load_cookie_to_session(session_state) -> bool:
                 login_timestamp = current_time
                 session_expiry = current_time + SESSION_TIMEOUT_SECONDS
                 logger.info(
-                    f"Generated new session timestamps for user {username}")
-
-                # Save the new timestamps back to cookies for consistency
+                    f"Generated new session timestamps for user {username}")                # Save the new timestamps back to cookies for consistency
                 try:
-                    cookies["login_timestamp"] = str(login_timestamp)
-                    cookies["session_expiry"] = str(session_expiry)
-                    cookies.save()
+                    _cookies_instance["login_timestamp"] = str(login_timestamp)
+                    _cookies_instance["session_expiry"] = str(session_expiry)
+                    _cookies_instance.save()
                 except Exception as e:
                     logger.warning(
                         f"Failed to update timestamps in cookies: {e}")
@@ -298,7 +338,8 @@ class CookieManager:
     def __init__(self):
         """Initialize the encrypted cookie manager."""
         # Use the global cookies instance
-        self._cookies = cookies
+        global _cookies_instance
+        self._cookies = _cookies_instance
 
     @property
     def ready(self) -> bool:
