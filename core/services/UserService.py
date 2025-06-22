@@ -115,17 +115,22 @@ class UserService:
             email = user.email
             role = user_data['role']
 
-            # Save to cookies with 7-hour timeout
-            cookie_saved = save_user_to_cookie(username, email, role)
+            # Save to cookies with 24-hour timeout
+            cookie_result = save_user_to_cookie(username, email, role)
 
             # Store user_uid for logout logging
             st.session_state.user_uid = user.uid
 
-            if cookie_saved:
+            if cookie_result['success']:
                 logger.info(
-                    f"Session created successfully for user: {username}")
+                    f"Session created successfully for user: {username} using {cookie_result['method']}")
+
+                # Show persistent login prompt if URL fallback was used
+                if cookie_result['requires_url_click']:
+                    from core.utils.cookies import show_persistent_login_prompt
+                    show_persistent_login_prompt()
             else:
-                logger.warning("Failed to save user data to cookies")
+                logger.warning("Failed to save user data")
 
             # Log activity
             self.save_login_logout(user.uid, "login")
@@ -614,13 +619,13 @@ class UserService:
 
             username = st.session_state.get("username", "")
             email = st.session_state.get("useremail", "")
+            # Refresh session by saving to cookies again (extends 24-hour timeout)
             role = st.session_state.get("role", "")
+            cookie_result = save_user_to_cookie(username, email, role)
 
-            # Refresh session by saving to cookies again (extends 7-hour timeout)
-            cookie_saved = save_user_to_cookie(username, email, role)
-
-            if cookie_saved:
-                logger.info(f"Session refreshed for user: {username}")
+            if cookie_result['success']:
+                logger.info(
+                    f"Session refreshed for user: {username} using {cookie_result['method']}")
                 return True
             else:
                 logger.warning(

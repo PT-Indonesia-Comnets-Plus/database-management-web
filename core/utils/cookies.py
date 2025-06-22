@@ -104,29 +104,45 @@ def _save_to_url_fallback(username: str, email: str, role: str, login_timestamp:
 
 def _load_from_url_fallback() -> Dict[str, Any]:
     """Load user data from URL parameters or prepared session data."""
-    try:        # First check URL parameters
+    try:
+        # First check URL parameters
         try:
             query_params = st.query_params
+            logger.debug(f"Query params: {dict(query_params)}")
+
             if "s" in query_params:  # 's' for session
                 encoded_data = query_params["s"]
+                logger.debug(
+                    f"Found session data in URL: {encoded_data[:50]}...")
                 session_data = _decode_session_data(encoded_data)
+                logger.debug(f"Decoded session data: {session_data}")
+
                 if session_data and session_data.get("session_expiry", 0) > time.time():
-                    logger.debug("Found valid session in URL parameters")
+                    logger.info("✅ Found valid session in URL parameters")
                     return session_data
+                else:
+                    logger.debug("❌ URL session data expired or invalid")
+            else:
+                logger.debug("❌ No 's' parameter found in URL")
         except Exception as e:
-            logger.debug(f"Error checking URL parameters: {e}")
+            logger.debug(f"❌ Error checking URL parameters: {e}")
 
         # Fallback to prepared session data
         if "iconnet_session_restore_data" in st.session_state:
             session_data = st.session_state["iconnet_session_restore_data"]
+            logger.debug(f"Found prepared session data: {session_data}")
             if session_data.get("session_expiry", 0) > time.time():
-                logger.debug("Found valid session in prepared data")
+                logger.info("✅ Found valid session in prepared data")
                 return session_data
+            else:
+                logger.debug("❌ Prepared session data expired")
+        else:
+            logger.debug("❌ No prepared session data found")
 
         return {}
 
     except Exception as e:
-        logger.debug(f"Failed to load from URL fallback: {e}")
+        logger.debug(f"❌ Failed to load from URL fallback: {e}")
         return {}
 
 
@@ -278,8 +294,16 @@ def _initialize_cookies(force_reinit: bool = False):
         return None, False
 
 
-def save_user_to_cookie(username: str, email: str, role: str) -> bool:
-    """Save user to cookie (with enhanced cloud handling)."""
+def save_user_to_cookie(username: str, email: str, role: str) -> dict:
+    """Save user to cookie (with enhanced cloud handling).
+
+    Returns:
+        dict: {
+            'success': bool,
+            'method': str ('cookies', 'url_fallback', 'session_only'),
+            'requires_url_click': bool
+        }
+    """
     global _cookies_instance, _cookies_available
 
     # Always save to session state as primary storage
@@ -299,9 +323,8 @@ def save_user_to_cookie(username: str, email: str, role: str) -> bool:
             if new_available and new_cookies:
                 logger.info("Cookies successfully initialized for login")
         except Exception as e:
+            # Try to save to cookies as secondary storage (best effort)
             logger.debug(f"Failed to initialize cookies: {e}")
-
-    # Try to save to cookies as secondary storage (best effort)
     if _cookies_available and _cookies_instance:
         try:
             _cookies_instance["username"] = username
@@ -313,19 +336,32 @@ def save_user_to_cookie(username: str, email: str, role: str) -> bool:
                 login_timestamp + SESSION_TIMEOUT_SECONDS)
 
             logger.info(f"User {username} saved to cookies successfully")
-            return True
+            return {
+                'success': True,
+                'method': 'cookies',
+                'requires_url_click': False
+            }
 
         except Exception as e:
             # Fallback to URL parameter storage
             logger.warning(f"Failed to save to cookies: {e}")
+
     url_saved = _save_to_url_fallback(
         username, email, role, login_timestamp)
     if url_saved:
         logger.info(f"User {username} saved using URL fallback")
-        return True
+        return {
+            'success': True,
+            'method': 'url_fallback',
+            'requires_url_click': True
+        }
 
     logger.info(f"User {username} saved to session state only")
-    return True
+    return {
+        'success': True,
+        'method': 'session_only',
+        'requires_url_click': False
+    }
 
 
 def load_cookie_to_session() -> bool:
@@ -576,3 +612,29 @@ def show_session_restore_notice():
                         "Your session will persist normally with browser cookies.")
     except Exception as e:
         logger.debug(f"Error showing session restore notice: {e}")
+
+
+def show_persistent_login_prompt():
+    """Show persistent login prompt after URL fallback is used."""
+    try:
+        session_url = get_session_url()
+        if session_url and "s=" in session_url:
+            st.info(
+                "🔗 **Important**: For persistent login across page refreshes, please click the link below:")
+
+            # Create a clickable link
+            st.markdown(
+                f"👉 [**Click here for persistent login**]({session_url})")
+
+            st.caption(
+                "⚠️ This link will keep you logged in even after page refresh. Don't share it with others.")
+            st.caption("💡 You can bookmark this link for quick access.")
+
+            # Also show it in an expandable section for easy copying
+            with st.expander("📋 Copy persistent login URL"):
+                st.code(session_url, language=None)
+                st.caption("Copy this URL to stay logged in across sessions.")
+        else:
+            st.debug("No session URL available for persistent login")
+    except Exception as e:
+        logger.debug(f"Error showing persistent login prompt: {e}")
