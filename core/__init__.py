@@ -2,6 +2,7 @@
 
 import streamlit as st
 import logging
+import time
 from typing import Optional, Dict, Any
 from .utils.cookies import load_cookie_to_session
 from .utils.firebase_config import get_firebase_app
@@ -68,8 +69,22 @@ def initialize_session_state() -> bool:
             except Exception as e:
                 logger.error(
                     f"Failed to initialize session storage service: {e}")        # Load user session data from cookies and fallback storage
-        if "username" not in st.session_state or not st.session_state.get("username"):
-            try:
+        # ALWAYS attempt to load session, regardless of current session state
+        try:
+            # Check if we have a valid active session first
+            current_user = st.session_state.get("username", "")
+            current_signout = st.session_state.get("signout", True)
+            current_expiry = st.session_state.get("session_expiry", 0)
+
+            # Only skip loading if we have a valid, non-expired, active session
+            skip_loading = (current_user and
+                            not current_signout and
+                            current_expiry > 0 and
+                            current_expiry > time.time())
+
+            if not skip_loading:
+                logger.debug(
+                    "Attempting to restore session from persistent storage...")
                 # Load session from cookies or fallback storage
                 session_loaded = load_cookie_to_session()
 
@@ -82,14 +97,22 @@ def initialize_session_state() -> bool:
                         f"User session loaded from session state: {username}")
                 else:
                     logger.debug("No previous session found")
+            else:
+                logger.debug(
+                    f"Valid session already active for user: {current_user}")
 
-            except Exception as e:
-                logger.error(f"Failed to load user session: {e}")
-                # Initialize default session state
-                st.session_state.username = ""
-                st.session_state.useremail = ""
-                st.session_state.role = ""
-                st.session_state.signout = True
+        except Exception as e:
+            logger.error(f"Failed to load user session: {e}")
+
+        # Ensure basic session state variables exist with defaults
+        if "username" not in st.session_state:
+            st.session_state.username = ""
+        if "useremail" not in st.session_state:
+            st.session_state.useremail = ""
+        if "role" not in st.session_state:
+            st.session_state.role = ""
+        if "signout" not in st.session_state:
+            st.session_state.signout = True
 
         # Ensure basic session state variables exist with defaults        if not hasattr(st.session_state, 'username'):
             st.session_state.username = ""

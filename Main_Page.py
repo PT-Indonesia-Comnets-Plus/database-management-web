@@ -15,7 +15,7 @@ from core.services.UserService import UserService
 from core.services.EmailService import EmailService
 from core import initialize_session_state
 from core.utils.load_css import load_custom_css
-from core.utils.cookies import clear_cookies
+from core.utils.cookies import clear_cookies, show_session_restore_notice
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -335,9 +335,7 @@ class MainPageManager:
                 # UserService.signup akan menangani st.success/st.warning/st.error
                 # dan mengatur show_otp_verification = True jika OTP berhasil dikirim
                 self.user_service.signup(
-                    username, email, password, confirm_password, role="Employee")
-
-                # Jika OTP verification diminta, rerun untuk menampilkan form OTP
+                    username, email, password, confirm_password, role="Employee")                # Jika OTP verification diminta, rerun untuk menampilkan form OTP
                 if st.session_state.get('show_otp_verification', False):
                     st.rerun()
 
@@ -349,6 +347,9 @@ class MainPageManager:
     def display_user_dashboard(self) -> None:
         """Display user dashboard for authenticated users."""
         st.markdown("---")
+
+        # Show session restore notice in sidebar
+        show_session_restore_notice()
 
         # Welcome section
         self._display_welcome_section()
