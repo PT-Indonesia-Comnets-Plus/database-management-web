@@ -46,7 +46,8 @@ def check_session_timeout() -> bool:
     Check if current session has timed out.
 
     Returns:
-        bool: True if session is valid, False if expired    """
+        bool: True if session is valid, False if expired
+    """
     try:
         # Check if user is logged in
         if _safe_session_state_access('signout', True):
@@ -59,9 +60,36 @@ def check_session_timeout() -> bool:
         current_time = time.time()
         session_expiry = _safe_session_state_access('session_expiry')
 
+        # Normalize session_expiry to Unix timestamp
+        if session_expiry is not None:
+            if isinstance(session_expiry, str):
+                # Convert ISO format string to Unix timestamp
+                try:
+                    session_expiry = datetime.fromisoformat(
+                        session_expiry).timestamp()
+                    # Store normalized value
+                    _safe_session_state_set('session_expiry', session_expiry)
+                except (ValueError, TypeError) as e:
+                    logger.warning(
+                        f"Invalid session_expiry format: {session_expiry}, error: {e}")
+                    session_expiry = None
+
         if session_expiry is None:
             # No expiry set - check login timestamp
             login_timestamp = _safe_session_state_access('login_timestamp')
+
+            # Also normalize login_timestamp if it's a string
+            if login_timestamp is not None and isinstance(login_timestamp, str):
+                try:
+                    login_timestamp = datetime.fromisoformat(
+                        login_timestamp).timestamp()
+                    # Store normalized value
+                    _safe_session_state_set('login_timestamp', login_timestamp)
+                except (ValueError, TypeError) as e:
+                    logger.warning(
+                        f"Invalid login_timestamp format: {login_timestamp}, error: {e}")
+                    login_timestamp = None
+
             if login_timestamp is None:
                 logger.warning("No session timestamps found - session invalid")
                 return False

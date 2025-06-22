@@ -137,34 +137,48 @@ def initialize_session_state() -> bool:
         if not hasattr(st.session_state, 'role'):
             st.session_state.role = ""
         if not hasattr(st.session_state, 'signout'):
+            # Check session timeout after loading session data
             st.session_state.signout = True
-
-        # Check session timeout after loading session data
         if st.session_state.get('username') and not st.session_state.get('signout', True):
             # Check if session has expired
             import time
+            from datetime import datetime
             current_time = time.time()
             session_expiry = st.session_state.get('session_expiry')
 
-            if session_expiry and current_time > session_expiry:
-                logger.info(
-                    f"Session expired for user {st.session_state.get('username')}, clearing session")
-                # Clear expired session
-                st.session_state.username = ""
-                st.session_state.useremail = ""
-                st.session_state.role = ""
-                st.session_state.signout = True
-                if hasattr(st.session_state, 'login_timestamp'):
-                    del st.session_state.login_timestamp
-                if hasattr(st.session_state, 'session_expiry'):
-                    del st.session_state.session_expiry
-                # Also clear cookies if available
+            if session_expiry:
+                # Normalize session_expiry to Unix timestamp for comparison
                 try:
-                    from core.utils.cookies import clear_user_cookie
-                    clear_user_cookie()
-                except Exception as e:
+                    if isinstance(session_expiry, str):
+                        # Convert ISO format string to Unix timestamp
+                        session_expiry = datetime.fromisoformat(
+                            session_expiry).timestamp()
+                        st.session_state.session_expiry = session_expiry  # Store normalized value
+
+                    if current_time > session_expiry:
+                        logger.info(
+                            f"Session expired for user {st.session_state.get('username')}, clearing session")
+                        # Clear expired session
+                        st.session_state.username = ""
+                        st.session_state.useremail = ""
+                        st.session_state.role = ""
+                        st.session_state.signout = True
+                        if hasattr(st.session_state, 'login_timestamp'):
+                            del st.session_state.login_timestamp
+                        if hasattr(st.session_state, 'session_expiry'):
+                            del st.session_state.session_expiry
+                        # Also clear cookies if available
+                        try:
+                            from core.utils.cookies import clear_user_cookie
+                            clear_user_cookie()
+                        except Exception as e:
+                            logger.warning(
+                                f"Could not clear cookies on session expiry: {e}")
+                except (ValueError, TypeError) as e:
                     logger.warning(
-                        f"Could not clear cookies on session expiry: {e}")
+                        f"Invalid session_expiry format: {session_expiry}, error: {e}")
+                    # Clear invalid session
+                    st.session_state.signout = True
 
         # Initialize Services
         services_to_init = ["user_service", "user_data_service",

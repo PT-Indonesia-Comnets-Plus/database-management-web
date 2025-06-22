@@ -130,9 +130,10 @@ class UserService:
             st.session_state.signout = False
             st.session_state.login_timestamp = login_timestamp
             st.session_state.session_expiry = session_expiry
-
             logger.info(
-                f"Session state set - username: {username}, role: {role}, signout: False, expires: {datetime.fromtimestamp(session_expiry)}")            # Save to cookies (legacy support) with timestamp
+                f"Session state set - username: {username}, role: {role}, signout: False, expires: {datetime.fromtimestamp(session_expiry)}")
+
+            # Save to cookies (legacy support) with timestamp
             cookie_saved = self._save_user_to_cookie_with_timestamp(
                 username, email, role, login_timestamp)
 
@@ -341,7 +342,9 @@ class UserService:
                 return False
 
             if not st.session_state.get('username'):
-                return False            # Check session expiry
+                return False
+
+            # Check session expiry
             current_time = time.time()
             session_expiry = st.session_state.get('session_expiry')
 
