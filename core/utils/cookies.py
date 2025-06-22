@@ -533,42 +533,24 @@ def get_current_user() -> Optional[Dict[str, Any]]:
 def get_session_url() -> str:
     """Get URL with session data for persistent login across refreshes."""
     try:
+        logger.debug("🔍 Checking for session URL generation...")
+        
         if "iconnet_url_session" in st.session_state:
             encoded_data = st.session_state["iconnet_url_session"]
+            logger.debug(f"Found session data: {encoded_data[:50]}...")
+            
             if encoded_data:
-                # Try to get the current URL from Streamlit
-                try:
-                    # For Streamlit Cloud, we need to build the URL differently
-                    import os
-
-                    # Check if we're on Streamlit Cloud
-                    if is_streamlit_cloud():
-                        # Get the app URL from environment or construct it
-                        app_name = os.getenv('STREAMLIT_APP_NAME', 'app')
-                        github_repo = os.getenv('GITHUB_REPOSITORY', '')
-
-                        if github_repo:
-                            # Format: https://[app-name]--[encoded-repo].streamlit.app
-                            repo_encoded = github_repo.replace(
-                                '/', '-').replace('_', '-').lower()
-                            base_url = f"https://{app_name}--{repo_encoded}.streamlit.app"
-                        else:
-                            # Fallback for Streamlit Cloud
-                            base_url = "https://share.streamlit.io"
-
-                        return f"{base_url}?s={encoded_data}"
-                    else:
-                        # Local development
-                        return f"http://localhost:8501?s={encoded_data}"
-
-                except Exception as e:
-                    logger.debug(f"Error building full URL: {e}")
-                    # Fallback to relative URL
-                    return f"?s={encoded_data}"
+                # Simple approach: just use relative URL with session parameter
+                # This will work on both local and Streamlit Cloud
+                session_url = f"?s={encoded_data}"
+                logger.debug(f"✅ Generated session URL: {session_url}")
+                return session_url
+        else:
+            logger.debug("❌ No session data found in session state")
 
         return ""
     except Exception as e:
-        logger.debug(f"Error generating session URL: {e}")
+        logger.error(f"❌ Error generating session URL: {e}")
         return ""
 
 
@@ -617,24 +599,45 @@ def show_session_restore_notice():
 def show_persistent_login_prompt():
     """Show persistent login prompt after URL fallback is used."""
     try:
-        session_url = get_session_url()
-        if session_url and "s=" in session_url:
-            st.info(
-                "🔗 **Important**: For persistent login across page refreshes, please click the link below:")
-
-            # Create a clickable link
-            st.markdown(
-                f"👉 [**Click here for persistent login**]({session_url})")
-
-            st.caption(
-                "⚠️ This link will keep you logged in even after page refresh. Don't share it with others.")
-            st.caption("💡 You can bookmark this link for quick access.")
-
-            # Also show it in an expandable section for easy copying
-            with st.expander("📋 Copy persistent login URL"):
-                st.code(session_url, language=None)
-                st.caption("Copy this URL to stay logged in across sessions.")
+        logger.info("🔗 Showing persistent login prompt...")
+        
+        # Check directly for session data instead of relying on get_session_url()
+        if "iconnet_url_session" in st.session_state:
+            encoded_data = st.session_state["iconnet_url_session"]
+            logger.debug(f"Found session data: {encoded_data[:50]}...")
+            
+            if encoded_data:
+                # Create the session URL
+                session_url = f"?s={encoded_data}"
+                logger.info("✅ Displaying persistent login link to user")
+                
+                # Show prominent message to user
+                st.success("🎉 **Login Successful!**")
+                st.info("🔗 **CRITICAL**: To enable persistent login, you **MUST** click the link below:")
+                
+                # Create a very visible clickable link
+                st.markdown(f"## � [**🔗 CLICK HERE FOR PERSISTENT LOGIN**]({session_url})")
+                
+                st.error("⚠️ **WARNING**: If you don't click the link above, you'll need to login again after page refresh!")
+                st.caption("💡 After clicking, your browser URL will change to include session data.")
+                
+                # Also show it in a code block for copying
+                with st.expander("📋 Manual URL (copy if needed)"):
+                    st.code(session_url, language=None)
+                    st.caption("You can also copy this URL and paste it in your browser.")
+                
+                return True
+            else:
+                logger.warning("❌ Session data is empty")
         else:
-            st.debug("No session URL available for persistent login")
+            logger.warning("❌ No 'iconnet_url_session' found in session state")
+        
+        # Fallback message if no session URL available
+        st.warning("⚠️ Persistent login not available. You may need to login again after page refresh.")
+        return False
+        
     except Exception as e:
-        logger.debug(f"Error showing persistent login prompt: {e}")
+        logger.error(f"❌ Error showing persistent login prompt: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return False
