@@ -13,39 +13,66 @@ SESSION_TIMEOUT_HOURS = 7
 SESSION_TIMEOUT_SECONDS = SESSION_TIMEOUT_HOURS * 3600
 
 
+def _is_in_streamlit_context() -> bool:
+    """Check if we're running in a proper Streamlit context."""
+    try:
+        import streamlit.runtime.scriptrunner as sr
+        return sr.get_script_run_ctx() is not None
+    except (ImportError, AttributeError):
+        return True  # Assume we're in context if we can't check
+
+
+def _safe_session_state_access(key: str, default=None):
+    """Safely access session state with context checking."""
+    if not _is_in_streamlit_context():
+        return default
+    return st.session_state.get(key, default)
+
+
+def _safe_session_state_set(key: str, value):
+    """Safely set session state with context checking."""
+    if _is_in_streamlit_context():
+        st.session_state[key] = value
+
+
+def _safe_session_state_delete(key: str):
+    """Safely delete session state with context checking."""
+    if _is_in_streamlit_context() and key in st.session_state:
+        del st.session_state[key]
+
+
 def check_session_timeout() -> bool:
     """
     Check if current session has timed out.
 
     Returns:
-        bool: True if session is valid, False if expired
-    """
+        bool: True if session is valid, False if expired    """
     try:
         # Check if user is logged in
-        if st.session_state.get('signout', True):
+        if _safe_session_state_access('signout', True):
             return False
 
-        if not st.session_state.get('username'):
+        if not _safe_session_state_access('username'):
             return False
 
         # Check session expiry
         current_time = time.time()
-        session_expiry = st.session_state.get('session_expiry')
+        session_expiry = _safe_session_state_access('session_expiry')
 
         if session_expiry is None:
             # No expiry set - check login timestamp
-            login_timestamp = st.session_state.get('login_timestamp')
+            login_timestamp = _safe_session_state_access('login_timestamp')
             if login_timestamp is None:
                 logger.warning("No session timestamps found - session invalid")
                 return False
 
             # Calculate expiry from login timestamp
             session_expiry = login_timestamp + SESSION_TIMEOUT_SECONDS
-            st.session_state.session_expiry = session_expiry
+            _safe_session_state_set('session_expiry', session_expiry)
 
         if current_time > session_expiry:
             logger.info(
-                f"Session expired for user {st.session_state.get('username')} at {datetime.fromtimestamp(session_expiry)}")
+                f"Session expired for user {_safe_session_state_access('username')} at {datetime.fromtimestamp(session_expiry)}")
             return False
 
         return True
@@ -60,16 +87,16 @@ def logout_if_expired() -> bool:
     Check if session is expired and logout if needed.
 
     Returns:
-        bool: True if session was expired and logout performed, False otherwise
-    """
+        bool: True if session was expired and logout performed, False otherwise    """
     try:
         if not check_session_timeout():
-            username = st.session_state.get('username', 'Unknown')
+            username = _safe_session_state_access('username', 'Unknown')
             logger.info(f"Session expired for user {username}, logging out")
 
-            # Show expiry message
-            st.warning(
-                f"⏰ Sesi Anda telah berakhir setelah {SESSION_TIMEOUT_HOURS} jam. Silakan login kembali.")
+            # Show expiry message (only if in Streamlit context)
+            if _is_in_streamlit_context():
+                st.warning(
+                    f"⏰ Sesi Anda telah berakhir setelah {SESSION_TIMEOUT_HOURS} jam. Silakan login kembali.")
 
             # Clear session
             clear_expired_session()
@@ -85,16 +112,14 @@ def clear_expired_session() -> None:
     """Clear expired session data."""
     try:
         # Clear session state
-        st.session_state.username = ""
-        st.session_state.useremail = ""
-        st.session_state.role = ""
-        st.session_state.signout = True
+        _safe_session_state_set('username', "")
+        _safe_session_state_set('useremail', "")
+        _safe_session_state_set('role', "")
+        _safe_session_state_set('signout', True)
 
         # Clear timestamp information
-        if hasattr(st.session_state, 'login_timestamp'):
-            del st.session_state.login_timestamp
-        if hasattr(st.session_state, 'session_expiry'):
-            del st.session_state.session_expiry
+        _safe_session_state_delete('login_timestamp')
+        _safe_session_state_delete('session_expiry')
 
         # Clear cookies if available
         try:

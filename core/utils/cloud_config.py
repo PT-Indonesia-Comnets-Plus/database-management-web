@@ -13,17 +13,47 @@ logger = logging.getLogger(__name__)
 
 
 def is_streamlit_cloud() -> bool:
-    """Detect if running on Streamlit Cloud."""
-    return (
-        os.getenv("STREAMLIT_SHARING_MODE") == "1" or
-        "streamlit.app" in os.getenv("HOSTNAME", "") or
-        os.getenv("STREAMLIT_CLOUD_MODE") == "1"
-    )
+    """Detect if running on Streamlit Cloud with improved detection."""
+    # Check environment variables
+    env_indicators = [
+        os.getenv("STREAMLIT_SHARING_MODE") == "1",
+        os.getenv("STREAMLIT_CLOUD_MODE") == "1",
+        "streamlit.app" in os.getenv("HOSTNAME", ""),
+        "streamlit.app" in os.getenv("SERVER_NAME", ""),
+    ]
+
+    # Check if running in cloud environment
+    try:
+        # Check server address if available
+        if hasattr(st, 'get_option'):
+            server_address = str(st.get_option("server.address") or "")
+            if "streamlit.app" in server_address or "0.0.0.0" in server_address:
+                env_indicators.append(True)
+    except Exception:
+        pass
+
+    # Check if we're in a containerized environment (typical for cloud)
+    try:
+        path_indicators = [
+            "/mount/src/" in os.getcwd(),
+            "/app/" in os.getcwd(),
+            os.path.exists("/.dockerenv"),
+        ]
+        env_indicators.extend(path_indicators)
+    except Exception:
+        pass
+
+    is_cloud = any(env_indicators)
+    if is_cloud:
+        logger.info("Detected Streamlit Cloud environment")
+
+    return is_cloud
 
 
 # Session configuration for cloud deployment
 CLOUD_SESSION_CONFIG = {
-    "session_timeout_days": 7,
+    "session_timeout_hours": 7,  # Changed from days to hours for consistency
+    "session_timeout_seconds": 7 * 3600,  # 7 hours in seconds
     "max_sessions_per_user": 3,
     "cleanup_interval_hours": 24,
     "enable_database_fallback": True,
@@ -135,9 +165,34 @@ def configure_for_cloud():
         if "enable_cloud_storage" not in st.session_state:
             st.session_state.enable_cloud_storage = True
 
+        # Configure session timeout for cloud
+        if "session_timeout_hours" not in st.session_state:
+            st.session_state.session_timeout_hours = CLOUD_SESSION_CONFIG["session_timeout_hours"]
+            st.session_state.session_timeout_seconds = CLOUD_SESSION_CONFIG[
+                "session_timeout_seconds"]
+
         return True
 
     return False
+
+
+def get_session_timeout_config():
+    """Get session timeout configuration based on environment."""
+    if is_streamlit_cloud():
+        return {
+            "timeout_hours": CLOUD_SESSION_CONFIG["session_timeout_hours"],
+            "timeout_seconds": CLOUD_SESSION_CONFIG["session_timeout_seconds"],
+            "warning_threshold_minutes": 30,
+            "critical_threshold_minutes": 5,
+        }
+    else:
+        # Local development settings
+        return {
+            "timeout_hours": 7,
+            "timeout_seconds": 7 * 3600,
+            "warning_threshold_minutes": 30,
+            "critical_threshold_minutes": 5,
+        }
 
 
 def get_streamlit_cloud_headers():

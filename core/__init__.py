@@ -243,3 +243,7 @@ def initialize_session_state() -> bool:
     except Exception as e:
         logger.error(f"Failed to initialize session state: {e}")
         return False
+
+
+# Export the function for external use
+__all__ = ['initialize_session_state']

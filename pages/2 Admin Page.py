@@ -1,6 +1,14 @@
-from features.admin.controller import AdminPage
 import streamlit as st
-from core import initialize_session_state
+
+# Import with error handling
+try:
+    from core import initialize_session_state
+except ImportError as e:
+    st.error(f"Import error: {e}")
+    st.error("Please ensure all required modules are installed and accessible.")
+    st.stop()
+
+from features.admin.controller import AdminPage
 
 initialize_session_state()
 

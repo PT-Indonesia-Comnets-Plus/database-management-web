@@ -1,5 +1,4 @@
 # pages/1 Home Page.py
-from core import initialize_session_state
 from features.home.controller import HomePage
 import streamlit as st
 import sys
@@ -7,6 +6,14 @@ import os
 
 # Add the parent directory to the Python path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Import with error handling
+try:
+    from core import initialize_session_state
+except ImportError as e:
+    st.error(f"Import error: {e}")
+    st.error("Please ensure all required modules are installed and accessible.")
+    st.stop()
 
 
 # Panggil inisialisasi di awal untuk memastikan semua service ada
