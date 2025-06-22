@@ -590,7 +590,8 @@ def render_add_column_ui():
                 st.error("❌ Koneksi database gagal!")
                 return
 
-            st.session_state.column_manager = ColumnManager(db_pool)            # Create tables if needed
+            st.session_state.column_manager = ColumnManager(
+                db_pool)            # Create tables if needed
             success, message = st.session_state.column_manager.create_dynamic_tables()
             if not success:
                 st.error(f"Error creating tables: {message}")
@@ -601,10 +602,10 @@ def render_add_column_ui():
     except Exception as e:
         st.error(f"❌ Error initialize: {e}")
         return
-    
+
     # Tabs for different functions
     tab1, tab2, tab3, tab4 = st.tabs(
-        ["📋 Daftar Kolom", "➕ Tambah Kolom", "📊 Data Entry", "🔗 Status Integrasi"])
+        ["📋 Daftar Kolom", "➕ Tambah Kolom", "🔗 Status Integrasi"])
 
     # Tab 1: List existing columns
     with tab1:
@@ -613,10 +614,6 @@ def render_add_column_ui():
     # Tab 2: Add new column
     with tab2:
         render_add_column_form(column_manager)
-
-    # Tab 3: Data entry
-    with tab3:
-        render_data_entry(column_manager)
 
     # Tab 4: Integration status
     with tab4:
@@ -816,208 +813,11 @@ def render_add_column_form(column_manager):
                     # Show detailed next steps
                     st.markdown("### 🎉 Kolom Berhasil Dibuat!")
 
-                    info_col1, info_col2 = st.columns(2)
-                    with info_col1:
-                        st.markdown("**📍 Detail Kolom:**")
-                        st.markdown(f"- **Table**: `{selected_table}`")
-                        st.markdown(f"- **Display Name**: {display_name}")
-                        st.markdown(f"- **Type**: {column_type}")
-                        st.markdown(
-                            f"- **Searchable**: {'✅ Ya' if is_searchable else '❌ Tidak'}")
-
-                    with info_col2:
-                        st.markdown("**🚀 Langkah Selanjutnya:**")
-                        st.markdown("1. 📝 Entry data di tab **'Data Entry'**")
-                        st.markdown("2. 🔍 Cari data di halaman **Search**")
-                        st.markdown("3. 📊 Lihat di tab **'Daftar Kolom'**")
-                        st.markdown(
-                            "4. 🔧 Edit data via **'Edit/Delete Assets'**")
-
-                    # Show integration info
-                    st.success(f"""
-                    💡 **Integrasi Berhasil**: 
-                    Kolom '{display_name}' sekarang sudah terintegrasi dengan user_terminals melalui FAT ID:
-                    ✅ Kolom akan muncul di Search suggestions (refresh halaman search untuk melihat)
-                    ✅ Dapat di-filter di advanced search  
-                    ✅ Tersedia di form edit data
-                    ✅ Dapat di-export bersama data lainnya
-                    ✅ Data entry melalui FAT ID akan langsung tersedia di semua fitur
-                    """)
-
-                    # Quick integration test
-                    if is_searchable:
-                        st.info("""
-                        🔍 **Test Integration**: 
-                        - Buka halaman **Search Assets**
-                        - Klik dropdown untuk melihat kolom pencarian
-                        - Kolom '{display_name}' akan muncul dalam daftar
-                        - Entry data melalui FAT ID akan langsung bisa dicari
-                        """.format(display_name=display_name))
-
                 else:
                     st.error(message)
 
             except Exception as e:
                 st.error(f"❌ Error menambah kolom: {e}")
-
-
-def render_data_entry(column_manager):
-    """Render form for entering data to dynamic columns."""
-
-    st.markdown("## 📝 Entry Data Kolom Dinamis")
-
-    try:
-        # Get available dynamic columns
-        columns = [col for col in column_manager.get_dynamic_columns()
-                   if col['is_active']]
-
-        if not columns:
-            st.info("Belum ada kolom dinamis yang tersedia untuk entry data.")
-            st.markdown("👉 Silakan tambah kolom baru di tab 'Tambah Kolom'")
-            return
-
-        # Select FAT ID
-        fat_id = st.text_input(
-            "FAT ID*",
-            placeholder="Masukkan FAT ID untuk entry data",
-            help="FAT ID harus ada di database utama"
-        )
-
-        if not fat_id:
-            st.warning("📝 Masukkan FAT ID untuk mulai entry data")
-            return
-
-        # Verify FAT ID exists
-        query = "SELECT COUNT(*) FROM user_terminals WHERE fat_id = %s"
-        success, message, result = column_manager.execute_query(
-            query, (fat_id,))
-
-        if success and result and result[0][0][0] > 0:
-            st.success(f"✅ FAT ID '{fat_id}' ditemukan di database")
-        else:
-            st.error(f"❌ FAT ID '{fat_id}' tidak ditemukan di database!")
-            return
-
-        st.markdown(f"### 📋 Entry Data untuk FAT ID: `{fat_id}`")
-
-        with st.form("data_entry_form"):
-            entered_data = {}
-
-            # Create input fields for each dynamic column
-            for col in columns:
-                col_id = col['id']
-                display_name = col['display_name']
-                col_type = col['column_type']
-                default_value = col.get('default_value', '')
-
-                # Get existing data for this column and FAT ID
-                existing_query = """
-                SELECT column_value 
-                FROM dynamic_column_data 
-                WHERE record_id = %s AND column_id = %s
-                """
-                success, message, result = column_manager.execute_query(
-                    existing_query, (fat_id, col_id))
-                existing_value = result[0][0][0] if success and result and result[0] else default_value
-
-                # Render input based on type
-                if col_type == 'TEXT':
-                    value = st.text_input(
-                        f"📝 {display_name}",
-                        value=str(existing_value) if existing_value else "",
-                        help=col.get('description', ''),
-                        key=f"input_{col_id}"
-                    )
-                elif col_type == 'INTEGER':
-                    try:
-                        default_int = int(
-                            existing_value) if existing_value else 0
-                    except:
-                        default_int = 0
-                    value = st.number_input(
-                        f"🔢 {display_name}",
-                        value=default_int,
-                        step=1,
-                        help=col.get('description', ''),
-                        key=f"input_{col_id}"
-                    )
-                elif col_type == 'FLOAT':
-                    try:
-                        default_float = float(
-                            existing_value) if existing_value else 0.0
-                    except:
-                        default_float = 0.0
-                    value = st.number_input(
-                        f"🔢 {display_name}",
-                        value=default_float,
-                        step=0.1,
-                        help=col.get('description', ''),
-                        key=f"input_{col_id}"
-                    )
-                elif col_type == 'DATE':
-                    value = st.date_input(
-                        f"📅 {display_name}",
-                        help=col.get('description', ''),
-                        key=f"input_{col_id}"
-                    )
-                    value = str(value)
-                elif col_type == 'BOOLEAN':
-                    current_bool = str(existing_value).lower() in [
-                        'true', '1', 'yes', 'on'] if existing_value else False
-                    value = st.checkbox(
-                        f"☑️ {display_name}",
-                        value=current_bool,
-                        help=col.get('description', ''),
-                        key=f"input_{col_id}"
-                    )
-                    value = str(value)
-                else:
-                    value = st.text_input(
-                        f"📝 {display_name}",
-                        value=str(existing_value) if existing_value else "",
-                        help=col.get('description', ''),
-                        key=f"input_{col_id}"
-                    )
-
-                entered_data[col_id] = value
-
-            if st.form_submit_button("💾 Simpan Semua Data", type="primary"):
-                # Save all data
-                success_count = 0
-                error_count = 0
-
-                for col_id, value in entered_data.items():
-                    # Upsert query
-                    upsert_query = """
-                    INSERT INTO dynamic_column_data (record_id, column_id, column_value)
-                    VALUES (%s, %s, %s)
-                    ON CONFLICT (record_id, column_id)
-                    DO UPDATE SET 
-                        column_value = EXCLUDED.column_value,
-                        updated_at = CURRENT_TIMESTAMP
-                    """
-
-                    success, message, _ = column_manager.execute_query(
-                        upsert_query, (fat_id, col_id, str(value))
-                    )
-
-                    if success:
-                        success_count += 1
-                    else:
-                        error_count += 1
-                        st.error(f"❌ Error menyimpan {col_id}: {message}")
-
-                if success_count > 0:
-                    st.success(f"✅ {success_count} kolom berhasil disimpan!")
-
-                if error_count > 0:
-                    st.warning(f"⚠️ {error_count} kolom gagal disimpan.")
-
-                if success_count > 0 and error_count == 0:
-                    st.balloons()
-
-    except Exception as e:
-        st.error(f"❌ Error in data entry: {e}")
 
 
 def render_integration_status(column_manager):

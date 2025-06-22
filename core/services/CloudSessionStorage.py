@@ -59,16 +59,37 @@ class CloudSessionStorage:
         """Initialize available storage mechanisms based on what's available."""
         self.storage_methods = []
 
-        # Method 1: extra-streamlit-components cookie manager (most reliable for cloud)
+        # Method 1: Database storage (most reliable for cloud deployment)
+        if self.db_pool:
+            self.storage_methods.append("database")
+            logger.info("Database storage available - prioritized for cloud")
+
+        # Method 2: extra-streamlit-components cookie manager
         if HAS_EXTRA_STREAMLIT:
             try:
                 self.stx_cookie_manager = stx.CookieManager()
-                self.storage_methods.append("stx_cookies")
-                logger.info("STX Cookie Manager initialized")
+                # Test if STX cookies are working
+                test_key = f"{self.app_prefix}_test"
+                test_value = "test_value"
+                self.stx_cookie_manager.set(test_key, test_value)
+                if self.stx_cookie_manager.get(test_key) == test_value:
+                    self.storage_methods.append("stx_cookies")
+                    logger.info(
+                        "STX Cookie Manager initialized and tested successfully")
+                    # Clean up test cookie
+                    self.stx_cookie_manager.delete(test_key)
+                else:
+                    logger.warning(
+                        "STX Cookie Manager test failed - cookies not working")
             except Exception as e:
                 logger.error(f"Failed to initialize STX Cookie Manager: {e}")
 
-        # Method 2: legacy cookies manager (fallback)
+        # Method 3: Browser localStorage via JS eval
+        if HAS_JS_EVAL:
+            self.storage_methods.append("js_local_storage")
+            logger.info("JS LocalStorage available")
+
+        # Method 4: legacy cookies manager (fallback)
         if HAS_COOKIES_MANAGER:
             try:
                 cookie_password = st.secrets.get(
@@ -82,16 +103,6 @@ class CloudSessionStorage:
                     logger.info("Legacy cookies initialized")
             except Exception as e:
                 logger.error(f"Failed to initialize legacy cookies: {e}")
-
-        # Method 3: Browser localStorage via JS eval
-        if HAS_JS_EVAL:
-            self.storage_methods.append("js_local_storage")
-            logger.info("JS LocalStorage available")
-
-        # Method 4: Database storage (always available if db_pool exists)
-        if self.db_pool:
-            self.storage_methods.append("database")
-            logger.info("Database storage available")
 
         # Method 5: Session state (always available, temporary)
         self.storage_methods.append("session_state")
@@ -409,8 +420,7 @@ class CloudSessionStorage:
                     session_data = EXCLUDED.session_data,
                     last_accessed = CURRENT_TIMESTAMP
             """, (
-                session_data["session_id"],
-                session_data["username"],
+                session_data["session_id"],                session_data["username"],
                 session_data["email"],
                 session_data["role"],
                 expires_at,
@@ -440,28 +450,49 @@ class CloudSessionStorage:
             return None
 
         try:
+            # Try to get session by username first
             username = st.session_state.get("username", "")
-            if not username:
-                return None
+            session_id = st.session_state.get("session_id", "")
 
             conn = self.db_pool.getconn()
             cursor = conn.cursor()
 
-            cursor.execute("""
-                SELECT session_data, expires_at 
-                FROM cloud_user_sessions 
-                WHERE username = %s AND expires_at > CURRENT_TIMESTAMP 
-                ORDER BY last_accessed DESC 
-                LIMIT 1
-            """, (username,))
+            # First try by session_id if available
+            if session_id:
+                cursor.execute("""
+                    SELECT session_data, expires_at 
+                    FROM cloud_user_sessions 
+                    WHERE session_id = %s AND expires_at > CURRENT_TIMESTAMP 
+                    ORDER BY last_accessed DESC 
+                    LIMIT 1
+                """, (session_id,))
+                result = cursor.fetchone()
 
-            result = cursor.fetchone()
+                if result:
+                    session_data_str, expires_at = result
+                    cursor.close()
+                    self.db_pool.putconn(conn)
+                    return json.loads(session_data_str)
+
+            # Fallback: try by username if session_id didn't work
+            if username:
+                cursor.execute("""
+                    SELECT session_data, expires_at 
+                    FROM cloud_user_sessions 
+                    WHERE username = %s AND expires_at > CURRENT_TIMESTAMP 
+                    ORDER BY last_accessed DESC 
+                    LIMIT 1
+                """, (username,))
+                result = cursor.fetchone()
+
+                if result:
+                    session_data_str, expires_at = result
+                    cursor.close()
+                    self.db_pool.putconn(conn)
+                    return json.loads(session_data_str)
+
             cursor.close()
             self.db_pool.putconn(conn)
-
-            if result:
-                session_data_str, expires_at = result
-                return json.loads(session_data_str)
 
         except Exception as e:
             logger.error(f"Database load failed: {e}")
@@ -532,59 +563,86 @@ class CloudSessionStorage:
         st.session_state.role = ""
         st.session_state.signout = True
         if "session_id" in st.session_state:
-            del st.session_state.session_id
+            del st.session_state.session_id    # Utility methods
 
-    # Utility methods
     def _generate_session_id(self, username: str) -> str:
         """Generate unique session ID."""
         timestamp = str(datetime.now().timestamp())
         unique_string = f"{username}_{timestamp}_{uuid.uuid4()}"
         return hashlib.sha256(unique_string.encode()).hexdigest()[:32]
 
-    def _is_session_valid(self, session_data: Dict[str, Any]) -> bool:
-        """Check if session data is valid and not expired."""
+    def _generate_browser_fingerprint(self) -> str:
+        """Generate a browser fingerprint for session identification when username is not available."""
         try:
-            if not session_data or not session_data.get("username"):
-                return False
+            # Use a combination of available session data for consistency
+            # This will be consistent across page refreshes for the same browser session
+            if "browser_fingerprint" not in st.session_state:
+                # Generate a new fingerprint and store it in session state
+                # This will persist during the browser session but reset on new session
+                fingerprint_data = f"iconnet_browser_{uuid.uuid4()}"
+                st.session_state.browser_fingerprint = hashlib.md5(
+                    fingerprint_data.encode()).hexdigest()[:16]
 
-            if session_data.get("signout", True):
-                return False
-
-            # Check expiration
-            expires_at_str = session_data.get("expires_at")
-            if expires_at_str:
-                expires_at = datetime.fromisoformat(expires_at_str)
-                if datetime.now() > expires_at:
-                    logger.info("Session expired")
-                    return False
-
-            return True
+            return st.session_state.browser_fingerprint
 
         except Exception as e:
-            logger.error(f"Session validation failed: {e}")
-            return False
+            logger.warning(f"Could not generate browser fingerprint: {e}")
+            # Ultimate fallback - use a simple UUID
+            return str(uuid.uuid4())[:16]
 
-    def _update_session_state(self, session_data: Dict[str, Any]) -> None:
-        """Update Streamlit session state with loaded session data."""
-        st.session_state.username = session_data.get("username", "")
-        st.session_state.useremail = session_data.get("email", "")
-        st.session_state.role = session_data.get("role", "")
-        st.session_state.signout = session_data.get("signout", True)
-        st.session_state.session_id = session_data.get("session_id", "")
+    def load_session_by_fingerprint(self) -> Optional[Dict[str, Any]]:
+        """Try to load session using browser fingerprint when username is not available."""
+        try:
+            fingerprint = self._generate_browser_fingerprint()
 
-    def _resave_to_persistent_storage(self, session_data: Dict[str, Any]) -> None:
-        """Re-save session data to persistent storage methods."""
-        for method in ["stx_cookies", "legacy_cookies", "js_local_storage"]:
-            if method in self.storage_methods:
+            # Check if we have this fingerprint stored in session state
+            stored_fingerprint = st.session_state.get("browser_fingerprint")
+            if stored_fingerprint != fingerprint:
+                # Store new fingerprint
+                st.session_state.browser_fingerprint = fingerprint
+
+            # Try to load from database using fingerprint as backup identifier
+            if self.db_pool:
                 try:
-                    if method == "stx_cookies" and hasattr(self, 'stx_cookie_manager'):
-                        self._save_stx_cookies(session_data)
-                    elif method == "legacy_cookies" and hasattr(self, 'legacy_cookies'):
-                        self._save_legacy_cookies(session_data)
-                    elif method == "js_local_storage":
-                        self._save_js_localStorage(session_data)
+                    conn = self.db_pool.getconn()
+                    cursor = conn.cursor()
+
+                    # Look for recent sessions that might belong to this browser
+                    cursor.execute("""
+                        SELECT session_data, expires_at, username
+                        FROM cloud_user_sessions 
+                        WHERE expires_at > CURRENT_TIMESTAMP 
+                        AND last_accessed > NOW() - INTERVAL '1 hour'
+                        ORDER BY last_accessed DESC 
+                        LIMIT 5
+                    """)
+
+                    results = cursor.fetchall()
+                    cursor.close()
+                    self.db_pool.putconn(conn)
+
+                    # Try to match with stored sessions
+                    for session_data_str, expires_at, username in results:
+                        session_data = json.loads(session_data_str)
+                        if self._is_session_valid(session_data):
+                            logger.info(
+                                f"Potential session found for browser fingerprint: {username}")
+                            return session_data
+
                 except Exception as e:
-                    logger.error(f"Failed to re-save to {method}: {e}")
+                    logger.error(f"Database fingerprint lookup failed: {e}")
+                    if 'conn' in locals():
+                        try:
+                            cursor.close()
+                            self.db_pool.putconn(conn)
+                        except:
+                            pass
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Browser fingerprint session loading failed: {e}")
+            return None
 
     def is_user_authenticated(self) -> bool:
         """Check if user is currently authenticated."""
