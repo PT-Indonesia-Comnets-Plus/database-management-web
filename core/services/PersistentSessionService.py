@@ -147,17 +147,28 @@ class PersistentSessionService:
                     return None
 
                 # Update last accessed time
-                doc.reference.update({'last_accessed': now_utc})
-
                 # Restore session state
+                doc.reference.update({'last_accessed': now_utc})
                 username = session_data['username']
                 user_data = session_data['user_data']
 
-                # Set session state
+                # Set session state with proper session data
                 st.session_state.username = username
                 st.session_state.logged_in = True
                 st.session_state.session_token = session_token
                 st.session_state.session_id = doc.id
+
+                # IMPORTANT: Set session_expiry as Unix timestamp for UserService compatibility
+                expires_at = session_data['expires_at']
+                if hasattr(expires_at, 'timestamp'):
+                    # Firestore timestamp object
+                    st.session_state.session_expiry = expires_at.timestamp()
+                else:
+                    # Convert datetime to Unix timestamp
+                    st.session_state.session_expiry = expires_at.timestamp()
+
+                # Set signout to False to indicate active session
+                st.session_state.signout = False
 
                 # Restore user data
                 for key, value in user_data.items():

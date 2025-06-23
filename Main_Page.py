@@ -133,8 +133,7 @@ class MainPageManager:
                 """
                 <p style='text-align: center; color: #666; font-size: 16px; margin-top: 0px;'>
                     Database Management & AI Assistant Platform
-                </p>
-                """,
+                </p>                """,
                 unsafe_allow_html=True
             )
 
@@ -142,26 +141,52 @@ class MainPageManager:
             logger.error(f"Error displaying header: {e}")
             # Fallback display in case of any error
             st.markdown(
-                "<p style='text-align: center; color: #666; font-size: 16px;'>Database Management & AI Assistant Platform</p>", unsafe_allow_html=True)
+                "<p style='text-align: center; color: #666; font-size: 16px;'>Database Management & AI Assistant Platform</p>",
+                unsafe_allow_html=True
+            )
 
     def is_user_authenticated(self) -> bool:
         """Check if user is currently authenticated and session is valid."""
-        # Check if user service is available for session validation
-        if self.user_service:
-            # Use UserService to check session validity (includes timeout check)
-            if not self.user_service.is_session_valid():
-                # Session is invalid/expired, perform logout
-                if not st.session_state.get("signout", True):
-                    # User was logged in but session expired
-                    self.user_service.logout_if_expired()
+        try:
+            # First check basic session state
+            username_exists = bool(
+                st.session_state.get("username", "").strip())
+            is_signed_out = st.session_state.get("signout", True)
+
+            logger.info(
+                f"🔍 Authentication check - username: {username_exists}, signout: {is_signed_out}")
+
+            # If no username or signed out, not authenticated
+            if not username_exists or is_signed_out:
+                logger.info("❌ Not authenticated - no username or signed out")
                 return False
 
-        # Fallback to simple check if UserService is not available
-        username_exists = bool(st.session_state.get("username", "").strip())
-        is_signed_out = st.session_state.get("signout", True)
+            # If user service is available, do additional validation
+            if self.user_service:
+                # Use UserService to check session validity (includes timeout check)
+                session_valid = self.user_service.is_session_valid()
+                logger.info(
+                    f"🔍 UserService session validation: {session_valid}")
 
-        # User is authenticated if username exists and not signed out
-        return username_exists and not is_signed_out
+                if not session_valid:
+                    # Session is invalid/expired, perform logout
+                    logger.info(
+                        f"❌ Session validation failed for user: {username_exists}")
+                    self.user_service.logout_if_expired()
+                    return False
+
+            # User is authenticated if username exists and not signed out
+            logger.info(
+                f"✅ User authenticated: {st.session_state.get('username', '')}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error checking authentication: {e}")
+            # Fallback to simple check
+            username_exists = bool(
+                st.session_state.get("username", "").strip())
+            is_signed_out = st.session_state.get("signout", True)
+            return username_exists and not is_signed_out
 
     def check_and_restore_session(self) -> bool:
         """
@@ -315,9 +340,18 @@ class MainPageManager:
                 # dan pembaruan st.session_state serta cookies.
                 # Jika login berhasil, UserService akan mengatur session state
                 self.user_service.login(email, password)
-                # dan kita bisa rerun untuk memperbarui UI
-                if self.is_user_authenticated():  # Cek lagi setelah login attempt
+
+                # Force check authentication status after login attempt
+                if self.is_user_authenticated():
+                    logger.info("🎉 Login successful, user authenticated!")
+                    # Clear any error states
+                    if 'login_error' in st.session_state:
+                        del st.session_state['login_error']
                     st.rerun()
+                else:
+                    logger.warning(
+                        "❌ Login attempt completed but user not authenticated")
+
             except Exception as e:  # Menangkap error tak terduga dari UserService.login
                 logger.error(f"Unexpected error during login handling: {e}")
                 st.error("An unexpected error occurred during login.")
@@ -594,15 +628,22 @@ class MainPageManager:
         self.load_styles()
 
         # Check and restore session automatically
-        self.check_and_restore_session()
+        session_restored = self.check_and_restore_session()
+        logger.info(f"🔄 Session restoration result: {session_restored}")
 
         self.display_header()
 
-        if self.is_user_authenticated():
+        # Check authentication status
+        is_authenticated = self.is_user_authenticated()
+        logger.info(f"🔍 Final authentication status: {is_authenticated}")
+
+        if is_authenticated:
+            logger.info("📱 Displaying user dashboard")
             # Show persistent session info in sidebar
             self.show_persistent_session_info()
             self.display_user_dashboard()
         else:
+            logger.info("🔐 Displaying authentication form")
             self.display_authentication_form()
 
 

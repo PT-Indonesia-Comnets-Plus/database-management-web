@@ -148,10 +148,15 @@ class UserService:
             if not session_saved:
                 cookie_manager = get_cloud_cookie_manager()
                 session_saved = cookie_manager.save_user_session(
-                    username, email, role)
-
-            # Store user_uid for logout logging
+                    username, email, role)            # Store user_uid for logout logging
             st.session_state.user_uid = user.uid
+
+            # Ensure session_expiry is set in session_state
+            current_time = time.time()
+            session_expiry = current_time + SESSION_TIMEOUT_SECONDS
+            st.session_state.session_expiry = session_expiry
+            logger.info(
+                f"🕒 Session expiry set to: {session_expiry} (current: {current_time}, timeout: {SESSION_TIMEOUT_HOURS}h)")
 
             if session_saved:
                 logger.info(
@@ -620,15 +625,29 @@ class UserService:
             username = st.session_state.get("username", "")
             signout = st.session_state.get("signout", True)
             session_expiry = st.session_state.get("session_expiry", 0)
+            current_time = time.time()
+
+            logger.info(
+                f"🕒 Session validation - username: {username}, signout: {signout}")
+            logger.info(
+                f"🕒 Session expiry: {session_expiry}, current time: {current_time}")
+            logger.info(
+                f"🕒 Time remaining: {session_expiry - current_time:.0f} seconds")
 
             # Check if session exists and is not expired
-            if username and not signout and session_expiry > time.time():
+            if username and not signout and session_expiry > current_time:
+                logger.info(f"✅ Session valid for: {username}")
                 return True
 
             # If session is expired or invalid, clear it
-            if username and session_expiry <= time.time():
-                logger.info(f"Session expired for user: {username}")
+            if username and session_expiry <= current_time:
+                logger.info(
+                    f"❌ Session expired for user: {username} (expired {current_time - session_expiry:.0f} seconds ago)")
                 clear_user_cookie()
+            elif username and signout:
+                logger.info(f"❌ User signed out: {username}")
+            elif not username:
+                logger.info("❌ No username in session")
 
             return False
 
