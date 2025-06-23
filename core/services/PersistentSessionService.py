@@ -10,7 +10,7 @@ import json
 import time
 import secrets
 from typing import Optional, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -57,25 +57,37 @@ class PersistentSessionService:
                 return None
 
             session_token = self._generate_session_token()
+            # Prepare session data with timezone-aware datetimes
             session_id = self._get_session_id(username)
-
-            # Prepare session data
+            now_utc = datetime.now(timezone.utc)
             session_data = {
                 'username': username,
                 'session_token': session_token,
                 'user_data': user_data,
-                'created_at': datetime.utcnow(),
-                'expires_at': datetime.utcnow() + timedelta(hours=self.session_timeout_hours),
-                'last_accessed': datetime.utcnow()
+                'created_at': now_utc,
+                'expires_at': now_utc + timedelta(hours=self.session_timeout_hours),
+                'last_accessed': now_utc
             }
 
             # Save to Firestore
             doc_ref = fs.collection(self.collection_name).document(session_id)
+            # Store session token in multiple places for persistence
             doc_ref.set(session_data)
-
-            # Store session token in session state and browser cookie
             st.session_state.session_token = session_token
             st.session_state.session_id = session_id
+            st.session_state.persistent_session_token = session_token  # Backup storage
+
+            # Store with a unique key to avoid conflicts
+            unique_key = f"persistent_token_{username}_{int(time.time())}"
+            st.session_state[unique_key] = session_token
+
+            # MOST IMPORTANT: Set session token in URL for persistence across refreshes
+            try:
+                from ..utils.url_session_manager import get_url_session_manager
+                url_manager = get_url_session_manager()
+                url_manager.set_session_token(session_token)
+            except Exception as e:
+                logger.error(f"Failed to set URL session token: {e}")
 
             # Try to set browser cookie using query params or session state
             self._set_browser_session_token(session_token)
@@ -108,25 +120,34 @@ class PersistentSessionService:
 
             if session_token is None:
                 logger.info("No session token found")
-                return None
-
-            # Search for session in Firestore
+                return None            # Search for session in Firestore
             sessions_ref = fs.collection(self.collection_name)
             query = sessions_ref.where(
                 'session_token', '==', session_token).limit(1)
             docs = query.stream()
 
+            now_utc = datetime.now(timezone.utc)
+
             for doc in docs:
                 session_data = doc.to_dict()
 
+                # Handle timezone-aware datetime comparison
+                expires_at = session_data['expires_at']
+                if hasattr(expires_at, 'tzinfo') and expires_at.tzinfo is None:
+                    # Convert naive datetime to UTC
+                    expires_at = expires_at.replace(tzinfo=timezone.utc)
+                elif not hasattr(expires_at, 'tzinfo'):
+                    # Handle Firestore timestamp
+                    expires_at = expires_at.replace(tzinfo=timezone.utc)
+
                 # Check if session is expired
-                if session_data['expires_at'] < datetime.utcnow():
+                if expires_at < now_utc:
                     logger.info("Session expired, deleting")
                     doc.reference.delete()
                     return None
 
                 # Update last accessed time
-                doc.reference.update({'last_accessed': datetime.utcnow()})
+                doc.reference.update({'last_accessed': now_utc})
 
                 # Restore session state
                 username = session_data['username']
@@ -197,9 +218,11 @@ class PersistentSessionService:
             if fs is None:
                 return
 
+            now_utc = datetime.now(timezone.utc)
+
             # Query for expired sessions
             sessions_ref = fs.collection(self.collection_name)
-            query = sessions_ref.where('expires_at', '<', datetime.utcnow())
+            query = sessions_ref.where('expires_at', '<', now_utc)
 
             expired_sessions = query.stream()
             deleted_count = 0
@@ -231,19 +254,38 @@ class PersistentSessionService:
     def _get_browser_session_token(self) -> Optional[str]:
         """Get session token from browser storage."""
         try:
-            # Try session state backup first
-            if "persistent_session_token" in st.session_state:
-                return st.session_state.persistent_session_token
-
-            # Try to get from URL query params (if available)
+            # Strategy 1: Try URL query parameters FIRST (most reliable on Streamlit Cloud)
             try:
-                if hasattr(st, 'query_params'):
-                    query_params = st.query_params
-                    if "session_token" in query_params:
-                        return query_params["session_token"]
-            except Exception:
-                pass
+                from ..utils.url_session_manager import get_url_session_manager
+                url_manager = get_url_session_manager()
+                token = url_manager.get_session_token()
+                if token:
+                    logger.debug(f"Found token in URL: {token[:10]}...")
+                    return token
+            except Exception as e:
+                logger.debug(f"URL session manager failed: {e}")
 
+            # Strategy 2: Try session state backup
+            if "persistent_session_token" in st.session_state:
+                token = st.session_state.persistent_session_token
+                logger.debug(
+                    f"Found token in persistent_session_token: {token[:10]}...")
+                return token
+
+            # Strategy 3: Try the main session_token key
+            if "session_token" in st.session_state:
+                token = st.session_state.session_token
+                logger.debug(f"Found token in session_token: {token[:10]}...")
+                return token
+
+            # Strategy 4: Search for any persistent token keys
+            for key in st.session_state.keys():
+                if key.startswith("persistent_token_"):
+                    token = st.session_state[key]
+                    logger.debug(f"Found token in {key}: {token[:10]}...")
+                    return token
+
+            logger.debug("No session token found in any storage method")
             return None
 
         except Exception as e:
@@ -253,6 +295,14 @@ class PersistentSessionService:
     def _clear_browser_session_token(self):
         """Clear session token from browser storage."""
         try:
+            # Clear from URL query parameters FIRST
+            try:
+                from ..utils.url_session_manager import get_url_session_manager
+                url_manager = get_url_session_manager()
+                url_manager.clear_session_token()
+            except Exception as e:
+                logger.debug(f"Failed to clear URL session token: {e}")
+
             # Clear from session state
             if "persistent_session_token" in st.session_state:
                 del st.session_state.persistent_session_token
