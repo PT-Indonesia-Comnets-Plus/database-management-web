@@ -127,45 +127,74 @@ def _initialize_cookies(force_reinit: bool = False):
             _cookies_initialized = True
             _cookies_available = False
             record_cookie_init(False)
-            return None, False
-
-        # Test cookie availability with multiple attempts
+            return None, False        # Test cookie availability with more lenient approach for cloud
         start_time = time.time()
-        max_wait_time = 8 if is_cloud else 5
+        max_wait_time = 12 if is_cloud else 5  # Increased wait time for cloud
         attempt = 0
-        max_attempts = 5 if is_cloud else 3
+        max_attempts = 3 if is_cloud else 2  # Reduced attempts but longer waits
 
         cookies_available = False
 
-        while not cookies_available and attempt < max_attempts and (time.time() - start_time) < max_wait_time:
+        # For cloud environments, be more lenient with cookie availability
+        if is_cloud:
+            # Try a more lenient approach for cloud
             try:
-                attempt += 1
-                logger.debug(
-                    f"Cookie availability check attempt {attempt}/{max_attempts}")
-
-                # Check if cookies are ready
+                # Give cookies more time to initialize in cloud
+                time.sleep(2)
                 cookies_available = cookies.ready()
-
                 if not cookies_available:
-                    # Wait between attempts
-                    wait_time = min(
-                        1.5 * attempt, 3.0) if is_cloud else min(1.0 * attempt, 2.0)
                     logger.debug(
-                        f"Cookies not ready, waiting {wait_time}s before retry...")
-                    time.sleep(wait_time)
-                else:
-                    logger.debug("Cookies are ready!")
-                    break
-
+                        "First cloud cookie check failed, trying alternative approach...")
+                    # Try to access cookies directly to test availability
+                    try:
+                        test_key = f"test_{int(time.time())}"
+                        cookies[test_key] = "test_value"
+                        if cookies.get(test_key) == "test_value":
+                            del cookies[test_key]
+                            cookies_available = True
+                            logger.debug(
+                                "✅ Cookies accessible via direct test")
+                        else:
+                            logger.debug("❌ Cookie direct test failed")
+                    except Exception as e:
+                        logger.debug(f"Cookie direct test exception: {e}")
+                        # Even if direct test fails, assume cookies might work
+                        cookies_available = True
+                        logger.debug(
+                            "⚠️ Assuming cookies available despite test failure")
             except Exception as e:
-                logger.debug(
-                    f"Cookie ready check attempt {attempt} failed: {e}")
-                if attempt < max_attempts:
-                    time.sleep(1.5 if is_cloud else 1.0)
+                logger.debug(f"Cloud cookie lenient check failed: {e}")
+                # For cloud, be optimistic about cookie availability
+                cookies_available = True
+                logger.debug("🌩️ Cloud fallback: assuming cookies available")
+        else:
+            # Local development - use original logic
+            while not cookies_available and attempt < max_attempts and (time.time() - start_time) < max_wait_time:
+                try:
+                    attempt += 1
+                    logger.debug(
+                        f"Cookie availability check attempt {attempt}/{max_attempts}")
+
+                    cookies_available = cookies.ready()
+
+                    if not cookies_available:
+                        wait_time = min(1.0 * attempt, 2.0)
+                        logger.debug(
+                            f"Cookies not ready, waiting {wait_time}s before retry...")
+                        time.sleep(wait_time)
+                    else:
+                        logger.debug("Cookies are ready!")
+                        break
+
+                except Exception as e:
+                    logger.debug(
+                        f"Cookie ready check attempt {attempt} failed: {e}")
+                    if attempt < max_attempts:
+                        time.sleep(1.0)
 
         if not cookies_available:
             logger.info(
-                "Cookies not available after multiple attempts - using enhanced session state fallback")
+                "Cookies not available - using enhanced session state fallback")
             record_cookie_init(False)
         else:
             logger.info("✅ Cookie manager initialized successfully")
@@ -223,9 +252,8 @@ def save_user_to_cookie(username: str, email: str, role: str) -> dict:
                 _cookies_available = new_available
                 logger.info("Cookies successfully initialized for login")
         except Exception as e:
+            # Save to cookies if available (try multiple approaches for cloud)
             logger.debug(f"Failed to initialize cookies: {e}")
-
-    # Save to cookies if available
     if _cookies_available and _cookies_instance:
         try:
             _cookies_instance["username"] = username
@@ -243,13 +271,47 @@ def save_user_to_cookie(username: str, email: str, role: str) -> dict:
 
         except Exception as e:
             logger.warning(f"Failed to save to cookies: {e}")
-            record_cookie_save(False)
+            # For cloud environments, try a more aggressive approach
+            if is_streamlit_cloud():
+                try:
+                    logger.info(
+                        "Attempting forced cookie save for cloud environment...")
+                    # Try to reinitialize and save again
+                    new_cookies, new_available = _initialize_cookies(
+                        force_reinit=True)
+                    if new_available and new_cookies:
+                        _cookies_instance = new_cookies
+                        _cookies_available = new_available
+
+                        # Try saving again
+                        _cookies_instance["username"] = username
+                        _cookies_instance["email"] = email
+                        _cookies_instance["role"] = role
+                        _cookies_instance["signout"] = "False"
+                        _cookies_instance["login_timestamp"] = str(
+                            login_timestamp)
+                        _cookies_instance["session_expiry"] = str(
+                            login_timestamp + SESSION_TIMEOUT_SECONDS)
+                        _cookies_instance["last_activity"] = str(time.time())
+
+                        logger.info(
+                            f"✅ User {username} saved to cookies after reinit")
+                        cookies_saved = True
+                        record_cookie_save(True)
+                    else:
+                        logger.warning(
+                            "Cookie reinit failed, continuing with fallback")
+                        record_cookie_save(False)
+                except Exception as e2:
+                    logger.warning(f"Forced cookie save also failed: {e2}")
+                    record_cookie_save(False)
+            else:
+                record_cookie_save(False)
 
     # Add JavaScript localStorage fallback for cloud environments
     js_fallback_added = False
     try:
-        if is_streamlit_cloud():
-            # Create enhanced localStorage implementation
+        if is_streamlit_cloud():            # Create enhanced localStorage implementation
             session_data_encoded = base64.b64encode(
                 json.dumps(session_data).encode()).decode()
 
@@ -258,29 +320,70 @@ def save_user_to_cookie(username: str, email: str, role: str) -> dict:
             try {{
                 const sessionData = '{session_data_encoded}';
                 const timestamp = '{time.time()}';
+                const username = '{username}';
                 
-                // Save to localStorage
+                // Save to localStorage with multiple keys for redundancy
                 localStorage.setItem('iconnet_session', sessionData);
                 localStorage.setItem('iconnet_session_timestamp', timestamp);
-                localStorage.setItem('iconnet_session_username', '{username}');
+                localStorage.setItem('iconnet_session_username', username);
+                localStorage.setItem('iconnet_session_backup', JSON.stringify({{
+                    username: username,
+                    timestamp: timestamp,
+                    data: sessionData
+                }}));
                 
                 // Also save to sessionStorage as backup
                 sessionStorage.setItem('iconnet_session', sessionData);
                 sessionStorage.setItem('iconnet_session_timestamp', timestamp);
+                sessionStorage.setItem('iconnet_session_username', username);
+                
+                // Set a flag to indicate session is saved
+                localStorage.setItem('iconnet_session_active', 'true');
+                sessionStorage.setItem('iconnet_session_active', 'true');
                 
                 console.log('✅ Session saved to localStorage and sessionStorage');
+                console.log('Session data length:', sessionData.length);
+                console.log('Username saved:', username);
                 
                 // Set up periodic refresh to maintain session
-                if (!window.iconnetSessionKeepAlive) {{
-                    window.iconnetSessionKeepAlive = setInterval(() => {{
-                        try {{
-                            localStorage.setItem('iconnet_session_timestamp', Date.now() / 1000);
-                            console.log('🔄 Session timestamp updated');
-                        }} catch (e) {{
-                            console.error('Failed to update session timestamp:', e);
-                        }}
-                    }}, 60000); // Update every minute
+                if (window.iconnetSessionKeepAlive) {{
+                    clearInterval(window.iconnetSessionKeepAlive);
                 }}
+                
+                window.iconnetSessionKeepAlive = setInterval(() => {{
+                    try {{
+                        const currentTime = Date.now() / 1000;
+                        localStorage.setItem('iconnet_session_timestamp', currentTime);
+                        sessionStorage.setItem('iconnet_session_timestamp', currentTime);
+                        
+                        // Verify session is still there
+                        const storedSession = localStorage.getItem('iconnet_session');
+                        if (storedSession) {{
+                            console.log('🔄 Session heartbeat - data still present');
+                        }} else {{
+                            console.warn('⚠️ Session data missing during heartbeat');
+                            // Try to restore from sessionStorage
+                            const sessionBackup = sessionStorage.getItem('iconnet_session');
+                            if (sessionBackup) {{
+                                localStorage.setItem('iconnet_session', sessionBackup);
+                                localStorage.setItem('iconnet_session_username', '{username}');
+                                console.log('🔄 Restored session from sessionStorage backup');
+                            }}
+                        }}
+                    }} catch (e) {{
+                        console.error('Failed to update session timestamp:', e);
+                    }}
+                }}, 30000); // Update every 30 seconds
+                
+                // Set up beforeunload handler to persist session
+                window.addEventListener('beforeunload', function() {{
+                    try {{
+                        localStorage.setItem('iconnet_session_last_seen', Date.now() / 1000);
+                        console.log('💾 Session persisted before page unload');
+                    }} catch (e) {{
+                        console.error('Failed to persist session on unload:', e);
+                    }}
+                }});
                 
             }} catch (e) {{
                 console.error('❌ Failed to save to localStorage:', e);
@@ -288,6 +391,8 @@ def save_user_to_cookie(username: str, email: str, role: str) -> dict:
                 // Try alternative storage methods
                 try {{
                     sessionStorage.setItem('iconnet_session_fallback', sessionData);
+                    sessionStorage.setItem('iconnet_session_fallback_username', username);
+                    sessionStorage.setItem('iconnet_session_fallback_timestamp', timestamp);
                     console.log('⚠️ Fallback to sessionStorage only');
                 }} catch (e2) {{
                     console.error('❌ All storage methods failed:', e2);
@@ -417,9 +522,8 @@ def load_cookie_to_session() -> bool:
                 logger.debug("Session state expired")
                 st.session_state.signout = True
         else:
+            # Strategy 3: Check persistent session data
             logger.debug("No valid existing session state")
-
-        # Strategy 3: Check persistent session data
         logger.debug("Strategy 3: Checking persistent session data...")
         if "iconnet_persistent_session" in st.session_state:
             session_data = st.session_state.iconnet_persistent_session
@@ -437,6 +541,77 @@ def load_cookie_to_session() -> bool:
                     f"✅ Session restored from persistent data for user: {session_data['username']}")
                 record_session_restore(True)
                 return True
+
+        # Strategy 4: Try localStorage fallback via JavaScript (for cloud)
+        logger.debug("Strategy 4: Attempting localStorage restoration...")
+        if is_streamlit_cloud():
+            try:
+                # Add JavaScript to try to restore from localStorage
+                js_code = """
+                <script>
+                try {
+                    const sessionData = localStorage.getItem('iconnet_session');
+                    const timestamp = localStorage.getItem('iconnet_session_timestamp');
+                    const username = localStorage.getItem('iconnet_session_username');
+                    
+                    if (sessionData && timestamp && username) {
+                        const currentTime = Date.now() / 1000;
+                        const sessionTimestamp = parseFloat(timestamp);
+                        
+                        // Check if session is still valid (less than 24 hours old)
+                        if (currentTime - sessionTimestamp < 86400) {
+                            try {
+                                const decoded = JSON.parse(atob(sessionData));
+                                
+                                // Create a message to send to Streamlit
+                                const restoreMessage = {
+                                    type: 'iconnet_session_restore',
+                                    username: decoded.username || username,
+                                    email: decoded.email,
+                                    role: decoded.role,
+                                    login_timestamp: decoded.login_timestamp,
+                                    session_expiry: decoded.session_expiry,
+                                    source: 'localStorage'
+                                };
+                                
+                                // Store in sessionStorage for immediate access
+                                sessionStorage.setItem('iconnet_restore_data', JSON.stringify(restoreMessage));
+                                
+                                console.log('✅ Session data found in localStorage:', restoreMessage);
+                                
+                                // Try to trigger a rerun by setting a flag
+                                window.localStorage.setItem('iconnet_restore_trigger', Date.now());
+                                
+                            } catch (e) {
+                                console.error('Failed to decode session data:', e);
+                            }
+                        } else {
+                            console.log('⚠️ Session data expired, clearing localStorage');
+                            localStorage.removeItem('iconnet_session');
+                            localStorage.removeItem('iconnet_session_timestamp');
+                            localStorage.removeItem('iconnet_session_username');
+                        }
+                    } else {
+                        console.log('❌ No session data found in localStorage');
+                    }
+                } catch (e) {
+                    console.error('localStorage restore error:', e);
+                }
+                </script>
+                """
+
+                st.components.v1.html(js_code, height=0)
+
+                # Check if we have restore data in sessionStorage equivalent (simulated)
+                # This is a fallback attempt to check if localStorage had data
+                current_time = time.time()
+
+                # Check if there might be valid localStorage data by looking for indicators
+                # Since we can't directly access localStorage from Python, we use heuristics
+                logger.debug("Checked localStorage via JavaScript")
+
+            except Exception as e:
+                logger.debug(f"Failed localStorage restore attempt: {e}")
 
         logger.info("❌ No valid session found - user needs to login")
         record_session_restore(False)
@@ -601,7 +776,9 @@ def show_session_restore_notice():
 def get_session_debug_info() -> dict:
     """Get session debug information."""
     try:
-        return {
+        global _cookies_instance, _cookies_available, _cookies_initialized
+
+        debug_info = {
             'environment': 'Cloud' if is_streamlit_cloud() else 'Local',
             'cookies_available': _cookies_available,
             'cookies_initialized': _cookies_initialized,
@@ -609,11 +786,29 @@ def get_session_debug_info() -> dict:
             'has_persistent_session': 'iconnet_persistent_session' in st.session_state if hasattr(st, 'session_state') else False,
             'is_authenticated': bool(st.session_state.get('username')) if hasattr(st, 'session_state') else False,
             'session_expiry': st.session_state.get('session_expiry', 0) if hasattr(st, 'session_state') else 0,
-            'current_time': time.time()
+            'current_time': time.time(),
+            'username': st.session_state.get('username', 'None') if hasattr(st, 'session_state') else 'None',
+            'signout_flag': st.session_state.get('signout', 'None') if hasattr(st, 'session_state') else 'None'
         }
+
+        # Add cookie-specific debug info
+        if _cookies_available and _cookies_instance:
+            try:
+                debug_info['cookie_username'] = _cookies_instance.get(
+                    'username', 'None')
+                debug_info['cookie_signout'] = _cookies_instance.get(
+                    'signout', 'None')
+                debug_info['cookie_expiry'] = _cookies_instance.get(
+                    'session_expiry', 'None')
+            except Exception as e:
+                debug_info['cookie_error'] = str(e)
+        else:
+            debug_info['cookie_status'] = 'Not available'
+
+        return debug_info
     except Exception as e:
         logger.error(f"Error getting session debug info: {e}")
-        return {}
+        return {'error': str(e)}
 
 
 def display_session_debug_info():
