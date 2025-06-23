@@ -115,24 +115,16 @@ def logout_if_expired() -> bool:
     Check if session is expired and logout if needed.
 
     Returns:
-        bool: True if session was expired and logout performed, False otherwise
-    """
+        bool: True if session was expired and logout performed, False otherwise    """
     try:
         if not check_session_timeout():
-            username = _safe_session_state_access('username', '')
+            username = _safe_session_state_access('username', 'Unknown')
+            logger.info(f"Session expired for user {username}, logging out")
 
-            # Only log if there's actually a username (avoid logging empty users)
-            if username and username.strip():
-                logger.info(
-                    f"Session expired for user {username}, logging out")
-
-                # Show expiry message (only if in Streamlit context and user was logged in)
-                if _is_in_streamlit_context():
-                    st.warning(
-                        f"⏰ Sesi Anda telah berakhir setelah {SESSION_TIMEOUT_HOURS} jam. Silakan login kembali.")
-            else:
-                logger.debug(
-                    "Session timeout check triggered for user with no active session")
+            # Show expiry message (only if in Streamlit context)
+            if _is_in_streamlit_context():
+                st.warning(
+                    f"⏰ Sesi Anda telah berakhir setelah {SESSION_TIMEOUT_HOURS} jam. Silakan login kembali.")
 
             # Clear session
             clear_expired_session()
@@ -155,11 +147,12 @@ def clear_expired_session() -> None:
 
         # Clear timestamp information
         _safe_session_state_delete('login_timestamp')
-        # Clear cookies if available
         _safe_session_state_delete('session_expiry')
+
+        # Clear cookies if available
         try:
-            from core.utils.cookies import clear_cookies
-            clear_cookies()
+            from core.utils.cookies import clear_user_cookie
+            clear_user_cookie()
         except Exception as e:
             logger.warning(f"Could not clear cookies: {e}")
 

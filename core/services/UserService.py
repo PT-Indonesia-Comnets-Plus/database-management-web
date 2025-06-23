@@ -12,16 +12,10 @@ import requests
 import re
 import dns.resolver
 
-from core.utils.cookies import (
-    save_user_to_cookie,
-    clear_cookies,
-    setup_session_heartbeat,
-    update_session_activity,
-    check_session_timeout
-)
+from core.utils.cookies import save_user_to_cookie, clear_user_cookie
 
 # Session configuration
-SESSION_TIMEOUT_HOURS = 24  # 24 hours session timeout (same as cookies.py)
+SESSION_TIMEOUT_HOURS = 7  # 7 hours session timeout
 SESSION_TIMEOUT_SECONDS = SESSION_TIMEOUT_HOURS * 3600
 
 logger = logging.getLogger(__name__)
@@ -100,8 +94,9 @@ class UserService:
             # Password validation
             raise ValidationError("Invalid email format")
         if len(password) < 6:
-            # Additional password validation
             raise ValidationError("Password must be at least 6 characters")
+
+        # Additional password validation
         if len(password) > 30:
             # Optional: Check for password strength
             raise ValidationError("Password must be less than 128 characters")
@@ -114,44 +109,29 @@ class UserService:
                 "Password must contain at least one uppercase letter, one lowercase letter, and one number")
 
     def _create_session(self, user, user_data: Dict[str, Any]) -> None:
-        """Create user session with enhanced persistence."""
+        """Create user session using cookies only."""
         try:
             username = user_data.get('username', user.uid)
             email = user.email
-            # Safe access with default fallback
-            role = user_data.get('role', 'Employee')
+            role = user_data['role']
 
-            logger.info(
-                f"Creating session for user: {username}, email: {email}, role: {role}")
-
-            # Save to cookies with enhanced persistence
-            cookie_result = save_user_to_cookie(username, email, role)
+            # Save to cookies with 7-hour timeout
+            cookie_saved = save_user_to_cookie(username, email, role)
 
             # Store user_uid for logout logging
             st.session_state.user_uid = user.uid
 
-            if cookie_result['success']:
+            if cookie_saved:
                 logger.info(
-                    f"Session created successfully for user: {username} using {cookie_result['method']}")
-
-                # Setup session heartbeat for persistence
-                setup_session_heartbeat()
-
+                    f"Session created successfully for user: {username}")
             else:
-                logger.warning(
-                    f"Failed to save user data to cookies, but session state is set. Result: {cookie_result}")
+                logger.warning("Failed to save user data to cookies")
 
             # Log activity
-            try:
-                self.save_login_logout(user.uid, "login")
-                logger.info(f"Login activity saved for user {username}")
-            except Exception as activity_error:
-                logger.warning(
-                    f"Failed to save login activity: {activity_error}")
-                # Don't fail the entire session creation if activity logging fails
+            self.save_login_logout(user.uid, "login")
 
         except Exception as e:
-            logger.error(f"Failed to create session: {e}", exc_info=True)
+            logger.error(f"Failed to create session: {e}")
             raise UserServiceError(f"Session creation failed: {e}")
 
     def login(self, email: str, password: str) -> None:
@@ -206,7 +186,9 @@ class UserService:
                     f"User {email} login blocked - not verified. verified={verified_field}, status='{status_field}'")
                 st.warning(
                     "Your account is pending admin approval. Please wait for verification.")
-                return            # Create session after successful validation
+                return
+
+            # Create session after successful validation
             self._create_session(user, user_doc_data)
 
             st.success(
@@ -218,11 +200,8 @@ class UserService:
         except AuthenticationError as e:
             logger.warning(f"Authentication failed: {e}")
             st.warning(str(e))
-        except UserServiceError as e:
-            logger.error(f"Session creation failed: {e}")
-            st.error("Failed to create user session. Please try logging in again.")
         except Exception as e:
-            logger.error(f"Login failed: {e}", exc_info=True)
+            logger.error(f"Login failed: {e}")
             st.error("An error occurred during login. Please try again.")
 
     def logout(self) -> None:
@@ -232,7 +211,9 @@ class UserService:
             user_uid = st.session_state.get("user_uid", "")
 
             # Clear cookies and session state
-            clear_cookies()            # Log logout activity
+            clear_user_cookie()
+
+            # Log logout activity
             if user_uid:
                 self.save_login_logout(user_uid, "logout")
 
@@ -241,7 +222,7 @@ class UserService:
         except Exception as e:
             logger.error(f"Error during logout: {e}")
             # Force clear session state even if other operations fail
-            clear_cookies()
+            clear_user_cookie()
 
     def verify_password(self, email: str, password: str) -> Optional[Dict[str, Any]]:
         """
@@ -515,13 +496,13 @@ class UserService:
 
                     if current_time > expiry_time:
                         logger.info(f"Session expired for user {username}")
-                        clear_cookies()  # Clear expired session
+                        clear_user_cookie()  # Clear expired session
                         return False
 
                 except (ValueError, TypeError) as e:
                     logger.warning(
                         f"Invalid session expiry format: {session_expiry}, error: {e}")
-                    clear_cookies()  # Clear invalid session
+                    clear_user_cookie()  # Clear invalid session
                     return False
             else:
                 # No session_expiry set, check login_timestamp and create session_expiry
@@ -542,19 +523,19 @@ class UserService:
                         if current_time > expiry_time:
                             logger.info(
                                 f"Session expired for user {username} (calculated from login_timestamp)")
-                            clear_cookies()  # Clear expired session
+                            clear_user_cookie()  # Clear expired session
                             return False
 
                     except (ValueError, TypeError) as e:
                         logger.warning(
                             f"Invalid login_timestamp format: {login_timestamp}, error: {e}")
-                        clear_cookies()  # Clear invalid session
+                        clear_user_cookie()  # Clear invalid session
                         return False
                 else:
                     # No timestamps available - this shouldn't happen for valid sessions
                     logger.warning(
                         f"No session timestamps found for user {username} - session invalid")
-                    clear_cookies()  # Clear invalid session
+                    clear_user_cookie()  # Clear invalid session
                     return False
 
             # Session is valid
@@ -570,7 +551,7 @@ class UserService:
             username = st.session_state.get("username", "")
 
             # Clear cookies and session state
-            clear_cookies()
+            clear_user_cookie()
 
             logger.info(f"Expired session cleared for user: {username}")
 
@@ -635,13 +616,13 @@ class UserService:
 
             username = st.session_state.get("username", "")
             email = st.session_state.get("useremail", "")
-            # Refresh session by saving to cookies again (extends 24-hour timeout)
             role = st.session_state.get("role", "")
-            cookie_result = save_user_to_cookie(username, email, role)
 
-            if cookie_result['success']:
-                logger.info(
-                    f"Session refreshed for user: {username} using {cookie_result['method']}")
+            # Refresh session by saving to cookies again (extends 7-hour timeout)
+            cookie_saved = save_user_to_cookie(username, email, role)
+
+            if cookie_saved:
+                logger.info(f"Session refreshed for user: {username}")
                 return True
             else:
                 logger.warning(
@@ -828,26 +809,3 @@ class UserService:
         except Exception as e:
             logger.error(f"Failed to complete registration: {e}")
             return False, "An error occurred during verification."
-
-    def check_and_update_session(self) -> bool:
-        """Check session validity and update activity."""
-        try:
-            # Check if session has timed out
-            if check_session_timeout():
-                logger.info("Session timed out, user needs to login again")
-                return False
-
-            # Update session activity if user is logged in
-            if (hasattr(st.session_state, 'username') and
-                st.session_state.username and
-                    not st.session_state.get('signout', True)):
-
-                update_session_activity()
-                setup_session_heartbeat()
-                return True
-
-            return False
-
-        except Exception as e:
-            logger.error(f"Error checking session: {e}")
-            return False

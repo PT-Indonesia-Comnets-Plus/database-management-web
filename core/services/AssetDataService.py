@@ -672,11 +672,7 @@ class AssetDataService:
         Returns:
             Error message string if failed, None if successful.
         """
-        # Important: Deleting requires careful handling of foreign key relationships.
-        # Option 1: Rely on DB's ON DELETE CASCADE (if configured). Delete only from parent table.
-        # Option 2: Manually delete from child tables first, then parent.
 
-        # Assuming Option 1 (delete from parent 'user_terminals')
         table_name = "user_terminals"
         db_identifier_col = identifier_col.lower()
 
@@ -687,15 +683,6 @@ class AssetDataService:
         if error:
             st.error(f"Failed to delete asset: {error}")
             return f"Deletion Error: {error}"
-
-        # Add manual deletes for child tables if Option 2 is needed
-        # child_tables = ["clusters", "home_connecteds", "dokumentasis", "additional_informations", "pelanggans"]
-        # for child_table in child_tables:
-        #     query_child = f'DELETE FROM {child_table} WHERE "{db_identifier_col}" = %s'
-        #     _, _, error_child = self._execute_query(query_child, (identifier_value,), fetch="none")
-        #     if error_child:
-        #         st.warning(f"Could not delete from child table {child_table}: {error_child}")
-        #         # Decide whether to stop or continue
 
         return None  # Success
 
@@ -955,6 +942,98 @@ class AssetDataService:
 
         except Exception as e:
             error_msg = f"Error in comprehensive update: {e}"
+            logger.error(error_msg)
+            return error_msg
+
+    def delete_asset_comprehensive(self, identifier_col: str, identifier_value: Any) -> Optional[str]:
+        """
+        Delete asset data across all related tables based on an identifier.
+        This method provides comprehensive deletion by removing records from all tables
+        that contain the specified identifier.
+
+        Args:
+            identifier_col: The column name to identify the record (e.g., 'fat_id', 'olt', 'fdt_id')
+            identifier_value: The value of the identifier column
+
+        Returns:
+            Error message if failed, None if successful
+        """
+        if not identifier_value:
+            return "No identifier value provided for deletion"
+
+        try:
+            # List of tables that may contain the identifier
+            # Order matters: delete from child tables first to avoid foreign key constraints
+            tables_to_check = [
+                'additional_informations',
+                'dokumentasis',
+                'home_connecteds',
+                'clusters',
+                'user_terminals'  # Main table - delete last
+            ]
+
+            deleted_count = 0
+            db_identifier_col = identifier_col.lower()
+
+            # Delete from each table where the identifier exists
+            for table_name in tables_to_check:
+                try:
+                    # First check if the identifier column exists in this table
+                    column_check_query = """
+                        SELECT column_name 
+                        FROM information_schema.columns 
+                        WHERE table_name = %s AND column_name = %s
+                    """
+
+                    columns, _, error = self._execute_query(
+                        column_check_query, (table_name,
+                                             db_identifier_col), fetch="all"
+                    )
+
+                    if error:
+                        logger.warning(
+                            f"Could not check columns for table {table_name}: {error}")
+                        continue
+
+                    if not columns:
+                        # Column doesn't exist in this table, skip
+                        continue
+
+                    # Column exists, proceed with deletion
+                    delete_query = f'DELETE FROM {table_name} WHERE "{db_identifier_col}" = %s'
+
+                    _, affected_rows, error = self._execute_query(
+                        delete_query, (identifier_value,), fetch="none"
+                    )
+
+                    if error:
+                        error_msg = f"Failed to delete from {table_name}: {error}"
+                        logger.error(error_msg)
+                        return error_msg
+
+                    if affected_rows and affected_rows > 0:
+                        deleted_count += affected_rows
+                        logger.info(
+                            f"Deleted {affected_rows} records from {table_name}")
+
+                except Exception as e:
+                    error_msg = f"Error deleting from table {table_name}: {e}"
+                    logger.error(error_msg)
+                    return error_msg
+
+            if deleted_count == 0:
+                return f"No records found with {identifier_col} = {identifier_value}"
+
+            logger.info(
+                f"Successfully deleted {deleted_count} total records for {identifier_col}={identifier_value}")
+
+            # Invalidate caches after deletion
+            self.invalidate_comprehensive_query_cache()
+
+            return None  # Success
+
+        except Exception as e:
+            error_msg = f"Error in comprehensive deletion: {e}"
             logger.error(error_msg)
             return error_msg
 

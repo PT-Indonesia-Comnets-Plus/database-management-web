@@ -65,11 +65,10 @@ CLOUD_SESSION_CONFIG = {
 # Cookie settings optimized for Streamlit Cloud
 CLOUD_COOKIE_CONFIG = {
     "secure": True,  # HTTPS only
-    "samesite": "Lax",  # Changed from Strict to Lax for better compatibility
+    "samesite": "Strict",
     "httponly": False,  # Allow JS access for localStorage fallback
     "domain": None,  # Let browser set automatically
     "path": "/",
-    "max_age": 7 * 24 * 3600,  # 7 days
 }
 
 # Database connection settings for cloud
