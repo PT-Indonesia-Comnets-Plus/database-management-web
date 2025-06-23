@@ -82,23 +82,29 @@ def initialize_session_state() -> bool:
 
             if not skip_loading:
                 logger.info(
-                    "Attempting to restore session from persistent storage...")
-
-                # Strategy 1: Use enhanced cloud session restoration
+                    "Attempting to restore session from persistent storage...")                # Strategy 1: Use enhanced cloud session restoration
                 cloud_storage = get_cloud_session_storage()
 
                 # Try enhanced restoration first (specifically for Streamlit Cloud)
                 try:
+                    logger.info("🔄 Trying enhanced session restoration...")
                     session_loaded = cloud_storage._enhanced_session_restoration()
                     if session_loaded:
                         username = st.session_state.get("username", "")
                         logger.info(
-                            f"Session restored via enhanced method: {username}")
+                            f"🟢 Session restored via enhanced method: {username}")
                     else:
+                        logger.info(
+                            "🔄 Enhanced restoration found no valid session")
                         # Fallback to standard restoration
                         session_loaded = cloud_storage.load_user_session()
-                except AttributeError:
-                    # Enhanced method not available, use standard
+                        if session_loaded:
+                            username = st.session_state.get("username", "")
+                            logger.info(
+                                f"🟢 Session restored via standard method: {username}")
+                except Exception as e:
+                    logger.error(f"Enhanced restoration failed: {e}")
+                    # Enhanced method failed, use standard
                     session_loaded = cloud_storage.load_user_session()
 
                 # Strategy 2: Fallback to cookie manager if cloud storage fails

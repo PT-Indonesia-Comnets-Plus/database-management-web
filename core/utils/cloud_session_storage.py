@@ -316,12 +316,10 @@ class CloudSessionStorage:
         This is specifically for Streamlit Cloud where regular cookies might fail.
         """
         try:
-            # Try to import and use JavaScript storage functions if available
-            try:
-                from .streamlit_cloud_cookies import load_user_session_cloud
-                return load_user_session_cloud()
-            except ImportError:
-                logger.debug("streamlit_cloud_cookies not available")
+            # Temporarily disable JavaScript integration due to compatibility issues
+            # Focus on session_state based persistence for now
+            logger.debug("Browser storage disabled - using session_state only")
+            return None
         except Exception as e:
             logger.debug(f"Browser storage load failed: {e}")
         return None
@@ -377,6 +375,12 @@ class CloudSessionStorage:
             logger.info(
                 "Starting enhanced session restoration for Streamlit Cloud")
 
+            # Debug: Show all current session state keys
+            all_keys = list(st.session_state.keys())
+            session_related_keys = [k for k in all_keys if any(term in k.lower() for term in
+                                                               ['session', 'user', 'auth', 'login', 'encoded', 'persistent'])]
+            logger.debug(f"All session-related keys: {session_related_keys}")
+
             # Strategy 1: Check for active session in current session state
             current_user = st.session_state.get("username", "")
             current_signout = st.session_state.get("signout", True)
@@ -385,46 +389,69 @@ class CloudSessionStorage:
             if (current_user and not current_signout and
                     current_expiry > 0 and current_expiry > time.time()):
                 logger.info(f"Active session found for: {current_user}")
-                return True
-
-            # Strategy 2: Look for encoded session data in session state keys
+                return True            # Strategy 2: Look for encoded session data in session state keys
+            logger.debug("Searching for encoded session data...")
+            found_keys = []
             for key in list(st.session_state.keys()):
-                if key.startswith("_encoded_session_") or key.startswith("iconnet_session_"):
-                    try:
+                if (key.startswith("_encoded_session_") or
+                    key.startswith("iconnet_session_") or
+                    key.startswith("backup_session_") or
+                        key.startswith("persistent_auth_")):
+                    found_keys.append(key)
+
+            logger.debug(f"Found potential session keys: {found_keys}")
+
+            for key in found_keys:
+                try:
+                    if key.startswith("persistent_auth_"):
+                        # Handle persistent auth format
+                        auth_data = st.session_state[key]
+                        if isinstance(auth_data, dict) and auth_data.get('expiry', 0) > time.time():
+                            session_str = auth_data.get('session', '')
+                            if session_str:
+                                session_data = json.loads(session_str)
+                            else:
+                                continue
+                        else:
+                            # Clean up expired auth
+                            del st.session_state[key]
+                            continue
+                    else:
+                        # Handle encoded session format
                         if isinstance(st.session_state[key], str):
                             session_data = json.loads(st.session_state[key])
                         else:
                             session_data = st.session_state[key]
 
-                        if self._is_session_valid(session_data):
-                            # Restore session
-                            st.session_state.username = session_data.get(
-                                "username", "")
-                            st.session_state.useremail = session_data.get(
-                                "email", "")
-                            st.session_state.role = session_data.get(
-                                "role", "")
-                            st.session_state.signout = session_data.get(
-                                "signout", True)
-                            st.session_state.login_timestamp = session_data.get(
-                                "login_timestamp", time.time())
-                            st.session_state.session_expiry = session_data.get(
-                                "session_expiry", 0)
+                    if self._is_session_valid(session_data):
+                        # Restore session
+                        st.session_state.username = session_data.get(
+                            "username", "")
+                        st.session_state.useremail = session_data.get(
+                            "email", "")
+                        st.session_state.role = session_data.get("role", "")
+                        st.session_state.signout = session_data.get(
+                            "signout", True)
+                        st.session_state.login_timestamp = session_data.get(
+                            "login_timestamp", time.time())
+                        st.session_state.session_expiry = session_data.get(
+                            "session_expiry", 0)
 
-                            restored_user = session_data.get("username", "")
-                            logger.info(
-                                f"Session restored from encoded data: {restored_user}")
-                            return True
-                        else:
-                            # Clean up expired data
-                            del st.session_state[key]
-                    except Exception as e:
-                        logger.debug(
-                            f"Failed to parse session data from {key}: {e}")
-                        try:
-                            del st.session_state[key]
-                        except:
-                            pass
+                        restored_user = session_data.get("username", "")
+                        logger.info(
+                            f"🟢 Session restored from {key}: {restored_user}")
+                        return True
+                    else:
+                        # Clean up expired data
+                        logger.debug(f"Cleaning up expired session key: {key}")
+                        del st.session_state[key]
+                except Exception as e:
+                    logger.debug(
+                        f"Failed to parse session data from {key}: {e}")
+                    try:
+                        del st.session_state[key]
+                    except:
+                        pass
 
             # Strategy 3: Try to restore from any persistent browser data
             try:

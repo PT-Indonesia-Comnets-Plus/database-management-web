@@ -197,8 +197,8 @@ class StreamlitCloudSessionManager:
         """Execute JavaScript action and return result."""
         try:
             js_code = self._create_js_storage_component(action, data)
-            result = components.html(
-                js_code, height=0, key=f"{self._storage_prefix}_{action}_{time.time()}")
+            # Remove problematic 'key' parameter for Streamlit Cloud compatibility
+            result = components.html(js_code, height=0)
             return result
         except Exception as e:
             logger.error(f"JavaScript execution failed: {e}")
