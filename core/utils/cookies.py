@@ -100,6 +100,12 @@ class StreamlitCloudCookieManager:
         self._init_attempted = True
 
         try:
+            # Skip if cookies library not available
+            if not COOKIES_AVAILABLE or EncryptedCookieManager is None:
+                logger.info(
+                    "streamlit-cookies-manager not available, using session state only")
+                return False
+
             # Check if we're in proper Streamlit context
             try:
                 import streamlit.runtime.scriptrunner as sr
@@ -110,8 +116,13 @@ class StreamlitCloudCookieManager:
             except (ImportError, AttributeError):
                 pass
 
-            # Create unique prefix to avoid conflicts
-            unique_prefix = f"IconnetApp_{self._session_key}_v2"
+            # For Streamlit Cloud, use simpler prefix to avoid conflicts
+            if is_streamlit_cloud():
+                unique_prefix = f"iconnet_v3"
+                max_wait = 5.0  # Increased timeout for cloud
+            else:
+                unique_prefix = f"IconnetApp_{self._session_key}_v3"
+                max_wait = 3.0
 
             # Get password from secrets with fallback
             try:
@@ -120,23 +131,24 @@ class StreamlitCloudCookieManager:
             except Exception:
                 password = "iconnet_fallback_key_2025_secure"
 
-            # Initialize with unique key
+            # Initialize with unique key and special handling for cloud
+            logger.info(f"Initializing cookies with prefix: {unique_prefix}")
             self._cookies = EncryptedCookieManager(
                 prefix=unique_prefix,
                 password=password
             )
 
             # Wait for cookies to be ready with timeout
-            max_wait = 3.0  # Reduced timeout for better UX
             start_time = time.time()
+            check_interval = 0.2 if is_streamlit_cloud() else 0.1
 
             while (time.time() - start_time) < max_wait:
                 if self._cookies.ready():
                     self._ready = True
                     logger.info(
-                        f"Cookie manager initialized with key: {unique_prefix}")
+                        f"Cookie manager initialized successfully: {unique_prefix}")
                     return True
-                time.sleep(0.1)
+                time.sleep(check_interval)
 
             if is_streamlit_cloud():
                 logger.info(
@@ -391,3 +403,115 @@ class CookieManager:
 def get_cookie_manager() -> CookieManager:
     """Get legacy cookie manager instance."""
     return CookieManager()
+
+
+def check_and_restore_persistent_session():
+    """
+    Global function to check and restore persistent session.
+    This should be called at the very beginning of every page.
+    """
+    try:
+        # Skip if already processing
+        if st.session_state.get("_session_restore_in_progress", False):
+            return False
+
+        st.session_state._session_restore_in_progress = True
+
+        # Quick check if we have an active session
+        username = st.session_state.get("username", "")
+        signout = st.session_state.get("signout", True)
+        session_expiry = st.session_state.get("session_expiry", 0)
+
+        # If we have a valid session, no need to restore
+        if username and not signout and session_expiry > time.time():
+            st.session_state._session_restore_in_progress = False
+            return True
+
+        # Look for persistent session data
+        session_restored = False
+
+        # Strategy 1: Look for encoded session data
+        for key in list(st.session_state.keys()):
+            if any(term in key for term in ['encoded_session', 'iconnet_session', 'backup_session']):
+                try:
+                    encoded_data = st.session_state[key]
+                    if isinstance(encoded_data, str):
+                        session_data = json.loads(encoded_data)
+
+                        # Validate session
+                        if (session_data.get('session_expiry', 0) > time.time() and
+                                session_data.get('username')):
+
+                            # Restore session variables
+                            st.session_state.username = session_data.get(
+                                'username', '')
+                            st.session_state.useremail = session_data.get(
+                                'email', '')
+                            st.session_state.role = session_data.get(
+                                'role', '')
+                            st.session_state.signout = session_data.get(
+                                'signout', True)
+                            st.session_state.login_timestamp = session_data.get(
+                                'login_timestamp', time.time())
+                            st.session_state.session_expiry = session_data.get(
+                                'session_expiry', 0)
+
+                            logger.info(
+                                f"🟢 Persistent session restored for: {session_data.get('username')}")
+                            session_restored = True
+                            break
+                        else:
+                            # Clean up expired session
+                            try:
+                                del st.session_state[key]
+                            except:
+                                pass
+                except Exception as e:
+                    logger.debug(f"Failed to parse session from {key}: {e}")
+
+        # Strategy 2: Look for persistent auth records
+        if not session_restored:
+            for key in list(st.session_state.keys()):
+                if key.startswith('persistent_auth_'):
+                    try:
+                        auth_data = st.session_state[key]
+                        if auth_data.get('expiry', 0) > time.time():
+                            session_str = auth_data.get('session', '')
+                            if session_str:
+                                session_data = json.loads(session_str)
+
+                                # Restore session
+                                st.session_state.username = session_data.get(
+                                    'username', '')
+                                st.session_state.useremail = session_data.get(
+                                    'email', '')
+                                st.session_state.role = session_data.get(
+                                    'role', '')
+                                st.session_state.signout = session_data.get(
+                                    'signout', True)
+                                st.session_state.login_timestamp = session_data.get(
+                                    'login_timestamp', time.time())
+                                st.session_state.session_expiry = session_data.get(
+                                    'session_expiry', 0)
+
+                                logger.info(
+                                    f"🟢 Session restored from persistent auth: {session_data.get('username')}")
+                                session_restored = True
+                                break
+                        else:
+                            # Clean up expired auth
+                            try:
+                                del st.session_state[key]
+                            except:
+                                pass
+                    except Exception as e:
+                        logger.debug(
+                            f"Failed to parse persistent auth {key}: {e}")
+
+        st.session_state._session_restore_in_progress = False
+        return session_restored
+
+    except Exception as e:
+        logger.error(f"Persistent session check failed: {e}")
+        st.session_state._session_restore_in_progress = False
+        return False

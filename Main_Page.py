@@ -172,23 +172,30 @@ class MainPageManager:
             bool: True if user is authenticated, False otherwise
         """
         try:
-            # Check if user service is available
+            # Use global persistent session check first
+            from core.utils.cookies import check_and_restore_persistent_session
+            session_restored = check_and_restore_persistent_session()
+
+            if session_restored:
+                return True
+
+            # Check if user service is available for additional restoration
             if not self.user_service:
                 logger.warning("UserService not available for session check")
                 return False
 
-            # Try to restore session
+            # Try to restore session using UserService
             if self.user_service.restore_user_session():
                 # Validate the restored session
                 if self.user_service.is_session_valid():
                     username = st.session_state.get("username", "")
-                    logger.debug(f"Valid session confirmed for: {username}")
+                    logger.info(f"🟢 Valid session confirmed for: {username}")
                     return True
                 else:
                     logger.debug("Restored session is invalid or expired")
                     return False
             else:
-                logger.debug("No session to restore")
+                logger.debug("No session to restore via UserService")
                 return False
 
         except Exception as e:

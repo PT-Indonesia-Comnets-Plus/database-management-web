@@ -73,43 +73,76 @@ def initialize_session_state() -> bool:
             # Check if we have a valid active session first
             current_user = st.session_state.get("username", "")
             current_signout = st.session_state.get("signout", True)
-            current_expiry = st.session_state.get("session_expiry", 0)
-
             # Only skip loading if we have a valid, non-expired, active session
+            current_expiry = st.session_state.get("session_expiry", 0)
             skip_loading = (current_user and
                             not current_signout and
                             current_expiry > 0 and
                             current_expiry > time.time())
 
             if not skip_loading:
-                logger.debug(
+                logger.info(
                     "Attempting to restore session from persistent storage...")
 
-                # Use cloud-optimized session storage
+                # Strategy 1: Use enhanced cloud session restoration
                 cloud_storage = get_cloud_session_storage()
-                session_loaded = cloud_storage.load_user_session()
 
-                # Fallback to cookie manager if cloud storage fails
+                # Try enhanced restoration first (specifically for Streamlit Cloud)
+                try:
+                    session_loaded = cloud_storage._enhanced_session_restoration()
+                    if session_loaded:
+                        username = st.session_state.get("username", "")
+                        logger.info(
+                            f"Session restored via enhanced method: {username}")
+                    else:
+                        # Fallback to standard restoration
+                        session_loaded = cloud_storage.load_user_session()
+                except AttributeError:
+                    # Enhanced method not available, use standard
+                    session_loaded = cloud_storage.load_user_session()
+
+                # Strategy 2: Fallback to cookie manager if cloud storage fails
                 if not session_loaded:
                     try:
+                        logger.info("Trying cookie manager fallback...")
                         cookie_manager = get_cloud_cookie_manager()
                         session_loaded = cookie_manager.load_user_session()
+                        if session_loaded:
+                            username = st.session_state.get("username", "")
+                            logger.info(
+                                f"Session restored via cookies: {username}")
                     except Exception as e:
                         logger.debug(f"Cookie fallback failed: {e}")
 
-                # Log restoration results
+                # Strategy 3: Final fallback - check for any session indicators
+                if not session_loaded:
+                    # Look for any remaining session data in session state
+                    for key in list(st.session_state.keys()):
+                        if ("user" in key.lower() or "auth" in key.lower() or
+                                "login" in key.lower() or "session" in key.lower()):
+                            if key not in ["username", "useremail", "role", "signout"]:
+                                logger.debug(
+                                    f"Found potential session key: {key}")
+
+                    # Check if we have minimal session data
+                    username = st.session_state.get("username", "")
+                    if username and not st.session_state.get("signout", True):
+                        session_loaded = True
+                        # Log final restoration results
+                        logger.info(
+                            f"Minimal session data found for: {username}")
                 username = st.session_state.get("username", "")
                 if username and session_loaded:
                     logger.info(
-                        f"User session restored successfully: {username}")
+                        f"🟢 Session restoration successful: {username}")
                 elif username:
                     logger.info(
-                        f"User session loaded from session state: {username}")
+                        f"🟡 Session exists but may need validation: {username}")
                 else:
-                    logger.debug("No previous session found")
+                    logger.info("🔴 No previous session found")
             else:
-                logger.debug(
-                    f"Valid session already exists for: {current_user}")
+                logger.info(
+                    f"🟢 Valid session already exists for: {current_user}")
 
         except Exception as e:
             logger.warning(f"Session restoration failed: {e}")
