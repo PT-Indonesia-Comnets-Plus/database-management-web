@@ -36,9 +36,7 @@ def initialize_session_state() -> bool:
             except Exception as e:
                 logger.error(f"Failed to connect to database: {e}")
                 st.session_state.db = None
-                st.session_state.storage = None
-
-        # Initialize Firebase
+                st.session_state.storage = None        # Initialize Firebase
         if "fs" not in st.session_state or "auth" not in st.session_state or "fs_config" not in st.session_state:
             try:
                 firestore, auth, config = get_firebase_app()
@@ -51,9 +49,18 @@ def initialize_session_state() -> bool:
                 logger.error(f"Failed to initialize Firebase: {e}")
                 st.session_state.fs = None
                 st.session_state.auth = None
-                # Initialize Cloud Session Storage Service (NEW - optimized for Streamlit Cloud)
-                # Cloud session storage removed - using cookies-only approach
                 st.session_state.fs_config = None
+
+        # Initialize Persistent Session Service (NEW)
+        if "persistent_session_service" not in st.session_state:
+            try:
+                from .services.PersistentSessionService import get_persistent_session_service
+                st.session_state.persistent_session_service = get_persistent_session_service()
+                logger.info("PersistentSessionService initialized")
+            except Exception as e:
+                logger.error(
+                    f"Failed to initialize PersistentSessionService: {e}")
+                st.session_state.persistent_session_service = None
         # Initialize Session Storage Service (Legacy fallback)
         st.session_state.cloud_session_storage = None
         if "session_storage_service" not in st.session_state:
@@ -82,32 +89,60 @@ def initialize_session_state() -> bool:
 
             if not skip_loading:
                 logger.info(
-                    "Attempting to restore session from persistent storage...")                # Strategy 1: Use enhanced cloud session restoration
-                cloud_storage = get_cloud_session_storage()
+                    "Attempting to restore session from persistent storage...")
 
-                # Try enhanced restoration first (specifically for Streamlit Cloud)
-                try:
-                    logger.info("🔄 Trying enhanced session restoration...")
-                    session_loaded = cloud_storage._enhanced_session_restoration()
-                    if session_loaded:
-                        username = st.session_state.get("username", "")
+                session_loaded = False
+
+                # NEW: Strategy 1 - Try Firestore persistent session first
+                if st.session_state.get("persistent_session_service") is not None:
+                    try:
                         logger.info(
-                            f"🟢 Session restored via enhanced method: {username}")
-                    else:
-                        logger.info(
-                            "🔄 Enhanced restoration found no valid session")
-                        # Fallback to standard restoration
-                        session_loaded = cloud_storage.load_user_session()
+                            "🔄 Attempting Firestore session restoration...")
+                        persistent_service = st.session_state.persistent_session_service
+
+                        # Clean up expired sessions
+                        persistent_service.cleanup_expired_sessions()
+
+                        # Try to restore session
+                        user_data = persistent_service.restore_session()
+                        if user_data:
+                            session_loaded = True
+                            username = st.session_state.get("username", "")
+                            logger.info(
+                                f"🟢 Session restored from Firestore for: {username}")
+                        else:
+                            logger.info("🔄 No valid Firestore session found")
+                    except Exception as e:
+                        logger.error(
+                            f"Firestore session restoration failed: {e}")
+
+                # Strategy 2: Use enhanced cloud session restoration (fallback)
+                if not session_loaded:
+                    cloud_storage = get_cloud_session_storage()
+
+                    # Try enhanced restoration first (specifically for Streamlit Cloud)
+                    try:
+                        logger.info("🔄 Trying enhanced session restoration...")
+                        session_loaded = cloud_storage._enhanced_session_restoration()
                         if session_loaded:
                             username = st.session_state.get("username", "")
                             logger.info(
-                                f"🟢 Session restored via standard method: {username}")
-                except Exception as e:
-                    logger.error(f"Enhanced restoration failed: {e}")
-                    # Enhanced method failed, use standard
-                    session_loaded = cloud_storage.load_user_session()
+                                f"🟢 Session restored via enhanced method: {username}")
+                        else:
+                            logger.info(
+                                "🔄 Enhanced restoration found no valid session")
+                            # Fallback to standard restoration
+                            session_loaded = cloud_storage.load_user_session()
+                            if session_loaded:
+                                username = st.session_state.get("username", "")
+                                logger.info(
+                                    f"🟢 Session restored via standard method: {username}")
+                    except Exception as e:
+                        logger.error(f"Enhanced restoration failed: {e}")
+                        # Enhanced method failed, use standard
+                        session_loaded = cloud_storage.load_user_session()
 
-                # Strategy 2: Fallback to cookie manager if cloud storage fails
+                # Strategy 3: Fallback to cookie manager if cloud storage fails
                 if not session_loaded:
                     try:
                         logger.info("Trying cookie manager fallback...")
@@ -120,7 +155,7 @@ def initialize_session_state() -> bool:
                     except Exception as e:
                         logger.debug(f"Cookie fallback failed: {e}")
 
-                # Strategy 3: Final fallback - check for any session indicators
+                # Strategy 4: Final fallback - check for any session indicators
                 if not session_loaded:
                     # Look for any remaining session data in session state
                     for key in list(st.session_state.keys()):
@@ -137,6 +172,8 @@ def initialize_session_state() -> bool:
                         # Log final restoration results
                         logger.info(
                             f"Minimal session data found for: {username}")
+
+                # Log final restoration results
                 username = st.session_state.get("username", "")
                 if username and session_loaded:
                     logger.info(

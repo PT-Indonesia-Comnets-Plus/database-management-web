@@ -366,6 +366,15 @@ class CloudSessionStorage:
             if key not in st.session_state:
                 st.session_state[key] = value
 
+    def load_user_session_enhanced(self) -> bool:
+        """
+        Enhanced session loading that tries the enhanced restoration method.
+
+        Returns:
+            bool: True if session was loaded successfully
+        """
+        return self._enhanced_session_restoration()
+
     def _enhanced_session_restoration(self) -> bool:
         """
         Enhanced session restoration specifically for Streamlit Cloud.

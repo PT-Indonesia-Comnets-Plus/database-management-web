@@ -110,16 +110,39 @@ class UserService:
                 "Password must contain at least one uppercase letter, one lowercase letter, and one number")
 
     def _create_session(self, user, user_data: Dict[str, Any]) -> None:
-        """Create user session using cloud-optimized storage."""
+        """Create user session using cloud-optimized storage and persistent Firestore session."""
         try:
             username = user_data.get('username', user.uid)
             email = user.email
             role = user_data['role']
 
-            # Use cloud-optimized session storage
-            cloud_storage = get_cloud_session_storage()
-            session_saved = cloud_storage.save_user_session(
-                username, email, role)
+            # NEW: Save to persistent Firestore session first
+            session_saved = False
+            if "persistent_session_service" in st.session_state and st.session_state.persistent_session_service:
+                try:
+                    persistent_service = st.session_state.persistent_session_service
+                    session_token = persistent_service.save_session(username, {
+                        'username': username,
+                        'useremail': email,
+                        'role': role,
+                        'user_uid': user.uid,
+                        'logged_in': True,
+                        'signout': False
+                    })
+                    if session_token:
+                        session_saved = True
+                        logger.info(
+                            f"✅ Persistent session saved for user: {username}")
+                    else:
+                        logger.warning("Failed to save persistent session")
+                except Exception as e:
+                    logger.error(f"Failed to save persistent session: {e}")
+
+            # Use cloud-optimized session storage (fallback)
+            if not session_saved:
+                cloud_storage = get_cloud_session_storage()
+                session_saved = cloud_storage.save_user_session(
+                    username, email, role)
 
             # Fallback to cookie manager
             if not session_saved:
@@ -217,9 +240,19 @@ class UserService:
             username = st.session_state.get("username", "")
             user_uid = st.session_state.get("user_uid", "")
 
+            # NEW: Clear persistent Firestore session first
+            if "persistent_session_service" in st.session_state and st.session_state.persistent_session_service:
+                try:
+                    persistent_service = st.session_state.persistent_session_service
+                    persistent_service.clear_session(username)
+                    logger.info(
+                        f"✅ Persistent session cleared for user: {username}")
+                except Exception as e:
+                    logger.error(f"Failed to clear persistent session: {e}")
+
             # Use comprehensive session clearing with cloud optimizations
             try:
-                # Try cloud session storage first
+                # Try cloud session storage
                 cloud_storage = get_cloud_session_storage()
                 cloud_storage.clear_user_session()
             except Exception as e:
