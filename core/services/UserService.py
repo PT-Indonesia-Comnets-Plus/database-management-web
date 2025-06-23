@@ -103,9 +103,8 @@ class UserService:
             # Additional password validation
             raise ValidationError("Password must be at least 6 characters")
         if len(password) > 30:
+            # Optional: Check for password strength
             raise ValidationError("Password must be less than 128 characters")
-
-        # Optional: Check for password strength
         has_upper = any(c.isupper() for c in password)
         has_lower = any(c.islower() for c in password)
         has_digit = any(c.isdigit() for c in password)
@@ -119,7 +118,11 @@ class UserService:
         try:
             username = user_data.get('username', user.uid)
             email = user.email
-            role = user_data['role']
+            # Safe access with default fallback
+            role = user_data.get('role', 'Employee')
+
+            logger.info(
+                f"Creating session for user: {username}, email: {email}, role: {role}")
 
             # Save to cookies with enhanced persistence
             cookie_result = save_user_to_cookie(username, email, role)
@@ -135,13 +138,20 @@ class UserService:
                 setup_session_heartbeat()
 
             else:
-                logger.warning("Failed to save user data")
+                logger.warning(
+                    f"Failed to save user data to cookies, but session state is set. Result: {cookie_result}")
 
             # Log activity
-            self.save_login_logout(user.uid, "login")
+            try:
+                self.save_login_logout(user.uid, "login")
+                logger.info(f"Login activity saved for user {username}")
+            except Exception as activity_error:
+                logger.warning(
+                    f"Failed to save login activity: {activity_error}")
+                # Don't fail the entire session creation if activity logging fails
 
         except Exception as e:
-            logger.error(f"Failed to create session: {e}")
+            logger.error(f"Failed to create session: {e}", exc_info=True)
             raise UserServiceError(f"Session creation failed: {e}")
 
     def login(self, email: str, password: str) -> None:
@@ -196,9 +206,7 @@ class UserService:
                     f"User {email} login blocked - not verified. verified={verified_field}, status='{status_field}'")
                 st.warning(
                     "Your account is pending admin approval. Please wait for verification.")
-                return
-
-            # Create session after successful validation
+                return            # Create session after successful validation
             self._create_session(user, user_doc_data)
 
             st.success(
@@ -210,8 +218,11 @@ class UserService:
         except AuthenticationError as e:
             logger.warning(f"Authentication failed: {e}")
             st.warning(str(e))
+        except UserServiceError as e:
+            logger.error(f"Session creation failed: {e}")
+            st.error("Failed to create user session. Please try logging in again.")
         except Exception as e:
-            logger.error(f"Login failed: {e}")
+            logger.error(f"Login failed: {e}", exc_info=True)
             st.error("An error occurred during login. Please try again.")
 
     def logout(self) -> None:

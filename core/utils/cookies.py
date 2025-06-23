@@ -26,7 +26,12 @@ except ImportError:
 try:
     from streamlit_cookies_manager import EncryptedCookieManager
 except ImportError:
-    st.error("streamlit-cookies-manager is required. Please install it.")
+    # Handle import error gracefully for non-Streamlit environments
+    if hasattr(st, 'error'):
+        st.error("streamlit-cookies-manager is required. Please install it.")
+    else:
+        # For CLI/testing environments, just log the error
+        print("Warning: streamlit-cookies-manager is not available. Cookie functionality will be limited.")
     EncryptedCookieManager = None
 
 logger = logging.getLogger(__name__)
@@ -88,6 +93,15 @@ def _initialize_cookies(force_reinit: bool = False):
             # Use unique prefix to prevent duplicate element issues
             unique_suffix = hashlib.md5(
                 f"{time.time()}_{is_cloud}".encode()).hexdigest()[:8]
+
+            # Check if EncryptedCookieManager is available
+            if EncryptedCookieManager is None:
+                logger.warning(
+                    "EncryptedCookieManager is not available - cookies disabled")
+                _cookies_initialized = True
+                _cookies_available = False
+                record_cookie_init(False)
+                return None, False
 
             if is_cloud:
                 # On Streamlit Cloud, use cloud-optimized settings
@@ -252,8 +266,9 @@ def save_user_to_cookie(username: str, email: str, role: str) -> dict:
                 _cookies_available = new_available
                 logger.info("Cookies successfully initialized for login")
         except Exception as e:
-            # Save to cookies if available (try multiple approaches for cloud)
             logger.debug(f"Failed to initialize cookies: {e}")
+
+    # Save to cookies if available (try multiple approaches for cloud)
     if _cookies_available and _cookies_instance:
         try:
             _cookies_instance["username"] = username
