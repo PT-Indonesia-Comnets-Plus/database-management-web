@@ -15,8 +15,7 @@ from core.services.UserService import UserService
 from core.services.EmailService import EmailService
 from core import initialize_session_state
 from core.utils.load_css import load_custom_css
-from core.utils.cookies import clear_cookies, show_session_restore_notice
-from core.utils.session_debug import add_session_debugging, log_session_event
+from core.utils.cookies import clear_cookies
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -353,9 +352,6 @@ class MainPageManager:
         """Display user dashboard for authenticated users."""
         st.markdown("---")
 
-        # Show session restore notice in sidebar
-        show_session_restore_notice()
-
         # Welcome section
         self._display_welcome_section()
 
@@ -550,17 +546,6 @@ class MainPageManager:
         self.configure_page()
         self.load_styles()
         self.display_header()
-
-        # Add session debugging for development/debugging
-        add_session_debugging()
-
-        if self.is_user_authenticated():
-            log_session_event("user_authenticated", {
-                              "username": st.session_state.get("username")})
-            self.display_user_dashboard()
-        else:
-            log_session_event("user_not_authenticated")
-            self.display_authentication_form()
 
 
 def main():

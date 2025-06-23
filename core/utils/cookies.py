@@ -266,23 +266,36 @@ def save_user_to_cookie(username: str, email: str, role: str) -> dict:
                 _cookies_available = new_available
                 logger.info("Cookies successfully initialized for login")
         except Exception as e:
+            # Save to cookies if available (try multiple approaches for cloud)
             logger.debug(f"Failed to initialize cookies: {e}")
-
-    # Save to cookies if available (try multiple approaches for cloud)
-    if _cookies_available and _cookies_instance:
+    if _cookies_available and _cookies_instance is not None:
         try:
-            _cookies_instance["username"] = username
-            _cookies_instance["email"] = email
-            _cookies_instance["role"] = role
-            _cookies_instance["signout"] = "False"
-            _cookies_instance["login_timestamp"] = str(login_timestamp)
-            _cookies_instance["session_expiry"] = str(
-                login_timestamp + SESSION_TIMEOUT_SECONDS)
-            _cookies_instance["last_activity"] = str(time.time())
+            # Check if cookies are actually ready before using them
+            try:
+                # Try to access cookies safely to verify they're ready
+                _ = _cookies_instance.ready()
+                cookies_ready = True
+            except Exception as ready_check_error:
+                logger.debug(
+                    f"Cookie readiness check failed: {ready_check_error}")
+                cookies_ready = False
 
-            logger.info(f"✅ User {username} saved to cookies successfully")
-            cookies_saved = True
-            record_cookie_save(True)
+            if cookies_ready:
+                _cookies_instance["username"] = username
+                _cookies_instance["email"] = email
+                _cookies_instance["role"] = role
+                _cookies_instance["signout"] = "False"
+                _cookies_instance["login_timestamp"] = str(login_timestamp)
+                _cookies_instance["session_expiry"] = str(
+                    login_timestamp + SESSION_TIMEOUT_SECONDS)
+                _cookies_instance["last_activity"] = str(time.time())
+
+                logger.info(f"✅ User {username} saved to cookies successfully")
+                cookies_saved = True
+                record_cookie_save(True)
+            else:
+                logger.debug("Cookies not ready, skipping cookie save")
+                record_cookie_save(False)
 
         except Exception as e:
             logger.warning(f"Failed to save to cookies: {e}")
@@ -466,57 +479,67 @@ def load_cookie_to_session() -> bool:
                     logger.debug("Cookies not available")
             except Exception as e:
                 logger.debug(
-                    f"Failed to initialize cookies for session restoration: {e}")
-
-        # Strategy 1: Try cookies first
+                    f"Failed to initialize cookies for session restoration: {e}")        # Strategy 1: Try cookies first
         logger.debug("Strategy 1: Attempting cookie restoration...")
-        if _cookies_available and _cookies_instance:
+        if _cookies_available and _cookies_instance is not None:
             try:
-                username = _cookies_instance.get("username")
-                email = _cookies_instance.get("email")
-                role = _cookies_instance.get("role")
-                signout = _cookies_instance.get("signout", "False")
-                login_timestamp = _cookies_instance.get("login_timestamp")
-                session_expiry = _cookies_instance.get("session_expiry")
+                # Check if cookies are actually ready before using them
+                try:
+                    cookies_ready = _cookies_instance.ready()
+                except Exception as ready_check_error:
+                    logger.debug(
+                        f"Cookie readiness check failed: {ready_check_error}")
+                    cookies_ready = False
 
-                if username and email and role and signout == "False":
-                    if session_expiry and float(session_expiry) > time.time():
-                        # Update last activity in cookies
-                        try:
-                            _cookies_instance["last_activity"] = str(
-                                time.time())
-                        except:
-                            pass
+                if cookies_ready:
+                    username = _cookies_instance.get("username")
+                    email = _cookies_instance.get("email")
+                    role = _cookies_instance.get("role")
+                    signout = _cookies_instance.get("signout", "False")
+                    login_timestamp = _cookies_instance.get("login_timestamp")
+                    session_expiry = _cookies_instance.get("session_expiry")
 
-                        # Restore to session state
-                        st.session_state.username = username
-                        st.session_state.useremail = email
-                        st.session_state.role = role
-                        st.session_state.signout = False
-                        st.session_state.login_timestamp = float(
-                            login_timestamp) if login_timestamp else time.time()
-                        st.session_state.session_expiry = float(session_expiry)
-                        st.session_state.iconnet_persistent_session = {
-                            "username": username,
-                            "email": email,
-                            "role": role,
-                            "login_timestamp": float(login_timestamp) if login_timestamp else time.time(),
-                            "session_expiry": float(session_expiry),
-                            "last_activity": time.time()
-                        }
+                    if username and email and role and signout == "False":
+                        if session_expiry and float(session_expiry) > time.time():
+                            # Update last activity in cookies
+                            try:
+                                _cookies_instance["last_activity"] = str(
+                                    time.time())
+                            except:
+                                pass
 
-                        logger.info(
-                            f"✅ Session restored from cookies for user: {username}")
-                        record_session_restore(True)
-                        return True
+                            # Restore to session state
+                            st.session_state.username = username
+                            st.session_state.useremail = email
+                            st.session_state.role = role
+                            st.session_state.signout = False
+                            st.session_state.login_timestamp = float(
+                                login_timestamp) if login_timestamp else time.time()
+                            st.session_state.session_expiry = float(
+                                session_expiry)
+                            st.session_state.iconnet_persistent_session = {
+                                "username": username,
+                                "email": email,
+                                "role": role,
+                                "login_timestamp": float(login_timestamp) if login_timestamp else time.time(),
+                                "session_expiry": float(session_expiry),
+                                "last_activity": time.time()
+                            }
+
+                            logger.info(
+                                f"✅ Session restored from cookies for user: {username}")
+                            record_session_restore(True)
+                            return True
+                        else:
+                            logger.debug("Cookie session expired")
+                            try:
+                                _cookies_instance["signout"] = "True"
+                            except:
+                                pass
                     else:
-                        logger.debug("Cookie session expired")
-                        try:
-                            _cookies_instance["signout"] = "True"
-                        except:
-                            pass
+                        logger.debug("Incomplete cookie data")
                 else:
-                    logger.debug("Incomplete cookie data")
+                    logger.debug("Cookies not ready for reading")
             except Exception as e:
                 logger.debug(f"Failed to load from cookies: {e}")
         else:
@@ -642,18 +665,26 @@ def clear_cookies():
     """Clear all cookies and session state with enhanced cleanup."""
     global _cookies_instance, _cookies_available
 
-    try:
-        # Clear cookies if available
-        if _cookies_available and _cookies_instance:
+    try:        # Clear cookies if available
+        if _cookies_available and _cookies_instance is not None:
             try:
-                # Set signout flag first
-                _cookies_instance["signout"] = "True"
+                # Check if cookies are ready before using them
+                try:
+                    cookies_ready = _cookies_instance.ready()
+                except Exception:
+                    cookies_ready = False
 
-                # Then clear all session keys
-                for key in ["username", "email", "role", "login_timestamp", "session_expiry", "last_activity"]:
-                    if key in _cookies_instance:
-                        del _cookies_instance[key]
-                logger.info("Cookies cleared successfully")
+                if cookies_ready:
+                    # Set signout flag first
+                    _cookies_instance["signout"] = "True"
+
+                    # Then clear all session keys
+                    for key in ["username", "email", "role", "login_timestamp", "session_expiry", "last_activity"]:
+                        if key in _cookies_instance:
+                            del _cookies_instance[key]
+                    logger.info("Cookies cleared successfully")
+                else:
+                    logger.debug("Cookies not ready for clearing")
             except Exception as e:
                 logger.debug(f"Failed to clear cookies: {e}")
 
@@ -732,13 +763,21 @@ def update_session_activity():
 
             # Update persistent session data
             if "iconnet_persistent_session" in st.session_state:
+                # Update cookies if available
                 st.session_state.iconnet_persistent_session["last_activity"] = current_time
-
-            # Update cookies if available
             global _cookies_instance, _cookies_available
-            if _cookies_available and _cookies_instance:
+            if _cookies_available and _cookies_instance is not None:
                 try:
-                    _cookies_instance["last_activity"] = str(current_time)
+                    # Check if cookies are ready before using them
+                    try:
+                        cookies_ready = _cookies_instance.ready()
+                    except Exception:
+                        cookies_ready = False
+
+                    if cookies_ready:
+                        _cookies_instance["last_activity"] = str(current_time)
+                    else:
+                        logger.debug("Cookies not ready for activity update")
                 except Exception as e:
                     logger.debug(f"Failed to update cookie activity: {e}")
 
@@ -804,17 +843,24 @@ def get_session_debug_info() -> dict:
             'current_time': time.time(),
             'username': st.session_state.get('username', 'None') if hasattr(st, 'session_state') else 'None',
             'signout_flag': st.session_state.get('signout', 'None') if hasattr(st, 'session_state') else 'None'
-        }
-
-        # Add cookie-specific debug info
-        if _cookies_available and _cookies_instance:
+        }        # Add cookie-specific debug info
+        if _cookies_available and _cookies_instance is not None:
             try:
-                debug_info['cookie_username'] = _cookies_instance.get(
-                    'username', 'None')
-                debug_info['cookie_signout'] = _cookies_instance.get(
-                    'signout', 'None')
-                debug_info['cookie_expiry'] = _cookies_instance.get(
-                    'session_expiry', 'None')
+                # Check if cookies are ready before trying to access them
+                try:
+                    cookies_ready = _cookies_instance.ready()
+                except Exception:
+                    cookies_ready = False
+
+                if cookies_ready:
+                    debug_info['cookie_username'] = _cookies_instance.get(
+                        'username', 'None')
+                    debug_info['cookie_signout'] = _cookies_instance.get(
+                        'signout', 'None')
+                    debug_info['cookie_expiry'] = _cookies_instance.get(
+                        'session_expiry', 'None')
+                else:
+                    debug_info['cookie_status'] = 'Not ready'
             except Exception as e:
                 debug_info['cookie_error'] = str(e)
         else:
