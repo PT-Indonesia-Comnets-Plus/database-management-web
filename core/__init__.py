@@ -54,9 +54,8 @@ def initialize_session_state() -> bool:
                 st.session_state.fs_config = None
 
         # Cloud session storage removed - using cookies-only approach
-        st.session_state.cloud_session_storage = None
-
         # Initialize Session Storage Service (Legacy fallback)
+        st.session_state.cloud_session_storage = None
         if "session_storage_service" not in st.session_state:
             try:
                 from .services.SessionStorageService import get_session_storage_service
@@ -86,7 +85,7 @@ def initialize_session_state() -> bool:
                 logger.debug(
                     "Attempting to restore session from persistent storage...")
                 # Load session from cookies or fallback storage
-                session_loaded = load_cookie_to_session()
+                session_loaded = load_cookie_to_session(st.session_state)
 
                 username = st.session_state.get("username", "")
                 if username and session_loaded:
@@ -102,9 +101,8 @@ def initialize_session_state() -> bool:
                     f"Valid session already active for user: {current_user}")
 
         except Exception as e:
+            # Ensure basic session state variables exist with defaults
             logger.error(f"Failed to load user session: {e}")
-
-        # Ensure basic session state variables exist with defaults
         if "username" not in st.session_state:
             st.session_state.username = ""
         if "useremail" not in st.session_state:
@@ -114,15 +112,7 @@ def initialize_session_state() -> bool:
         if "signout" not in st.session_state:
             st.session_state.signout = True
 
-        # Ensure basic session state variables exist with defaults        if not hasattr(st.session_state, 'username'):
-            st.session_state.username = ""
-        if not hasattr(st.session_state, 'useremail'):
-            st.session_state.useremail = ""
-        if not hasattr(st.session_state, 'role'):
-            st.session_state.role = ""
-        if not hasattr(st.session_state, 'signout'):
-            # Only check session expiry if user is actually logged in
-            st.session_state.signout = True
+        # Only check session expiry if user is actually logged in
         username = st.session_state.get('username', '')
         if username and username.strip() and not st.session_state.get('signout', True):
             # Check if session has expired
