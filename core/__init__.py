@@ -4,7 +4,8 @@ import streamlit as st
 import logging
 import time
 from typing import Optional, Dict, Any
-from .utils.cookies import load_cookie_to_session
+from .utils.cookies import get_cloud_cookie_manager
+from .utils.cloud_session_storage import get_cloud_session_storage
 from .utils.firebase_config import get_firebase_app
 from .utils.database import connect_db
 from .utils.cloud_config import configure_for_cloud, is_streamlit_cloud
@@ -51,9 +52,8 @@ def initialize_session_state() -> bool:
                 st.session_state.fs = None
                 st.session_state.auth = None
                 # Initialize Cloud Session Storage Service (NEW - optimized for Streamlit Cloud)
+                # Cloud session storage removed - using cookies-only approach
                 st.session_state.fs_config = None
-
-        # Cloud session storage removed - using cookies-only approach
         # Initialize Session Storage Service (Legacy fallback)
         st.session_state.cloud_session_storage = None
         if "session_storage_service" not in st.session_state:
@@ -67,7 +67,7 @@ def initialize_session_state() -> bool:
                 logger.info("Session storage service initialized successfully")
             except Exception as e:
                 logger.error(
-                    f"Failed to initialize session storage service: {e}")        # Load user session data from cookies and fallback storage
+                    f"Failed to initialize session storage service: {e}")        # Load user session data using cloud-optimized storage
         # ALWAYS attempt to load session, regardless of current session state
         try:
             # Check if we have a valid active session first
@@ -84,9 +84,20 @@ def initialize_session_state() -> bool:
             if not skip_loading:
                 logger.debug(
                     "Attempting to restore session from persistent storage...")
-                # Load session from cookies or fallback storage
-                session_loaded = load_cookie_to_session(st.session_state)
 
+                # Use cloud-optimized session storage
+                cloud_storage = get_cloud_session_storage()
+                session_loaded = cloud_storage.load_user_session()
+
+                # Fallback to cookie manager if cloud storage fails
+                if not session_loaded:
+                    try:
+                        cookie_manager = get_cloud_cookie_manager()
+                        session_loaded = cookie_manager.load_user_session()
+                    except Exception as e:
+                        logger.debug(f"Cookie fallback failed: {e}")
+
+                # Log restoration results
                 username = st.session_state.get("username", "")
                 if username and session_loaded:
                     logger.info(
@@ -98,11 +109,13 @@ def initialize_session_state() -> bool:
                     logger.debug("No previous session found")
             else:
                 logger.debug(
-                    f"Valid session already active for user: {current_user}")
+                    f"Valid session already exists for: {current_user}")
 
         except Exception as e:
-            # Ensure basic session state variables exist with defaults
-            logger.error(f"Failed to load user session: {e}")
+            logger.warning(f"Session restoration failed: {e}")
+            # Continue without session restoration
+
+        # Ensure basic session state variables exist with defaults
         if "username" not in st.session_state:
             st.session_state.username = ""
         if "useremail" not in st.session_state:

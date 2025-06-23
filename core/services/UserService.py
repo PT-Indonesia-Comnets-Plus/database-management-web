@@ -12,7 +12,8 @@ import requests
 import re
 import dns.resolver
 
-from core.utils.cookies import save_user_to_cookie, clear_user_cookie
+from core.utils.cookies import get_cloud_cookie_manager, clear_user_cookie, save_user_to_cookie
+from core.utils.cloud_session_storage import get_cloud_session_storage
 
 # Session configuration
 SESSION_TIMEOUT_HOURS = 7  # 7 hours session timeout
@@ -109,23 +110,31 @@ class UserService:
                 "Password must contain at least one uppercase letter, one lowercase letter, and one number")
 
     def _create_session(self, user, user_data: Dict[str, Any]) -> None:
-        """Create user session using cookies only."""
+        """Create user session using cloud-optimized storage."""
         try:
             username = user_data.get('username', user.uid)
             email = user.email
             role = user_data['role']
 
-            # Save to cookies with 7-hour timeout
-            cookie_saved = save_user_to_cookie(username, email, role)
+            # Use cloud-optimized session storage
+            cloud_storage = get_cloud_session_storage()
+            session_saved = cloud_storage.save_user_session(
+                username, email, role)
+
+            # Fallback to cookie manager
+            if not session_saved:
+                cookie_manager = get_cloud_cookie_manager()
+                session_saved = cookie_manager.save_user_session(
+                    username, email, role)
 
             # Store user_uid for logout logging
             st.session_state.user_uid = user.uid
 
-            if cookie_saved:
+            if session_saved:
                 logger.info(
                     f"Session created successfully for user: {username}")
             else:
-                logger.warning("Failed to save user data to cookies")
+                logger.warning("Failed to save user session data")
 
             # Log activity
             self.save_login_logout(user.uid, "login")
@@ -186,9 +195,7 @@ class UserService:
                     f"User {email} login blocked - not verified. verified={verified_field}, status='{status_field}'")
                 st.warning(
                     "Your account is pending admin approval. Please wait for verification.")
-                return
-
-            # Create session after successful validation
+                return            # Create session after successful validation
             self._create_session(user, user_doc_data)
 
             st.success(
@@ -210,6 +217,14 @@ class UserService:
             username = st.session_state.get("username", "")
             user_uid = st.session_state.get("user_uid", "")
 
+            # Use comprehensive session clearing with cloud optimizations
+            try:
+                # Try cloud session storage first
+                cloud_storage = get_cloud_session_storage()
+                cloud_storage.clear_user_session()
+            except Exception as e:
+                logger.debug(f"Cloud storage clear failed: {e}")
+
             # Clear cookies and session state
             clear_user_cookie()
 
@@ -218,11 +233,13 @@ class UserService:
                 self.save_login_logout(user_uid, "logout")
 
             logger.info(f"User {username} logged out successfully")
+            st.success("You have been logged out successfully")
 
         except Exception as e:
             logger.error(f"Error during logout: {e}")
             # Force clear session state even if other operations fail
             clear_user_cookie()
+            st.warning("Logout completed with some issues")
 
     def verify_password(self, email: str, password: str) -> Optional[Dict[str, Any]]:
         """
@@ -465,98 +482,126 @@ class UserService:
             logger.error(f"Password reset failed: {e}")
             st.error("An error occurred. Please try again.")
 
+    def restore_user_session(self) -> bool:
+        """
+        Restore user session from persistent storage with enhanced cloud support.
+        This method is called during app initialization to recover user sessions.
+
+        Returns:
+            bool: True if session was successfully restored, False otherwise
+        """
+        try:
+            # Check if we already have a valid session
+            current_user = st.session_state.get("username", "")
+            current_signout = st.session_state.get("signout", True)
+            current_expiry = st.session_state.get("session_expiry", 0)
+
+            # If we already have a valid, non-expired session, no need to restore
+            if (current_user and not current_signout and
+                    current_expiry > 0 and current_expiry > time.time()):
+                logger.debug(
+                    f"Valid session already exists for: {current_user}")
+                return True
+
+            logger.debug(
+                "Attempting to restore user session from persistent storage...")
+
+            # Strategy 1: Try cloud session storage (most reliable for Streamlit Cloud)
+            try:
+                cloud_storage = get_cloud_session_storage()
+                if cloud_storage.load_user_session():
+                    restored_user = st.session_state.get("username", "")
+                    if restored_user:
+                        logger.info(
+                            f"Session restored from cloud storage: {restored_user}")
+                        return True
+            except Exception as e:
+                logger.debug(f"Cloud storage restoration failed: {e}")
+
+            # Strategy 2: Try cookie manager (fallback)
+            try:
+                cookie_manager = get_cloud_cookie_manager()
+                if cookie_manager.load_user_session():
+                    restored_user = st.session_state.get("username", "")
+                    if restored_user:
+                        logger.info(
+                            f"Session restored from cookies: {restored_user}")
+                        return True
+            except Exception as e:
+                logger.debug(f"Cookie restoration failed: {e}")
+
+            # Strategy 3: Check for any persisted session data in session_state
+            try:
+                for key in st.session_state.keys():
+                    if key.startswith("_encoded_session_"):
+                        encoded_data = st.session_state[key]
+                        if encoded_data:
+                            import json
+                            session_data = json.loads(encoded_data)
+
+                            # Validate session is not expired
+                            session_expiry = session_data.get(
+                                "session_expiry", 0)
+                            if session_expiry > time.time():
+                                # Restore session data
+                                st.session_state.username = session_data.get(
+                                    "username", "")
+                                st.session_state.useremail = session_data.get(
+                                    "email", "")
+                                st.session_state.role = session_data.get(
+                                    "role", "")
+                                st.session_state.signout = session_data.get(
+                                    "signout", True)
+                                st.session_state.login_timestamp = session_data.get(
+                                    "login_timestamp", time.time())
+                                st.session_state.session_expiry = session_expiry
+
+                                restored_user = st.session_state.get(
+                                    "username", "")
+                                if restored_user:
+                                    logger.info(
+                                        f"Session restored from encoded data: {restored_user}")
+                                    return True
+                            else:
+                                # Clean up expired encoded session
+                                del st.session_state[key]
+            except Exception as e:
+                logger.debug(f"Encoded session restoration failed: {e}")
+
+            # No valid session found
+            logger.debug("No valid session found to restore")
+            return False
+
+        except Exception as e:
+            logger.error(f"Failed to restore user session: {e}")
+            return False
+
     def is_session_valid(self) -> bool:
         """
-        Check if the current session is valid and not expired (cookies only).
+        Check if the current user session is valid and not expired.
 
         Returns:
             bool: True if session is valid, False otherwise
         """
         try:
-            # Check if user is logged in from session state
             username = st.session_state.get("username", "")
             signout = st.session_state.get("signout", True)
+            session_expiry = st.session_state.get("session_expiry", 0)
 
-            if not username or signout:
-                logger.debug("No valid username or user is signed out")
-                return False
+            # Check if session exists and is not expired
+            if username and not signout and session_expiry > time.time():
+                return True
 
-            # Check session expiry from session state
-            session_expiry = st.session_state.get("session_expiry")
-            current_time = time.time()
+            # If session is expired or invalid, clear it
+            if username and session_expiry <= time.time():
+                logger.info(f"Session expired for user: {username}")
+                clear_user_cookie()
 
-            if session_expiry:
-                try:
-                    if isinstance(session_expiry, str):
-                        # Convert ISO format to timestamp
-                        expiry_time = datetime.fromisoformat(
-                            session_expiry.replace('Z', '+00:00')).timestamp()
-                    else:
-                        expiry_time = float(session_expiry)
-
-                    if current_time > expiry_time:
-                        logger.info(f"Session expired for user {username}")
-                        clear_user_cookie()  # Clear expired session
-                        return False
-
-                except (ValueError, TypeError) as e:
-                    logger.warning(
-                        f"Invalid session expiry format: {session_expiry}, error: {e}")
-                    clear_user_cookie()  # Clear invalid session
-                    return False
-            else:
-                # No session_expiry set, check login_timestamp and create session_expiry
-                login_timestamp = st.session_state.get("login_timestamp")
-
-                if login_timestamp:
-                    try:
-                        if isinstance(login_timestamp, str):
-                            login_time = datetime.fromisoformat(
-                                login_timestamp.replace('Z', '+00:00')).timestamp()
-                        else:
-                            login_time = float(login_timestamp)
-
-                        # Calculate and set session_expiry
-                        expiry_time = login_time + SESSION_TIMEOUT_SECONDS
-                        st.session_state.session_expiry = expiry_time
-
-                        if current_time > expiry_time:
-                            logger.info(
-                                f"Session expired for user {username} (calculated from login_timestamp)")
-                            clear_user_cookie()  # Clear expired session
-                            return False
-
-                    except (ValueError, TypeError) as e:
-                        logger.warning(
-                            f"Invalid login_timestamp format: {login_timestamp}, error: {e}")
-                        clear_user_cookie()  # Clear invalid session
-                        return False
-                else:
-                    # No timestamps available - this shouldn't happen for valid sessions
-                    logger.warning(
-                        f"No session timestamps found for user {username} - session invalid")
-                    clear_user_cookie()  # Clear invalid session
-                    return False
-
-            # Session is valid
-            return True
-
-        except Exception as e:
-            logger.error(f"Session validation failed: {e}")
             return False
 
-    def _clear_expired_session(self) -> None:
-        """Clear expired session data using cookies."""
-        try:
-            username = st.session_state.get("username", "")
-
-            # Clear cookies and session state
-            clear_user_cookie()
-
-            logger.info(f"Expired session cleared for user: {username}")
-
         except Exception as e:
-            logger.error(f"Failed to clear expired session: {e}")
+            logger.error(f"Failed to validate session: {e}")
+            return False
 
     def is_user_authenticated(self) -> bool:
         """

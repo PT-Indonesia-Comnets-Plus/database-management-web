@@ -163,6 +163,50 @@ class MainPageManager:
         # User is authenticated if username exists and not signed out
         return username_exists and not is_signed_out
 
+    def check_and_restore_session(self) -> bool:
+        """
+        Check and restore user session automatically.
+        This should be called on every page load.
+
+        Returns:
+            bool: True if user is authenticated, False otherwise
+        """
+        try:
+            # Check if user service is available
+            if not self.user_service:
+                logger.warning("UserService not available for session check")
+                return False
+
+            # Try to restore session
+            if self.user_service.restore_user_session():
+                # Validate the restored session
+                if self.user_service.is_session_valid():
+                    username = st.session_state.get("username", "")
+                    logger.debug(f"Valid session confirmed for: {username}")
+                    return True
+                else:
+                    logger.debug("Restored session is invalid or expired")
+                    return False
+            else:
+                logger.debug("No session to restore")
+                return False
+
+        except Exception as e:
+            logger.error(f"Session check failed: {e}")
+            return False
+
+    def show_persistent_session_info(self) -> None:
+        """Show information about session persistence to user."""
+        if st.session_state.get("username"):
+            username = st.session_state.get("username", "")
+            # Show a subtle indicator that user is logged in
+            with st.sidebar:
+                st.success(f"🔒 Logged in as: {username}")
+                if st.button("🚪 Logout", key="persistent_logout"):
+                    if self.user_service:
+                        self.user_service.logout()
+                        st.rerun()
+
     def display_authentication_form(self) -> None:
         """Display authentication forms (login/register)."""
         st.markdown("---")
@@ -523,9 +567,7 @@ class MainPageManager:
                     del st.session_state.verification_email
                 if 'pending_registration' in st.session_state and verification_email in st.session_state.pending_registration:
                     del st.session_state.pending_registration[verification_email]
-                st.rerun()
-
-        # Handle verification
+                st.rerun()        # Handle verification
         if verify_button and otp_input:
             if self.user_service:
                 if len(otp_input) != 6 or not otp_input.isdigit():
@@ -543,9 +585,15 @@ class MainPageManager:
         """Main application entry point."""
         self.configure_page()
         self.load_styles()
+
+        # Check and restore session automatically
+        self.check_and_restore_session()
+
         self.display_header()
 
         if self.is_user_authenticated():
+            # Show persistent session info in sidebar
+            self.show_persistent_session_info()
             self.display_user_dashboard()
         else:
             self.display_authentication_form()
