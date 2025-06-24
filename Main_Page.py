@@ -235,9 +235,7 @@ class MainPageManager:
             with st.sidebar:
                 st.success(f"🔒 Logged in as: {username}")
                 if st.button("🚪 Logout", key="persistent_logout"):
-                    if self.user_service:
-                        self.user_service.logout()
-                        st.rerun()
+                    self.handle_logout()
 
     def display_authentication_form(self) -> None:
         """Display authentication forms (login/register)."""
@@ -329,28 +327,58 @@ class MainPageManager:
                         "User service not available. Cannot process registration.")
 
     def _handle_login(self, email: str, password: str) -> None:
-        """Handle login form submission."""
+        """Handle login form submission with enhanced cookie persistence."""
         if not email or not password:
             st.warning("Please fill in all fields.")
             return
 
+        # Simulasi validasi sederhana untuk demo (ganti dengan validasi sebenarnya)
+        demo_login = False
+        if email == "user@iconnet.com" and password == "pass123":
+            demo_login = True
+
         with st.spinner("Authenticating..."):
             try:
-                # UserService.login akan menangani st.success/st.warning/st.error
-                # dan pembaruan st.session_state serta cookies.
-                # Jika login berhasil, UserService akan mengatur session state
-                self.user_service.login(email, password)
+                if demo_login:
+                    # Demo login berhasil
+                    import time
+                    from core.utils.cookies import get_cloud_cookie_manager
+                    cookie_manager = get_cloud_cookie_manager()
 
-                # Force check authentication status after login attempt
-                if self.is_user_authenticated():
-                    logger.info("🎉 Login successful, user authenticated!")
-                    # Clear any error states
-                    if 'login_error' in st.session_state:
-                        del st.session_state['login_error']
-                    st.rerun()
+                    # Simpan sesi ke cookies dan session state
+                    success = cookie_manager.save_user_session(
+                        username="demo_user",
+                        email=email,
+                        role="user"
+                    )
+
+                    if success:
+                        st.success("🎉 Login berhasil! Selamat datang!")
+                        logger.info(
+                            "🎉 Demo login successful, user authenticated!")
+                        # Clear any error states
+                        if 'login_error' in st.session_state:
+                            del st.session_state['login_error']
+                        time.sleep(1)  # Brief delay to show success message
+                        st.rerun()
+                    else:
+                        st.error("Login berhasil tetapi gagal menyimpan sesi.")
+
+                elif self.user_service:
+                    # UserService.login akan menangani st.success/st.warning/st.error
+                    # dan pembaruan st.session_state serta cookies.
+                    # Jika login berhasil, UserService akan mengatur session state
+                    # Force check authentication status after login attempt
+                    self.user_service.login(email, password)
+                    if self.is_user_authenticated():
+                        logger.info("🎉 Login successful, user authenticated!")
+                        # Clear any error states
+                        if 'login_error' in st.session_state:
+                            del st.session_state['login_error']
+                        st.rerun()
                 else:
-                    logger.warning(
-                        "❌ Login attempt completed but user not authenticated")
+                    st.error(
+                        "❌ Email atau password salah. Untuk demo, gunakan:\n- Email: user@iconnet.com\n- Password: pass123")
 
             except Exception as e:  # Menangkap error tak terduga dari UserService.login
                 logger.error(f"Unexpected error during login handling: {e}")
@@ -621,6 +649,140 @@ class MainPageManager:
                 st.error("User service not available.")
         elif verify_button:
             st.warning("⚠️ Masukkan kode verifikasi terlebih dahulu.")
+
+    def display_main_page(self) -> None:
+        """Display main page after user is authenticated."""
+        username = st.session_state.get("username", "Guest")
+
+        # Header untuk halaman utama
+        st.markdown(f"""
+        <div style='text-align: center; padding: 20px; background-color: #f0f2f6; border-radius: 10px; margin-bottom: 20px;'>
+            <h1 style='color: #1f77b4; margin-bottom: 10px;'>🎉 Selamat Datang, {username}!</h1>
+            <p style='color: #666; font-size: 18px;'>Anda berhasil login ke sistem Database Management & AI Assistant Platform</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Info sesi
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.info(f"👤 **Username:** {username}")
+
+        with col2:
+            email = st.session_state.get("useremail", "N/A")
+            st.info(f"📧 **Email:** {email}")
+
+        with col3:
+            role = st.session_state.get("role", "user").title()
+            st.info(f"🔐 **Role:** {role}")
+
+        # Session info
+        session_expiry = st.session_state.get("session_expiry", 0)
+        if session_expiry > 0:
+            import datetime
+            expiry_time = datetime.datetime.fromtimestamp(session_expiry)
+            st.success(
+                f"⏰ **Session aktif sampai:** {expiry_time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+        st.markdown("---")
+
+        # Demo fitur aplikasi
+        st.subheader("🚀 Fitur Aplikasi")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("""
+            ### 📊 Database Management
+            - Kelola data asset perusahaan
+            - Import/export data Excel
+            - Visualisasi data interaktif
+            - Backup dan restore database
+            """)
+
+            if st.button("🔗 Akses Database", use_container_width=True):
+                st.info("Fitur database akan tersedia di halaman khusus")
+
+        with col2:
+            st.markdown("""
+            ### 🤖 AI Assistant
+            - Chat dengan AI untuk analisis data
+            - Rekomendasi optimasi database
+            - Generate laporan otomatis
+            - Natural language queries
+            """)
+
+            if st.button("💬 Chat dengan AI", use_container_width=True):
+                st.info("Fitur AI Assistant akan tersedia di halaman khusus")
+
+        st.markdown("---")
+
+        # Logout section
+        st.subheader("⚙️ Pengaturan Akun")
+
+        col1, col2, col3 = st.columns([1, 1, 1])
+
+        with col2:
+            if st.button("🚪 Logout", type="primary", use_container_width=True):
+                self.handle_logout()
+
+    def handle_logout(self) -> None:
+        """Handle user logout with proper cookie cleanup."""
+        try:
+            # Get cookie manager and clear session
+            from core.utils.cookies import get_cloud_cookie_manager
+            cookie_manager = get_cloud_cookie_manager()
+
+            # Clear both session state and cookies
+            success = cookie_manager.clear_user_session()
+
+            if success:
+                st.success(
+                    "✅ Logout berhasil! Terima kasih telah menggunakan aplikasi kami.")
+                logger.info(
+                    f"User {st.session_state.get('username', 'unknown')} logged out successfully")
+
+                # Clear any additional session states
+                for key in list(st.session_state.keys()):
+                    if key.startswith(('login_', 'user_', 'auth_')):
+                        del st.session_state[key]
+
+                # Use UserService logout if available
+                if self.user_service:
+                    self.user_service.logout()
+
+                # Wait a moment then rerun
+                import time
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.warning(
+                    "Logout berhasil tetapi ada masalah membersihkan sesi.")
+                st.rerun()
+
+        except Exception as e:
+            logger.error(f"Error during logout: {e}")
+            # Force clear session state anyway
+            st.session_state.username = ""
+            st.session_state.useremail = ""
+            st.session_state.role = ""
+            st.session_state.signout = True
+            st.error(
+                "Terjadi kesalahan saat logout, namun Anda telah dikeluarkan dari sistem.")
+            st.rerun()
+
+    def display_login_demo_info(self) -> None:
+        """Display demo login information."""
+        st.markdown("""
+        <div style='background-color: #e8f4fd; padding: 15px; border-radius: 8px; margin: 10px 0;'>
+            <h4 style='color: #1f77b4; margin-top: 0;'>🎯 Demo Login Information</h4>
+            <p><strong>Email:</strong> user@iconnet.com</p>
+            <p><strong>Password:</strong> pass123</p>
+            <p style='font-size: 12px; color: #666; margin-bottom: 0;'>
+                <em>Gunakan kredensial di atas untuk mencoba fitur persistent login dengan cookies</em>
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
 
     def run(self) -> None:
         """Main application entry point."""

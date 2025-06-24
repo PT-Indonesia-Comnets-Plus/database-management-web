@@ -13,7 +13,6 @@ import re
 import dns.resolver
 
 from core.utils.cookies import get_cloud_cookie_manager, clear_user_cookie, save_user_to_cookie
-from core.utils.cloud_session_storage import get_cloud_session_storage
 
 # Session configuration
 SESSION_TIMEOUT_HOURS = 7  # 7 hours session timeout
@@ -109,6 +108,81 @@ class UserService:
             raise ValidationError(
                 "Password must contain at least one uppercase letter, one lowercase letter, and one number")
 
+    def _handle_session_persistence(self, username: str, email: str, role: str) -> bool:
+        """
+        Handle session persistence using available storage methods.
+
+        Args:
+            username: User's username
+            email: User's email
+            role: User's role
+
+        Returns:
+            bool: True if at least one storage method succeeded
+        """
+        session_saved = False
+
+        # Try persistent Firestore session first
+        if "persistent_session_service" in st.session_state and st.session_state.persistent_session_service:
+            try:
+                persistent_service = st.session_state.persistent_session_service
+                session_token = persistent_service.save_session(username, {
+                    'username': username,
+                    'useremail': email,
+                    'role': role,
+                    'logged_in': True,
+                    'signout': False
+                })
+                if session_token:
+                    session_saved = True
+                    logger.info(
+                        f"✅ Persistent session saved for user: {username}")
+                else:
+                    logger.warning("Failed to save persistent session")
+            except Exception as e:
+                logger.error(f"Failed to save persistent session: {e}")
+
+        # Try cookie manager
+        if not session_saved:
+            try:
+                cookie_manager = get_cloud_cookie_manager()
+                if cookie_manager.save_user_session(username, email, role):
+                    session_saved = True
+                    logger.info(f"✅ Cookie session saved for user: {username}")
+            except Exception as e:
+                logger.debug(f"Cookie manager save failed: {e}")
+
+        # Final fallback: session state only
+        if not session_saved:
+            logger.warning(
+                "All session storage methods failed, using session state only")
+            # Session state is already set in cookie manager or above
+
+        return session_saved
+
+    def _clear_all_sessions(self, username: str) -> None:
+        """
+        Clear all session data from available storage methods.
+          Args:
+            username: Username for logging purposes
+        """
+        # Clear persistent Firestore session
+        if "persistent_session_service" in st.session_state and st.session_state.persistent_session_service:
+            try:
+                persistent_service = st.session_state.persistent_session_service
+                persistent_service.clear_session(username)
+                logger.info(
+                    f"✅ Persistent session cleared for user: {username}")
+            except Exception as e:
+                logger.error(f"Failed to clear persistent session: {e}")
+
+        # Clear cookies and session state
+        try:
+            clear_user_cookie()
+            logger.info("Session cleared via cookie manager")
+        except Exception as e:
+            logger.debug(f"Cookie clearing failed: {e}")
+
     def _create_session(self, user, user_data: Dict[str, Any]) -> None:
         """Create user session using cloud-optimized storage and persistent Firestore session."""
         try:
@@ -116,39 +190,11 @@ class UserService:
             email = user.email
             role = user_data['role']
 
-            # NEW: Save to persistent Firestore session first
-            session_saved = False
-            if "persistent_session_service" in st.session_state and st.session_state.persistent_session_service:
-                try:
-                    persistent_service = st.session_state.persistent_session_service
-                    session_token = persistent_service.save_session(username, {
-                        'username': username,
-                        'useremail': email,
-                        'role': role,
-                        'user_uid': user.uid,
-                        'logged_in': True,
-                        'signout': False
-                    })
-                    if session_token:
-                        session_saved = True
-                        logger.info(
-                            f"✅ Persistent session saved for user: {username}")
-                    else:
-                        logger.warning("Failed to save persistent session")
-                except Exception as e:
-                    logger.error(f"Failed to save persistent session: {e}")
+            # Handle session persistence using helper method
+            session_saved = self._handle_session_persistence(
+                username, email, role)
 
-            # Use cloud-optimized session storage (fallback)
-            if not session_saved:
-                cloud_storage = get_cloud_session_storage()
-                session_saved = cloud_storage.save_user_session(
-                    username, email, role)
-
-            # Fallback to cookie manager
-            if not session_saved:
-                cookie_manager = get_cloud_cookie_manager()
-                session_saved = cookie_manager.save_user_session(
-                    username, email, role)            # Store user_uid for logout logging
+            # Store user_uid for logout logging
             st.session_state.user_uid = user.uid
 
             # Ensure session_expiry is set in session_state
@@ -162,13 +208,14 @@ class UserService:
                 logger.info(
                     f"Session created successfully for user: {username}")
             else:
-                logger.warning("Failed to save user session data")
+                logger.warning("Session created with session state only")
 
             # Log activity
             self.save_login_logout(user.uid, "login")
 
         except Exception as e:
             logger.error(f"Failed to create session: {e}")
+            raise UserServiceError(f"Session creation failed: {e}")
             raise UserServiceError(f"Session creation failed: {e}")
 
     def login(self, email: str, password: str) -> None:
@@ -245,26 +292,8 @@ class UserService:
             username = st.session_state.get("username", "")
             user_uid = st.session_state.get("user_uid", "")
 
-            # NEW: Clear persistent Firestore session first
-            if "persistent_session_service" in st.session_state and st.session_state.persistent_session_service:
-                try:
-                    persistent_service = st.session_state.persistent_session_service
-                    persistent_service.clear_session(username)
-                    logger.info(
-                        f"✅ Persistent session cleared for user: {username}")
-                except Exception as e:
-                    logger.error(f"Failed to clear persistent session: {e}")
-
-            # Use comprehensive session clearing with cloud optimizations
-            try:
-                # Try cloud session storage
-                cloud_storage = get_cloud_session_storage()
-                cloud_storage.clear_user_session()
-            except Exception as e:
-                logger.debug(f"Cloud storage clear failed: {e}")
-
-            # Clear cookies and session state
-            clear_user_cookie()
+            # Clear all sessions using helper method
+            self._clear_all_sessions(username)
 
             # Log logout activity
             if user_uid:
@@ -535,8 +564,7 @@ class UserService:
             current_expiry = st.session_state.get("session_expiry", 0)
 
             # If we already have a valid, non-expired session, no need to restore
-            if (current_user and not current_signout and
-                    current_expiry > 0 and current_expiry > time.time()):
+            if (current_user and not current_signout and current_expiry > 0 and current_expiry > time.time()):
                 logger.debug(
                     f"Valid session already exists for: {current_user}")
                 return True
@@ -544,19 +572,7 @@ class UserService:
             logger.debug(
                 "Attempting to restore user session from persistent storage...")
 
-            # Strategy 1: Try cloud session storage (most reliable for Streamlit Cloud)
-            try:
-                cloud_storage = get_cloud_session_storage()
-                if cloud_storage.load_user_session():
-                    restored_user = st.session_state.get("username", "")
-                    if restored_user:
-                        logger.info(
-                            f"Session restored from cloud storage: {restored_user}")
-                        return True
-            except Exception as e:
-                logger.debug(f"Cloud storage restoration failed: {e}")
-
-            # Strategy 2: Try cookie manager (fallback)
+            # Strategy 1: Try cookie manager (primary method for this app)
             try:
                 cookie_manager = get_cloud_cookie_manager()
                 if cookie_manager.load_user_session():
@@ -568,7 +584,7 @@ class UserService:
             except Exception as e:
                 logger.debug(f"Cookie restoration failed: {e}")
 
-            # Strategy 3: Check for any persisted session data in session_state
+            # Strategy 2: Check for any persisted session data in session_state
             try:
                 for key in st.session_state.keys():
                     if key.startswith("_encoded_session_"):
@@ -624,32 +640,24 @@ class UserService:
         try:
             username = st.session_state.get("username", "")
             signout = st.session_state.get("signout", True)
-            session_expiry = st.session_state.get("session_expiry", 0)
-            current_time = time.time()
 
-            logger.info(
-                f"🕒 Session validation - username: {username}, signout: {signout}")
-            logger.info(
-                f"🕒 Session expiry: {session_expiry}, current time: {current_time}")
-            logger.info(
-                f"🕒 Time remaining: {session_expiry - current_time:.0f} seconds")
+            # Basic checks
+            if not username or signout:
+                logger.info("❌ Session invalid - no username or signed out")
+                return False
 
-            # Check if session exists and is not expired
-            if username and not signout and session_expiry > current_time:
-                logger.info(f"✅ Session valid for: {username}")
-                return True
+            # Check session expiry using helper
+            time_info = self._get_session_remaining_time()
 
-            # If session is expired or invalid, clear it
-            if username and session_expiry <= current_time:
-                logger.info(
-                    f"❌ Session expired for user: {username} (expired {current_time - session_expiry:.0f} seconds ago)")
+            if time_info.get("expired", True):
+                logger.info(f"❌ Session expired for user: {username}")
+                # Auto-clear expired session
                 clear_user_cookie()
-            elif username and signout:
-                logger.info(f"❌ User signed out: {username}")
-            elif not username:
-                logger.info("❌ No username in session")
+                return False
 
-            return False
+            logger.info(
+                f"✅ Session valid for: {username} ({time_info.get('remaining_hours', 0):.1f}h remaining)")
+            return True
 
         except Exception as e:
             logger.error(f"Failed to validate session: {e}")
@@ -752,58 +760,19 @@ class UserService:
             if not self.is_user_authenticated():
                 return None
 
-            session_expiry = st.session_state.get("session_expiry")
-            login_timestamp = st.session_state.get("login_timestamp")
-
-            # Calculate remaining time
-            remaining_time_seconds = None
-            remaining_hours = 0
-            remaining_minutes = 0
-
-            if session_expiry:
-                try:
-                    if isinstance(session_expiry, str):
-                        expiry_time = datetime.fromisoformat(
-                            session_expiry.replace('Z', '+00:00')).timestamp()
-                    else:
-                        expiry_time = float(session_expiry)
-
-                    remaining_time_seconds = max(0, expiry_time - time.time())
-                    remaining_hours = remaining_time_seconds / 3600
-                    remaining_minutes = remaining_time_seconds / 60
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Error calculating remaining time: {e}")
-                    # If we can't calculate from session_expiry, try login_timestamp
-                    login_ts = st.session_state.get("login_timestamp")
-                    if login_ts:
-                        try:
-                            if isinstance(login_ts, str):
-                                login_time = datetime.fromisoformat(
-                                    login_ts.replace('Z', '+00:00')).timestamp()
-                            else:
-                                login_time = float(login_ts)
-
-                            expiry_time = login_time + SESSION_TIMEOUT_SECONDS
-                            remaining_time_seconds = max(
-                                0, expiry_time - time.time())
-                            remaining_hours = remaining_time_seconds / 3600
-                            remaining_minutes = remaining_time_seconds / 60
-
-                            # Update session_expiry for future use
-                            st.session_state.session_expiry = expiry_time
-                        except (ValueError, TypeError):
-                            pass
+            # Get time information using helper
+            time_info = self._get_session_remaining_time()
 
             return {
                 "username": st.session_state.get("username", ""),
                 "email": st.session_state.get("useremail", ""),
                 "role": st.session_state.get("role", ""),
-                "login_timestamp": login_timestamp,
-                "session_expiry": session_expiry,
-                "remaining_time_seconds": remaining_time_seconds,
-                "remaining_hours": remaining_hours,
-                "remaining_minutes": remaining_minutes,
-                "is_valid": self.is_session_valid()
+                "login_timestamp": st.session_state.get("login_timestamp"),
+                "session_expiry": time_info.get("expiry_timestamp"),
+                "remaining_time_seconds": time_info.get("remaining_seconds", 0),
+                "remaining_hours": time_info.get("remaining_hours", 0),
+                "remaining_minutes": time_info.get("remaining_minutes", 0),
+                "is_valid": time_info.get("valid", False)
             }
 
         except Exception as e:
@@ -861,48 +830,176 @@ class UserService:
             logger.error(f"Failed to send verification OTP: {e}")
             return False, "An error occurred while sending verification code."
 
-    def complete_registration_after_otp(self, email: str, otp_code: str) -> tuple[bool, str]:
+    def complete_registration_after_otp(self, email: str, otp_code: str) -> None:
         """
-        Complete user registration after OTP verification.
+        Complete user registration after OTP verification with UI feedback.
 
         Args:
             email: User email address
             otp_code: OTP verification code
-
-        Returns:
-            Tuple of (success, message)
         """
         try:
-            # Find user by email
-            users = self.fs.collection('users').where(
-                'email', '==', email).get()
+            if not email or not otp_code:
+                st.warning("⚠️ Email dan kode verifikasi harus diisi!")
+                return
 
-            if not users:
-                return False, "User not found."
-
-            user_doc = users[0]
-            user_data = user_doc.to_dict()
+            if len(otp_code) != 6 or not otp_code.isdigit():
+                st.error("❌ Kode verifikasi harus 6 digit angka!")
+                return
 
             # Verify OTP
-            if user_data.get('otp_code') != otp_code:
-                return False, "Invalid verification code."
+            success = self.verify_otp(email, otp_code)
 
-            # Check OTP expiry
-            otp_expires_at = user_data.get('otp_expires_at')
-            if otp_expires_at and datetime.now() > otp_expires_at:
-                return False, "Verification code has expired."
+            if success:
+                # Clear OTP verification state
+                if 'show_otp_verification' in st.session_state:
+                    del st.session_state['show_otp_verification']
+                if 'verification_email' in st.session_state:
+                    del st.session_state['verification_email']
+                if 'pending_registration' in st.session_state and email in st.session_state.pending_registration:
+                    del st.session_state.pending_registration[email]
 
-            # Mark email as verified
-            user_doc.reference.update({
-                'email_verified': True,
-                'otp_code': None,
-                'otp_expires_at': None,
-                'verified_at': datetime.now()
-            })
+                st.success(
+                    "✅ Email berhasil diverifikasi! Akun Anda menunggu persetujuan admin.")
+                st.info(
+                    "💡 Anda akan mendapat notifikasi email setelah akun disetujui admin.")
 
-            logger.info(f"Registration completed for user: {email}")
-            return True, "Email verified successfully! Your account is now pending admin approval."
+                # Force rerun to show updated UI
+                time.sleep(2)
+                st.rerun()
 
         except Exception as e:
-            logger.error(f"Failed to complete registration: {e}")
-            return False, "An error occurred during verification."
+            logger.error(f"Error during OTP completion: {e}")
+            st.error("❌ Terjadi kesalahan saat verifikasi. Silakan coba lagi.")
+
+    def _is_session_expired(self, session_expiry: float) -> bool:
+        """
+        Check if a session timestamp is expired.
+
+        Args:
+            session_expiry: Session expiry timestamp
+
+        Returns:
+            bool: True if expired, False otherwise
+        """
+        try:
+            current_time = time.time()
+            return current_time > session_expiry
+        except (ValueError, TypeError):
+            return True
+
+    def _normalize_session_expiry(self, session_expiry) -> float:
+        """
+        Normalize session expiry to Unix timestamp.
+
+        Args:
+            session_expiry: Session expiry in various formats
+
+        Returns:
+            float: Unix timestamp or 0 if invalid
+        """
+        try:
+            if isinstance(session_expiry, str):
+                # Handle ISO format string
+                from datetime import datetime
+                return datetime.fromisoformat(session_expiry.replace('Z', '+00:00')).timestamp()
+            elif isinstance(session_expiry, (int, float)):
+                return float(session_expiry)
+            else:
+                return 0.0
+        except (ValueError, TypeError):
+            return 0.0
+
+    def _get_session_remaining_time(self) -> Dict[str, Any]:
+        """
+        Get remaining session time information.
+
+        Returns:
+            Dict with remaining time details
+        """
+        try:
+            session_expiry = st.session_state.get("session_expiry", 0)
+            normalized_expiry = self._normalize_session_expiry(session_expiry)
+
+            if normalized_expiry <= 0:
+                return {"valid": False, "expired": True}
+
+            current_time = time.time()
+            remaining_seconds = max(0, normalized_expiry - current_time)
+            remaining_minutes = remaining_seconds / 60
+            remaining_hours = remaining_seconds / 3600
+
+            return {
+                "valid": remaining_seconds > 0,
+                "expired": remaining_seconds <= 0,
+                "remaining_seconds": remaining_seconds,
+                "remaining_minutes": remaining_minutes,
+                "remaining_hours": remaining_hours,
+                "expiry_timestamp": normalized_expiry
+            }
+        except Exception as e:
+            logger.error(f"Error calculating session time: {e}")
+            return {"valid": False, "expired": True, "error": str(e)}
+
+    def get_cookie_status(self) -> Dict[str, Any]:
+        """
+        Get cookie manager status information for debugging.
+
+        Returns:
+            Dict with cookie status information
+        """
+        try:
+            cookie_manager = get_cloud_cookie_manager()
+
+            return {
+                "cookies_available": cookie_manager is not None,
+                "cookies_ready": cookie_manager.ready if cookie_manager else False,
+                "session_timeout_hours": SESSION_TIMEOUT_HOURS,
+                "current_user": st.session_state.get("username", ""),
+                "is_authenticated": self.is_user_authenticated(),
+                "session_valid": self.is_session_valid() if self.is_user_authenticated() else False
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting cookie status: {e}")
+            return {"error": str(e), "cookies_available": False}
+
+    def debug_session_state(self) -> Dict[str, Any]:
+        """
+        Get session state information for debugging (non-sensitive data only).
+
+        Returns:
+            Dict with session state information
+        """
+        try:
+            relevant_keys = [
+                "username", "useremail", "role", "signout",
+                "login_timestamp", "session_expiry", "user_uid"
+            ]
+
+            debug_info = {}
+            for key in relevant_keys:
+                if key in st.session_state:
+                    value = st.session_state[key]
+                    # Mask sensitive information
+                    if key == "useremail" and value:
+                        parts = value.split("@")
+                        if len(parts) == 2:
+                            value = f"{parts[0][:2]}***@{parts[1]}"
+                    debug_info[key] = value
+
+            # Add calculated values
+            time_info = self._get_session_remaining_time()
+            debug_info.update({
+                "remaining_hours": time_info.get("remaining_hours", 0),
+                "session_expired": time_info.get("expired", True),
+                "session_valid": time_info.get("valid", False)
+            })
+
+            return debug_info
+
+        except Exception as e:
+            logger.error(f"Error getting debug info: {e}")
+            return {"error": str(e)}
+
+    # ...existing methods...

@@ -122,14 +122,14 @@ class StreamlitCloudCookieManager:
                 max_wait = 5.0  # Increased timeout for cloud
             else:
                 unique_prefix = f"IconnetApp_{self._session_key}_v3"
-                max_wait = 3.0
-
-            # Get password from secrets with fallback
+                max_wait = 3.0            # Get password from secrets with fallback
             try:
                 password = st.secrets.get(
                     "cookie_password", "iconnet_fallback_key_2025_secure")
-            except Exception:
+                logger.info("✅ Cookie password loaded from secrets")
+            except Exception as e:
                 password = "iconnet_fallback_key_2025_secure"
+                logger.warning(f"⚠️ Using fallback cookie password: {e}")
 
             # Initialize with unique key and special handling for cloud
             logger.info(f"Initializing cookies with prefix: {unique_prefix}")
