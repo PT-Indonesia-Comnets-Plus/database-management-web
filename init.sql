@@ -208,3 +208,44 @@ ON cloud_user_sessions(username, device_fingerprint);
 
 CREATE INDEX IF NOT EXISTS idx_cloud_user_sessions_expiry 
 ON cloud_user_sessions(session_expiry);
+
+-- Tambahkan kolom yang diperlukan untuk session management yang lebih robust
+ALTER TABLE cloud_user_sessions 
+ADD COLUMN IF NOT EXISTS ip_address INET DEFAULT '127.0.0.1',
+ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
+
+-- Index tambahan untuk performa
+CREATE INDEX IF NOT EXISTS idx_cloud_user_sessions_active 
+ON cloud_user_sessions(is_active);
+
+CREATE INDEX IF NOT EXISTS idx_cloud_user_sessions_expiry_active 
+ON cloud_user_sessions(session_expiry, is_active);
+
+-- Trigger untuk auto-update timestamp pada cloud_user_sessions
+CREATE OR REPLACE FUNCTION update_cloud_session_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    NEW.last_activity = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_cloud_user_sessions_updated_at
+    BEFORE UPDATE ON cloud_user_sessions
+    FOR EACH ROW
+    EXECUTE FUNCTION update_cloud_session_timestamp();
+
+-- Function untuk cleanup expired sessions (dapat dipanggil secara periodik)
+CREATE OR REPLACE FUNCTION cleanup_expired_sessions()
+RETURNS INTEGER AS $$
+DECLARE
+    deleted_count INTEGER;
+BEGIN
+    DELETE FROM cloud_user_sessions 
+    WHERE session_expiry < CURRENT_TIMESTAMP OR is_active = FALSE;
+    
+    GET DIAGNOSTICS deleted_count = ROW_COUNT;
+    RETURN deleted_count;
+END;
+$$ LANGUAGE plpgsql;

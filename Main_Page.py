@@ -15,7 +15,6 @@ from core.services.UserService import UserService
 from core.services.EmailService import EmailService
 from core import initialize_session_state
 from core.utils.load_css import load_custom_css
-from core.utils.cookies import get_cookie_manager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -190,26 +189,19 @@ class MainPageManager:
 
     def check_and_restore_session(self) -> bool:
         """
-        Check and restore user session automatically.
+        Check and restore user session from database using URL session ID.
         This should be called on every page load.
 
         Returns:
             bool: True if user is authenticated, False otherwise
         """
         try:
-            # Use global persistent session check first
-            from core.utils.cookies import check_and_restore_persistent_session
-            session_restored = check_and_restore_persistent_session()
-
-            if session_restored:
-                return True
-
-            # Check if user service is available for additional restoration
+            # Use UserService to restore session from database
             if not self.user_service:
                 logger.warning("UserService not available for session check")
                 return False
 
-            # Try to restore session using UserService
+            # Try to restore session using UserService (database-based)
             if self.user_service.restore_user_session():
                 # Validate the restored session
                 if self.user_service.is_session_valid():
@@ -327,49 +319,18 @@ class MainPageManager:
                         "User service not available. Cannot process registration.")
 
     def _handle_login(self, email: str, password: str) -> None:
-        """Handle login form submission with enhanced cookie persistence."""
+        """Handle login form submission with database session persistence."""
         if not email or not password:
             st.warning("Please fill in all fields.")
             return
 
-        # Simulasi validasi sederhana untuk demo (ganti dengan validasi sebenarnya)
-        demo_login = False
-        if email == "user@iconnet.com" and password == "pass123":
-            demo_login = True
-
         with st.spinner("Authenticating..."):
             try:
-                if demo_login:
-                    # Demo login berhasil
-                    import time
-                    from core.utils.cookies import get_cloud_cookie_manager
-                    cookie_manager = get_cloud_cookie_manager()
-
-                    # Simpan sesi ke cookies dan session state
-                    success = cookie_manager.save_user_session(
-                        username="demo_user",
-                        email=email,
-                        role="user"
-                    )
-
-                    if success:
-                        st.success("🎉 Login berhasil! Selamat datang!")
-                        logger.info(
-                            "🎉 Demo login successful, user authenticated!")
-                        # Clear any error states
-                        if 'login_error' in st.session_state:
-                            del st.session_state['login_error']
-                        time.sleep(1)  # Brief delay to show success message
-                        st.rerun()
-                    else:
-                        st.error("Login berhasil tetapi gagal menyimpan sesi.")
-
-                elif self.user_service:
-                    # UserService.login akan menangani st.success/st.warning/st.error
-                    # dan pembaruan st.session_state serta cookies.
-                    # Jika login berhasil, UserService akan mengatur session state
-                    # Force check authentication status after login attempt
+                if self.user_service:
+                    # UserService.login will handle authentication and create database session
+                    # If login is successful, session_id will be set in URL
                     self.user_service.login(email, password)
+
                     if self.is_user_authenticated():
                         logger.info("🎉 Login successful, user authenticated!")
                         # Clear any error states
@@ -377,10 +338,9 @@ class MainPageManager:
                             del st.session_state['login_error']
                         st.rerun()
                 else:
-                    st.error(
-                        "❌ Email atau password salah. Untuk demo, gunakan:\n- Email: user@iconnet.com\n- Password: pass123")
+                    st.error("User service not available. Cannot process login.")
 
-            except Exception as e:  # Menangkap error tak terduga dari UserService.login
+            except Exception as e:
                 logger.error(f"Unexpected error during login handling: {e}")
                 st.error("An unexpected error occurred during login.")
 
@@ -531,40 +491,47 @@ class MainPageManager:
                     st.switch_page("pages/2 Admin Page.py")
             # else:
                 # Tidak perlu menampilkan info jika bukan admin, biarkan kosong atau isi dengan fitur lain
-                # st.info("Admin access required for Admin Panel")
-
-    def _handle_logout(self) -> None:
-        """Handle user logout."""
+                # st.info("Admin access required for Admin Panel")    def _handle_logout(self) -> None:
+        """Handle user logout with URL session ID cleanup."""
         try:
             if self.user_service:
-                self.user_service.logout()  # Ini akan membersihkan session state dan cookies
-                st.rerun()  # Rerun untuk memperbarui UI ke kondisi logout
+                self.user_service.logout()  # This will clean up database session and session state
+
+                # Clear session ID from URL
+                from core.utils.url_session_manager import get_url_session_manager
+                url_manager = get_url_session_manager()
+                url_manager.clear_session_id_from_url()
+
+                st.rerun()  # Rerun to update UI to logout state
             else:
                 logger.error(
                     "UserService not available during logout attempt.")
-                self._fallback_logout()  # Coba fallback jika service tidak ada
+                self._fallback_logout()  # Try fallback if service not available
         except Exception as e:
             logger.error(f"Error during UserService logout: {e}")
-            self._fallback_logout()  # Coba fallback jika ada error di service logout
-
-    def _fallback_logout(self) -> None:
+            # Try fallback if service logout has error    def _fallback_logout(self) -> None:
+            self._fallback_logout()
         """Fallback logout method if UserService fails or is unavailable."""
         logger.warning("Executing fallback logout.")
         try:
-            # Clear cookies
-            # Ini juga akan mencoba membersihkan session state
-            get_cookie_manager().clear_user()
+            # Clear session from database and URL
+            from core.utils.cookies import clear_cookies
+            clear_cookies()
 
-            # Eksplisit membersihkan session state yang relevan dengan sesi pengguna
-            # Hati-hati jangan menghapus state yang dibutuhkan oleh layanan inti jika mereka
-            # di-cache atau dimaksudkan untuk persisten antar sesi (meskipun jarang untuk data pengguna).
-            user_session_keys = ["username", "useremail",
-                                 "role", "signout", "messages", "thread_id"]
+            # Clear session ID from URL
+            from core.utils.url_session_manager import get_url_session_manager
+            url_manager = get_url_session_manager()
+            url_manager.clear_session_id_from_url()
+
+            # Explicitly clear session state relevant to user session
+            user_session_keys = ["username", "useremail", "role", "signout",
+                                 "session_id", "login_timestamp", "session_expiry",
+                                 "messages", "thread_id", "user_uid"]
             for key in user_session_keys:
                 if key in st.session_state:
                     del st.session_state[key]
 
-            # Pastikan signout diatur ke True
+            # Ensure signout is set to True
             st.session_state.signout = True
 
             st.success("Logged out successfully (fallback).")

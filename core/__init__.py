@@ -210,23 +210,25 @@ def initialize_session_state() -> bool:
                     )
                     logger.info("UserDataService initialized")
                 except Exception as e:
+                    # Initialize UserService
                     logger.error(f"Failed to initialize UserDataService: {e}")
-
-            # Initialize UserService
             if (firebase_ready and
                 st.session_state.get("email_service") is not None and
                     "user_service" not in st.session_state):
                 try:
                     from .services.UserService import UserService
+                    # Get database connection for session management
+                    db_connection = st.session_state.get("db")
                     st.session_state.user_service = UserService(
                         firestore=st.session_state.fs,
                         auth=st.session_state.auth,
                         firebase_api=st.session_state.fs_config,
-                        email_service=st.session_state.email_service
+                        email_service=st.session_state.email_service,
+                        db_connection=db_connection
                     )
-                    logger.info("UserService initialized")
+                    logger.info(
+                        "UserService initialized with database session support")
                 except Exception as e:
-                    # Initialize RAGService
                     logger.error(f"Failed to initialize UserService: {e}")
             if db_ready and storage_ready and "rag_service" not in st.session_state:
                 try:

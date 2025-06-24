@@ -12,7 +12,9 @@ import requests
 import re
 import dns.resolver
 
-from core.utils.cookies import get_cookie_manager, save_user_to_cookie, load_user_from_cookie, clear_user_cookie
+# Import new session management utilities
+from core.utils.url_session_manager import get_url_session_manager
+from core.services.DatabaseSessionService import DatabaseSessionService
 
 # Session configuration
 SESSION_TIMEOUT_HOURS = 7  # 7 hours session timeout
@@ -38,9 +40,7 @@ class UserServiceError(Exception):
 
 class UserService:
     """
-    Service for managing user authentication and operations.
-
-    This service handles:
+    Service for managing user authentication and operations.    This service handles:
     - User login and logout
     - User registration and verification
     - Password validation
@@ -48,7 +48,7 @@ class UserService:
     - Activity logging
     """
 
-    def __init__(self, firestore, auth, firebase_api, email_service):
+    def __init__(self, firestore, auth, firebase_api, email_service, db_connection=None):
         """
         Initialize UserService with required dependencies.
 
@@ -57,11 +57,17 @@ class UserService:
             auth: Firebase Auth client
             firebase_api: Firebase API key
             email_service: Email service instance
+            db_connection: Database connection for session management
         """
         self.fs = firestore
         self.auth = auth
         self.firebase_api = firebase_api
         self.email_service = email_service
+
+        # Initialize session services
+        self.url_session_manager = get_url_session_manager()
+        self.db_session_service = DatabaseSessionService(
+            db_connection) if db_connection else None
 
     def _validate_login_input(self, email: str, password: str) -> None:
         """Validate login input parameters."""
@@ -96,8 +102,7 @@ class UserService:
         if len(password) < 6:
             raise ValidationError("Password must be at least 6 characters")
 
-        # Additional password validation
-        if len(password) > 30:
+        # Additional password validation        if len(password) > 30:
             # Optional: Check for password strength
             raise ValidationError("Password must be less than 128 characters")
         has_upper = any(c.isupper() for c in password)
@@ -107,9 +112,9 @@ class UserService:
             raise ValidationError(
                 "Password must contain at least one uppercase letter, one lowercase letter, and one number")
 
-    def _handle_session_persistence(self, username: str, email: str, role: str) -> bool:
+    def _handle_session_persistence(self, username: str, email: str, role: str) -> Optional[str]:
         """
-        Handle session persistence using available storage methods.
+        Handle session persistence using database and URL-based storage.
 
         Args:
             username: User's username
@@ -117,66 +122,80 @@ class UserService:
             role: User's role
 
         Returns:
-            bool: True if at least one storage method succeeded
+            str: Session ID if successful, None otherwise
         """
-        session_saved = False
-
-        # Try cookie manager first (primary method for cloud deployment)
         try:
-            session_data = {
-                'user_id': username,
-                'username': username,
-                'email': email,
-                'role': role,
-                'logged_in': True,
-                'signout': False
-            }
-            if save_user_to_cookie(session_data):
-                session_saved = True
-                logger.info(f"✅ Cookie session saved for user: {username}")
+            # Create session in database
+            if self.db_session_service:
+                device_info = self.url_session_manager.get_device_info()
+                ip_address = self.url_session_manager.get_mock_ip_address()
+
+                session_id = self.db_session_service.create_session(
+                    username, email, role, device_info, ip_address
+                )
+
+                # Save session data to session state
+                session_data = {
+                    'username': username,
+                    'useremail': email,
+                    'role': role,
+                    'session_id': session_id,
+                    'signout': False,
+                    'login_timestamp': time.time(),
+                    'session_expiry': time.time() + SESSION_TIMEOUT_SECONDS
+                }
+
+                if self.url_session_manager.save_session_to_state(session_data):
+                    logger.info(
+                        f"✅ Database session created for user: {username}")
+                    return session_id
+                else:
+                    logger.error("Failed to save session to state")
+                    return None
+            else:
+                logger.warning("Database session service not available")
+                return None
+
         except Exception as e:
-            logger.warning(f"Cookie manager save failed: {e}")
-
-        # Final fallback: session state only
-        if not session_saved:
-            logger.warning(
-                "Cookie storage failed, using session state only")
-            # Session state is already set in the login process
-
-        return session_saved
+            logger.error(f"Failed to create database session: {e}")
+            return None
 
     def _clear_all_sessions(self, username: str) -> None:
         """
-        Clear all session data from available storage methods.
-          Args:
+        Clear all session data from database and session state.
+
+        Args:
             username: Username for logging purposes
         """
-        # Clear persistent Firestore session
-        if "persistent_session_service" in st.session_state and st.session_state.persistent_session_service:
-            try:
-                persistent_service = st.session_state.persistent_session_service
-                persistent_service.clear_session(username)
-                logger.info(
-                    f"✅ Persistent session cleared for user: {username}")
-            except Exception as e:
-                logger.error(f"Failed to clear persistent session: {e}")
-
-        # Clear cookies and session state
         try:
-            clear_user_cookie()
-            logger.info("Session cleared via cookie manager")
-        except Exception as e:
-            logger.debug(f"Cookie clearing failed: {e}")
+            # Clear database sessions
+            if self.db_session_service:
+                self.db_session_service.end_user_sessions(username)
+                logger.info(
+                    f"✅ Database sessions cleared for user: {username}")
 
-    def _create_session(self, user, user_data: Dict[str, Any]) -> None:
-        """Create user session using cloud-optimized storage and persistent Firestore session."""
+            # Clear session state
+            if self.url_session_manager:
+                self.url_session_manager.clear_session_from_state()
+                logger.info("✅ Session state cleared")
+
+            # Clear URL parameters
+            if self.url_session_manager:
+                self.url_session_manager.clear_session_id_from_url()
+                logger.info("✅ URL session ID cleared")
+
+        except Exception as e:
+            logger.error(f"Error clearing sessions: {e}")
+
+    def _create_session(self, user, user_data: Dict[str, Any]) -> Optional[str]:
+        """Create user session using database and URL-based storage."""
         try:
             username = user_data.get('username', user.uid)
             email = user.email
             role = user_data['role']
 
             # Handle session persistence using helper method
-            session_saved = self._handle_session_persistence(
+            session_id = self._handle_session_persistence(
                 username, email, role)
 
             # Store user_uid for logout logging
@@ -189,18 +208,22 @@ class UserService:
             logger.info(
                 f"🕒 Session expiry set to: {session_expiry} (current: {current_time}, timeout: {SESSION_TIMEOUT_HOURS}h)")
 
-            if session_saved:
+            if session_id:
+                # Set session ID in URL
+                if self.url_session_manager:
+                    self.url_session_manager.set_session_id_in_url(session_id)
                 logger.info(
-                    f"Session created successfully for user: {username}")
+                    f"✅ Session created successfully for user: {username}")
+                return session_id
             else:
-                logger.warning("Session created with session state only")
+                logger.warning("Session creation failed")
+                return None
 
             # Log activity
             self.save_login_logout(user.uid, "login")
 
         except Exception as e:
             logger.error(f"Failed to create session: {e}")
-            raise UserServiceError(f"Session creation failed: {e}")
             raise UserServiceError(f"Session creation failed: {e}")
 
     def login(self, email: str, password: str) -> None:
@@ -278,9 +301,7 @@ class UserService:
             user_uid = st.session_state.get("user_uid", "")
 
             # Clear all sessions using helper method
-            self._clear_all_sessions(username)
-
-            # Log logout activity
+            self._clear_all_sessions(username)            # Log logout activity
             if user_uid:
                 self.save_login_logout(user_uid, "logout")
 
@@ -290,7 +311,8 @@ class UserService:
         except Exception as e:
             logger.error(f"Error during logout: {e}")
             # Force clear session state even if other operations fail
-            clear_user_cookie()
+            from core.utils.cookies import clear_cookies
+            clear_cookies()
             st.warning("Logout completed with some issues")
 
     def verify_password(self, email: str, password: str) -> Optional[Dict[str, Any]]:
@@ -536,7 +558,7 @@ class UserService:
 
     def restore_user_session(self) -> bool:
         """
-        Restore user session from persistent storage with enhanced cloud support.
+        Restore user session from database using URL session ID.
         This method is called during app initialization to recover user sessions.
 
         Returns:
@@ -554,68 +576,46 @@ class UserService:
                     f"Valid session already exists for: {current_user}")
                 return True
 
-            logger.debug(
-                "Attempting to restore user session from persistent storage...")            # Strategy 1: Try cookie manager (primary method for this app)
-            try:
-                session_data = load_user_from_cookie()
-                if session_data:
-                    # Restore session state from cookie data
-                    st.session_state["username"] = session_data.get(
-                        "username", "")
-                    st.session_state["useremail"] = session_data.get(
-                        "email", "")
-                    st.session_state["role"] = session_data.get("role", "")
-                    st.session_state["logged_in"] = True
-                    st.session_state["signout"] = False
+            logger.debug("Attempting to restore user session from database...")
 
-                    restored_user = st.session_state.get("username", "")
-                    if restored_user:
-                        logger.info(
-                            f"Session restored from cookies: {restored_user}")
-                        return True
-            except Exception as e:
-                logger.debug(f"Cookie restoration failed: {e}")
+            # Get session ID from URL
+            if not self.url_session_manager:
+                logger.warning("URL session manager not available")
+                return False
 
-            # Strategy 2: Check for any persisted session data in session_state
-            try:
-                for key in st.session_state.keys():
-                    if key.startswith("_encoded_session_"):
-                        encoded_data = st.session_state[key]
-                        if encoded_data:
-                            import json
-                            session_data = json.loads(encoded_data)
+            session_id = self.url_session_manager.get_session_id_from_url()
+            if not session_id:
+                logger.debug("No session ID found in URL")
+                return False
 
-                            # Validate session is not expired
-                            session_expiry = session_data.get(
-                                "session_expiry", 0)
-                            if session_expiry > time.time():
-                                # Restore session data
-                                st.session_state.username = session_data.get(
-                                    "username", "")
-                                st.session_state.useremail = session_data.get(
-                                    "email", "")
-                                st.session_state.role = session_data.get(
-                                    "role", "")
-                                st.session_state.signout = session_data.get(
-                                    "signout", True)
-                                st.session_state.login_timestamp = session_data.get(
-                                    "login_timestamp", time.time())
-                                st.session_state.session_expiry = session_expiry
+            # Validate session with database
+            if not self.db_session_service:
+                logger.warning("Database session service not available")
+                return False
 
-                                restored_user = st.session_state.get(
-                                    "username", "")
-                                if restored_user:
-                                    logger.info(
-                                        f"Session restored from encoded data: {restored_user}")
-                                    return True
-                            else:
-                                # Clean up expired encoded session
-                                del st.session_state[key]
-            except Exception as e:
-                logger.debug(f"Encoded session restoration failed: {e}")
+            session_data = self.db_session_service.validate_session(session_id)
+            if not session_data:
+                logger.debug("Session validation failed or expired")
+                # Clear invalid session ID from URL
+                self.url_session_manager.clear_session_id_from_url()
+                return False
 
-            # No valid session found
-            logger.debug("No valid session found to restore")
+            # Restore session state from database
+            st.session_state["username"] = session_data.get("username", "")
+            st.session_state["useremail"] = session_data.get("email", "")
+            st.session_state["role"] = session_data.get("role", "")
+            st.session_state["session_id"] = session_data.get("session_id", "")
+            st.session_state["logged_in"] = True
+            st.session_state["signout"] = False
+            st.session_state["login_timestamp"] = time.time()
+            st.session_state["session_expiry"] = session_data.get(
+                "session_expiry", 0)
+
+            restored_user = st.session_state.get("username", "")
+            if restored_user:
+                logger.info(f"Session restored from database: {restored_user}")
+                return True
+
             return False
 
         except Exception as e:
@@ -644,7 +644,8 @@ class UserService:
             if time_info.get("expired", True):
                 logger.info(f"❌ Session expired for user: {username}")
                 # Auto-clear expired session
-                clear_user_cookie()
+                from core.utils.cookies import clear_cookies
+                clear_cookies()
                 return False
 
             logger.info(
@@ -714,16 +715,25 @@ class UserService:
             username = st.session_state.get("username", "")
             email = st.session_state.get("useremail", "")
             role = st.session_state.get("role", "")
+            session_id = st.session_state.get("session_id", "")
 
-            # Refresh session by saving to cookies again (extends 7-hour timeout)
-            cookie_saved = save_user_to_cookie(username, email, role)
+            # Refresh session by extending expiry in database
+            if self.db_session_service and session_id:
+                session_extended = self.db_session_service.extend_session(
+                    session_id, SESSION_TIMEOUT_HOURS)
 
-            if cookie_saved:
-                logger.info(f"Session refreshed for user: {username}")
-                return True
+                if session_extended:
+                    # Update session state expiry
+                    st.session_state.session_expiry = time.time() + SESSION_TIMEOUT_SECONDS
+                    logger.info(f"Session refreshed for user: {username}")
+                    return True
+                else:
+                    logger.warning(
+                        f"Failed to refresh session for user: {username}")
+                    return False
             else:
                 logger.warning(
-                    f"Failed to refresh session for user: {username}")
+                    "Database session service or session ID not available")
                 return False
 
         except Exception as e:
