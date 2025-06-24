@@ -36,8 +36,8 @@ class URLSessionManager:
             str: Session ID if found, None otherwise
         """
         try:
-            query_params = st.experimental_get_query_params()
-            return query_params.get(self._session_key, [None])[0]
+            query_params = st.query_params
+            return query_params.get(self._session_key, None)
         except Exception as e:
             logger.error(f"Error getting session ID from URL: {e}")
             return None
@@ -50,7 +50,7 @@ class URLSessionManager:
             session_id: Session ID to set in URL
         """
         try:
-            st.experimental_set_query_params(**{self._session_key: session_id})
+            st.query_params[self._session_key] = session_id
             logger.info(f"Session ID set in URL: {session_id[:8]}...")
         except Exception as e:
             logger.error(f"Error setting session ID in URL: {e}")
@@ -58,10 +58,8 @@ class URLSessionManager:
     def clear_session_id_from_url(self) -> None:
         """Clear session ID from URL query parameters."""
         try:
-            current_params = st.experimental_get_query_params()
-            if self._session_key in current_params:
-                del current_params[self._session_key]
-                st.experimental_set_query_params(**current_params)
+            if self._session_key in st.query_params:
+                del st.query_params[self._session_key]
                 logger.info("Session ID cleared from URL")
         except Exception as e:
             logger.error(f"Error clearing session ID from URL: {e}")

@@ -6,7 +6,7 @@ import logging
 import time
 import uuid
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any
 import streamlit as st
 
 logger = logging.getLogger(__name__)
@@ -23,9 +23,46 @@ class DatabaseSessionService:
         Initialize with database connection.
 
         Args:
-            connection: Database connection object
+            connection: Database connection pool
         """
         self.conn = connection
+
+    def _get_connection(self):
+        """Get a connection from the pool."""
+        return self.conn.getconn()
+
+    def _return_connection(self, connection):
+        """Return a connection to the pool."""
+        self.conn.putconn(connection)
+
+    def _execute_query(self, query, params=None, fetch_one=False, fetch_all=False):
+        """Execute a query with proper connection handling."""
+        connection = None
+        cursor = None
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+            cursor.execute(query, params)
+
+            if fetch_one:
+                result = cursor.fetchone()
+            elif fetch_all:
+                result = cursor.fetchall()
+            else:
+                result = cursor.rowcount
+
+            connection.commit()
+            return result
+
+        except Exception as e:
+            if connection:
+                connection.rollback()
+            raise e
+        finally:
+            if cursor:
+                cursor.close()
+            if connection:
+                self._return_connection(connection)
 
     def create_session(self, username: str, email: str, role: str,
                        device_info: Dict[str, Any], ip_address: str = "127.0.0.1") -> str:
@@ -76,10 +113,7 @@ class DatabaseSessionService:
                 True
             )
 
-            cursor = self.conn.cursor()
-            cursor.execute(query, values)
-            self.conn.commit()
-            cursor.close()
+            self._execute_query(query, values)
 
             logger.info(
                 f"Session created for user {username}: {session_id[:8]}...")
@@ -87,8 +121,6 @@ class DatabaseSessionService:
 
         except Exception as e:
             logger.error(f"Error creating session: {e}")
-            if hasattr(self.conn, 'rollback'):
-                self.conn.rollback()
             raise
 
     def validate_session(self, session_id: str) -> Optional[Dict[str, Any]]:
@@ -108,10 +140,7 @@ class DatabaseSessionService:
                 WHERE session_id = %s AND is_active = TRUE
             """
 
-            cursor = self.conn.cursor()
-            cursor.execute(query, (session_id,))
-            result = cursor.fetchone()
-            cursor.close()
+            result = self._execute_query(query, (session_id,), fetch_one=True)
 
             if not result:
                 logger.debug(f"Session not found: {session_id[:8]}...")
@@ -153,10 +182,7 @@ class DatabaseSessionService:
                 WHERE session_id = %s
             """
 
-            cursor = self.conn.cursor()
-            cursor.execute(query, (session_id,))
-            self.conn.commit()
-            cursor.close()
+            self._execute_query(query, (session_id,))
 
         except Exception as e:
             logger.error(f"Error updating last activity: {e}")
@@ -170,10 +196,7 @@ class DatabaseSessionService:
                 WHERE session_id = %s
             """
 
-            cursor = self.conn.cursor()
-            cursor.execute(query, (session_id,))
-            self.conn.commit()
-            cursor.close()
+            self._execute_query(query, (session_id,))
 
         except Exception as e:
             logger.error(f"Error deactivating session: {e}")
@@ -214,11 +237,7 @@ class DatabaseSessionService:
                 WHERE username = %s AND is_active = TRUE
             """
 
-            cursor = self.conn.cursor()
-            cursor.execute(query, (username,))
-            affected_rows = cursor.rowcount
-            self.conn.commit()
-            cursor.close()
+            affected_rows = self._execute_query(query, (username,))
 
             logger.info(f"Ended {affected_rows} sessions for user {username}")
             return True
@@ -240,11 +259,7 @@ class DatabaseSessionService:
                 WHERE session_expiry < CURRENT_TIMESTAMP OR is_active = FALSE
             """
 
-            cursor = self.conn.cursor()
-            cursor.execute(query)
-            deleted_count = cursor.rowcount
-            self.conn.commit()
-            cursor.close()
+            deleted_count = self._execute_query(query)
 
             logger.info(f"Cleaned up {deleted_count} expired sessions")
             return deleted_count
@@ -269,10 +284,8 @@ class DatabaseSessionService:
                 WHERE username = %s AND is_active = TRUE AND session_expiry > CURRENT_TIMESTAMP
             """
 
-            cursor = self.conn.cursor()
-            cursor.execute(query, (username,))
-            count = cursor.fetchone()[0]
-            cursor.close()
+            result = self._execute_query(query, (username,), fetch_one=True)
+            count = result[0] if result else 0
 
             return count
 
@@ -300,11 +313,8 @@ class DatabaseSessionService:
                 WHERE session_id = %s AND is_active = TRUE
             """
 
-            cursor = self.conn.cursor()
-            cursor.execute(query, (new_expiry, session_id))
-            affected_rows = cursor.rowcount
-            self.conn.commit()
-            cursor.close()
+            affected_rows = self._execute_query(
+                query, (new_expiry, session_id))
 
             if affected_rows > 0:
                 logger.info(f"Session extended: {session_id[:8]}...")

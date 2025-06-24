@@ -4,7 +4,6 @@ import streamlit as st
 import logging
 import time
 from typing import Optional, Dict, Any
-from .utils.cookies import get_cloud_cookie_manager
 from .utils.firebase_config import get_firebase_app
 from .utils.database import connect_db
 
@@ -48,17 +47,9 @@ def initialize_session_state() -> bool:
                 st.session_state.fs = None
                 st.session_state.auth = None
                 # Note: PersistentSessionService removed - using cookie manager for persistence# Initialize Cookie Manager for session management
+                # Session management is now handled by UserService with database sessions
                 st.session_state.fs_config = None
-        if "cookie_manager" not in st.session_state:
-            try:
-                cookie_manager = get_cloud_cookie_manager()
-                st.session_state.cookie_manager = cookie_manager
-                logger.info("Cookie manager initialized successfully")
-            except Exception as e:
-                logger.error(f"Failed to initialize cookie manager: {e}")
-                # Load user session data using cloud-optimized storage
-                # ALWAYS attempt to load session, regardless of current session state
-                st.session_state.cookie_manager = None
+        # No need for cookie manager initialization
         try:
             # Check if we have a valid active session first
             current_user = st.session_state.get("username", "")
@@ -77,35 +68,9 @@ def initialize_session_state() -> bool:
 
                 session_loaded = False
 
-                # Strategy 1: Use cookie manager for session restoration
-                if not session_loaded:
-                    try:
-                        logger.info(
-                            "🔄 Trying cookie manager session restoration...")
-                        cookie_manager = get_cloud_cookie_manager()
-                        session_data = cookie_manager.load_user_session()
-                        if session_data and isinstance(session_data, dict):
-                            # Restore session to Streamlit session state
-                            st.session_state.username = session_data.get(
-                                "username", "")
-                            st.session_state.useremail = session_data.get(
-                                "email", "")
-                            st.session_state.role = session_data.get(
-                                "role", "")
-                            st.session_state.signout = False
-                            st.session_state.login_timestamp = session_data.get(
-                                "saved_at", time.time())
-                            st.session_state.session_expiry = session_data.get(
-                                "expires_at", time.time() + 25200)
-
-                            username = st.session_state.get("username", "")
-                            logger.info(
-                                f"🟢 Session restored via cookies: {username}")
-                            session_loaded = True
-                        else:
-                            logger.info("🔄 No valid cookie session found")
-                    except Exception as e:
-                        logger.error(f"Cookie session restoration failed: {e}")
+                logger.info(
+                    "Session restoration is now handled by UserService during app usage")
+                session_loaded = True  # Skip old session restoration logic
 
                 # Log final restoration results
                 username = st.session_state.get("username", "")

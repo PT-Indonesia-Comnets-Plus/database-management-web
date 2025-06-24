@@ -212,15 +212,16 @@ class UserService:
                 # Set session ID in URL
                 if self.url_session_manager:
                     self.url_session_manager.set_session_id_in_url(session_id)
+
+                # Log activity
+                self.save_login_logout(user.uid, "login")
+
                 logger.info(
                     f"✅ Session created successfully for user: {username}")
                 return session_id
             else:
                 logger.warning("Session creation failed")
                 return None
-
-            # Log activity
-            self.save_login_logout(user.uid, "login")
 
         except Exception as e:
             logger.error(f"Failed to create session: {e}")
