@@ -173,3 +173,13 @@ wheel==0.45.1
 xxhash==3.5.0
 yarl==1.20.0
 zstandard==0.23.0
+streamlit>=1.41.0,<2.0.0
+streamlit-cookies-manager>=0.2.0,<0.3.0
+
+# Authentication & Security
+cryptography>=45.0.0
+pyjwt>=2.10.0
+
+# Development & Testing
+pytest>=8.3.5
+pytest-mock>=3.14.0
