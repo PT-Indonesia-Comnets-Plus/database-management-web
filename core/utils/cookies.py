@@ -619,34 +619,116 @@ def initialize_cookies_early() -> bool:
         return False
 
 
-def ensure_cookie_compatibility() -> Dict[str, Any]:
+def force_cookie_initialization_with_retry() -> bool:
     """
-    Ensure cookie compatibility and return status information.
-    Useful for debugging and user feedback.
-
-    Returns:
-        Dict with detailed status information
+    Force cookie initialization dengan multiple retry strategies.
+    Khusus untuk mengatasi timing issues di Streamlit Cloud.
     """
     try:
-        cookie_manager = get_cloud_cookie_manager()
+        # Get atau create global manager
+        global _global_cookie_manager
+
+        if _global_cookie_manager is None:
+            _global_cookie_manager = StreamlitCloudCookieManager()
+
+        manager = _global_cookie_manager
+
+        # Strategy 1: Quick check jika sudah ready
+        if manager._ready and manager._cookies and manager._cookies.ready():
+            logger.info("✅ Cookies already initialized and ready")
+            return True
+
+        # Strategy 2: Force re-initialization dengan berbagai timeouts
+        retry_configs = [
+            {"timeout": 5.0, "interval": 0.2},   # Quick attempt
+            {"timeout": 10.0, "interval": 0.5},  # Medium patience
+            {"timeout": 15.0, "interval": 1.0},  # Maximum patience
+        ]
+
+        for attempt, config in enumerate(retry_configs, 1):
+            logger.info(
+                f"🔄 Cookie initialization attempt {attempt}/{len(retry_configs)} (timeout: {config['timeout']}s)")
+
+            # Reset initialization state
+            manager._init_attempted = False
+            manager._ready = False
+            manager._cookies = None
+
+            # Try initialization dengan timeout ini
+            start_time = time.time()
+            while (time.time() - start_time) < config['timeout']:
+                try:
+                    # Call internal initialization
+                    if manager._initialize_cookies():
+                        elapsed = time.time() - start_time
+                        logger.info(
+                            f"✅ Cookies initialized successfully in attempt {attempt} ({elapsed:.2f}s)")
+                        return True
+
+                except Exception as e:
+                    logger.debug(f"Initialization attempt failed: {e}")
+
+                time.sleep(config['interval'])
+
+            logger.warning(
+                f"⏰ Attempt {attempt} timeout after {config['timeout']}s")
+
+            # Rest between attempts
+            if attempt < len(retry_configs):
+                time.sleep(1.0)
+
+        # All attempts failed
+        logger.error("❌ All cookie initialization attempts failed")
+        return False
+
+    except Exception as e:
+        logger.error(f"❌ Force cookie initialization failed: {e}")
+        return False
+
+
+def get_cookie_status_detailed() -> Dict[str, Any]:
+    """
+    Get detailed cookie status untuk debugging.
+    """
+    try:
+        manager = get_cloud_cookie_manager()
 
         status = {
             "library_available": COOKIES_AVAILABLE,
-            "manager_ready": cookie_manager.ready if cookie_manager else False,
-            "cloud_detected": is_streamlit_cloud(),
-            "session_timeout_hours": SESSION_TIMEOUT_HOURS,
-            "init_attempted": cookie_manager._init_attempted if cookie_manager else False,
-            "current_user": st.session_state.get("username", ""),
-            "session_mode": "cookies" if (cookie_manager and cookie_manager.ready) else "session_state"
+            "manager_exists": manager is not None,
+            "init_attempted": manager._init_attempted if manager else False,
+            "manager_ready": manager._ready if manager else False,
+            "cookies_object_exists": manager._cookies is not None if manager else False,
+            "cookies_ready": False,
+            "cloud_environment": is_streamlit_cloud(),
+            "session_data": {
+                "username": st.session_state.get("username", ""),
+                "signout": st.session_state.get("signout", True),
+                "session_expiry": st.session_state.get("session_expiry", 0),
+            },
+            "timestamp": time.time()
         }
 
-        # Add recommendations
-        if not status["library_available"]:
-            status["recommendation"] = "Install streamlit-cookies-manager: pip install streamlit-cookies-manager"
-        elif not status["manager_ready"]:
-            status["recommendation"] = "Check cookie_password in Streamlit secrets and network connectivity"
-        else:
-            status["recommendation"] = "Cookie system working properly"
+        # Test cookies.ready() safely
+        if manager and manager._cookies:
+            try:
+                status["cookies_ready"] = manager._cookies.ready()
+            except Exception as e:
+                status["cookies_ready_error"] = str(e)
+
+        # Test basic functionality
+        if manager and manager.ready:
+            try:
+                test_key = f"status_test_{int(time.time())}"
+                manager._cookies[test_key] = "test_value"
+                test_result = manager._cookies.get(test_key)
+                status["functionality_test"] = test_result == "test_value"
+
+                # Clean up
+                if test_key in manager._cookies:
+                    del manager._cookies[test_key]
+            except Exception as e:
+                status["functionality_test_error"] = str(e)
 
         return status
 
@@ -654,8 +736,7 @@ def ensure_cookie_compatibility() -> Dict[str, Any]:
         return {
             "error": str(e),
             "library_available": COOKIES_AVAILABLE,
-            "session_mode": "session_state",
-            "recommendation": "Check application logs for detailed error information"
+            "timestamp": time.time()
         }
 
 
