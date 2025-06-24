@@ -14,31 +14,51 @@ def get_cookie_manager():
     Get cookie manager instance with proper error handling for cloud deployment.
     """
     try:
+        # Get password from secrets with secure fallback
         from streamlit_cookies_manager import EncryptedCookieManager
-
-        # Get password from secrets with fallback
-        cookie_password = "super_secret_key"  # Default fallback
+        cookie_password = None
         if hasattr(st, 'secrets'):
-            cookie_password = st.secrets.get(
-                "cookie_password", "super_secret_key")
+            cookie_password = st.secrets.get("cookie_password", None)
 
-        # Initialize cookies
+        # Use a strong default only if no secret is configured
+        if not cookie_password:
+            cookie_password = "ICONNET_Corp_Default_Key_2025_Please_Configure_Secrets"
+            logger.warning(
+                "Using default cookie password. Please configure 'cookie_password' in secrets.toml for production use")
+
+        # Initialize cookies with the password
         cookies = EncryptedCookieManager(
             prefix="Iconnet_Corp_App_v1",
             password=cookie_password
-        )        # Check if cookies are ready with shorter timeout for better UX
-        max_wait = 3  # seconds - reduced from 10 to 3
+        )        # Check if cookies are ready with adequate timeout and retry mechanism
+        max_wait = 15  # seconds - increased for better stability
+        retry_count = 0
+        max_retries = 3
         start_time = time.time()
 
         while not cookies.ready() and (time.time() - start_time) < max_wait:
-            time.sleep(0.05)  # Reduced sleep time from 0.1 to 0.05
+            time.sleep(0.1)  # Check every 100ms
+
+            # Log progress every 5 seconds
+            elapsed = time.time() - start_time
+            if elapsed > 5 and retry_count == 0:
+                logger.info(
+                    "Cookie manager still initializing... (5s elapsed)")
+                retry_count += 1
+            elif elapsed > 10 and retry_count == 1:
+                logger.info(
+                    "Cookie manager still initializing... (10s elapsed)")
+                retry_count += 1
 
         if not cookies.ready():
+            logger.warning(
+                f"Cookies not ready after {max_wait} seconds timeout, falling back to session-only mode")
             logger.info(
-                "Cookies not ready after timeout, using session-only mode")
+                "This may be due to: browser compatibility, network latency, or heavy system load")
             return None
-
-        return cookies
+        else:
+            logger.info("Cookie manager successfully initialized")
+            return cookies
 
     except ImportError as e:
         logger.error(f"Failed to import streamlit_cookies_manager: {e}")
@@ -63,25 +83,56 @@ def _get_cookies():
 
 
 def save_user_to_cookie(username: str, email: str, role: str) -> bool:
-    """Save user to cookie (matches old working code)."""
-    cookies = _get_cookies()
-    if cookies and cookies.ready():
-        try:
-            cookies["username"] = username
-            cookies["email"] = email
-            cookies["role"] = role
-            cookies["signout"] = "False"
-            cookies.save()
-            logger.info(f"User {username} saved to cookies successfully")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to save user to cookies: {e}")
-            # Don't show error to user, just log it
-            logger.warning("Falling back to session-only authentication")
+    """Save user to cookie with enhanced error handling and validation."""
+    try:
+        # Validate inputs
+        if not username or not email or not role:
+            logger.error(
+                "Cannot save user to cookies: missing required fields")
             return False
-    else:
-        # Fallback to session-only authentication
-        logger.info("Cookies not available, using session-only authentication")
+
+        cookies = _get_cookies()
+        if cookies and cookies.ready():
+            try:
+                # Save user data to cookies
+                cookies["username"] = username
+                cookies["email"] = email
+                cookies["role"] = role
+                cookies["signout"] = "False"
+
+                # Attempt to save with retry
+                save_attempts = 0
+                max_save_attempts = 3
+
+                while save_attempts < max_save_attempts:
+                    try:
+                        cookies.save()
+                        logger.info(
+                            f"User {username} saved to cookies successfully")
+                        return True
+                    except Exception as save_error:
+                        save_attempts += 1
+                        logger.warning(
+                            f"Cookie save attempt {save_attempts} failed: {save_error}")
+                        if save_attempts < max_save_attempts:
+                            time.sleep(0.5)  # Brief pause before retry
+
+                logger.error(
+                    f"Failed to save cookies after {max_save_attempts} attempts")
+                return False
+
+            except Exception as e:
+                logger.error(f"Failed to save user to cookies: {e}")
+                logger.warning("Falling back to session-only authentication")
+                return False
+        else:
+            # Fallback to session-only authentication
+            logger.info(
+                "Cookies not available, using session-only authentication")
+            return False
+
+    except Exception as e:
+        logger.error(f"Unexpected error in save_user_to_cookie: {e}")
         return False
 
 
