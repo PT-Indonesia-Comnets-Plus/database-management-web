@@ -11,6 +11,13 @@ import requests
 import re
 import dns.resolver
 
+try:
+    from google.cloud.firestore import ArrayUnion
+    FIRESTORE_AVAILABLE = True
+except ImportError:
+    FIRESTORE_AVAILABLE = False
+    ArrayUnion = None
+
 from core.utils.cookies import save_user_to_cookie, clear_user_cookie
 
 # Configure logging
@@ -438,12 +445,15 @@ class UserService:
 
         Args:
             username: User identifier
-            event_type: Either 'login' or 'logout'
-
-        Raises:
+            event_type: Either 'login' or 'logout'        Raises:
             UserServiceError: If activity logging fails
         """
         try:
+            if not FIRESTORE_AVAILABLE or not ArrayUnion:
+                logger.warning(
+                    "Firestore ArrayUnion not available, skipping activity logging")
+                return
+
             now = datetime.now()
             date = now.strftime("%d-%m-%Y")
             time = now.strftime("%H:%M:%S")
@@ -452,11 +462,11 @@ class UserService:
                 "employee attendance").document(username)
 
             if event_type == "login":
-                update_data = {f"activity.{date}.Login_Time": self.firebase_api.ArrayUnion([
-                                                                                           time])}
+                update_data = {
+                    f"activity.{date}.Login_Time": ArrayUnion([time])}
             elif event_type == "logout":
-                update_data = {f"activity.{date}.Logout_Time": self.firebase_api.ArrayUnion([
-                                                                                            time])}
+                update_data = {
+                    f"activity.{date}.Logout_Time": ArrayUnion([time])}
             else:
                 raise ValueError(f"Invalid event_type: {event_type}")
 

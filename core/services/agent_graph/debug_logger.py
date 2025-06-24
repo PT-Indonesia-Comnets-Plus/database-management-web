@@ -9,15 +9,6 @@ from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, asdict
 import streamlit as st
 
-# Setup logging configuration
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('agent_debug.log', encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
 
 logger = logging.getLogger('ICONNET_AGENT')
 

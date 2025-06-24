@@ -26,18 +26,16 @@ def get_cookie_manager():
         cookies = EncryptedCookieManager(
             prefix="Iconnet_Corp_App_v1",
             password=cookie_password
-        )
-
-        # Check if cookies are ready with timeout
-        max_wait = 10  # seconds
+        )        # Check if cookies are ready with shorter timeout for better UX
+        max_wait = 3  # seconds - reduced from 10 to 3
         start_time = time.time()
 
         while not cookies.ready() and (time.time() - start_time) < max_wait:
-            time.sleep(0.1)
+            time.sleep(0.05)  # Reduced sleep time from 0.1 to 0.05
 
         if not cookies.ready():
-            logger.warning(
-                "Cookies not ready after timeout, proceeding without cookies")
+            logger.info(
+                "Cookies not ready after timeout, using session-only mode")
             return None
 
         return cookies
