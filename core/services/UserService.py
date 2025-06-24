@@ -2,35 +2,19 @@
 
 import random
 import string
-import time
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 import logging
 import streamlit as st
-from firebase_admin import exceptions, auth as firebase_auth
+from firebase_admin import exceptions
 import requests
 import re
 import dns.resolver
 
-# Import new session management utilities
-from core.utils.url_session_manager import get_url_session_manager
-from core.services.DatabaseSessionService import DatabaseSessionService
+from core.utils.cookies import save_user_to_cookie, clear_user_cookie
 
-# Session configuration
-SESSION_TIMEOUT_HOURS = 7  # 7 hours session timeout
-SESSION_TIMEOUT_SECONDS = SESSION_TIMEOUT_HOURS * 3600
-
+# Configure logging
 logger = logging.getLogger(__name__)
-
-
-class ValidationError(Exception):
-    """Custom exception for validation errors."""
-    pass
-
-
-class AuthenticationError(Exception):
-    """Custom exception for authentication errors."""
-    pass
 
 
 class UserServiceError(Exception):
@@ -38,9 +22,21 @@ class UserServiceError(Exception):
     pass
 
 
+class ValidationError(UserServiceError):
+    """Exception raised for validation errors."""
+    pass
+
+
+class AuthenticationError(UserServiceError):
+    """Exception raised for authentication errors."""
+    pass
+
+
 class UserService:
     """
-    Service for managing user authentication and operations.    This service handles:
+    Service for managing user authentication and operations.
+
+    This service handles:
     - User login and logout
     - User registration and verification
     - Password validation
@@ -48,180 +44,90 @@ class UserService:
     - Activity logging
     """
 
-    def __init__(self, firestore, auth, firebase_api, email_service, db_connection=None):
+    def __init__(self, firestore, auth, firebase_api, email_service):
         """
         Initialize UserService with required dependencies.
 
         Args:
-            firestore: Firestore client
-            auth: Firebase Auth client
-            firebase_api: Firebase API key
-            email_service: Email service instance
-            db_connection: Database connection for session management
+            firestore: Firestore database instance
+            auth: Firebase Auth instance
+            firebase_api: Firebase API utilities
+            email_service: Email service for verification emails        Raises:
+            UserServiceError: If any required dependency is None
         """
+        if not all([firestore, auth, firebase_api, email_service]):
+            raise UserServiceError("All dependencies are required")
+
         self.fs = firestore
         self.auth = auth
         self.firebase_api = firebase_api
         self.email_service = email_service
 
-        # Initialize session services
-        self.url_session_manager = get_url_session_manager()
-        self.db_session_service = DatabaseSessionService(
-            db_connection) if db_connection else None
-
     def _validate_login_input(self, email: str, password: str) -> None:
         """Validate login input parameters."""
         if not email or not email.strip():
-            raise ValidationError("Email is required")
-
+            raise ValidationError("Email cannot be empty")
         if not password or not password.strip():
-            raise ValidationError("Password is required")
-
-        # Email format validation
-        if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
-            raise ValidationError("Invalid email format")
+            raise ValidationError("Password cannot be empty")
 
     def _validate_signup_input(self, username: str, email: str, password: str, confirm_password: str) -> None:
         """Validate signup input parameters."""
         if not username or not username.strip():
-            raise ValidationError("Username is required")
-
+            raise ValidationError("Username cannot be empty")
         if not email or not email.strip():
-            raise ValidationError("Email is required")
-
-        if not password or not password.strip():
-            raise ValidationError("Password is required")
-
+            raise ValidationError("Email cannot be empty")
+        if not password or not confirm_password:
+            raise ValidationError("Password cannot be empty")
+        if len(password) < 6:
+            raise ValidationError(
+                "Password must be at least 6 characters long")
         if password != confirm_password:
             raise ValidationError("Passwords do not match")
 
-        # Email format validation
-        if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
-            # Password validation
-            raise ValidationError("Invalid email format")
-        if len(password) < 6:
-            raise ValidationError("Password must be at least 6 characters")
+        # Additional username validation
+        if len(username) < 3:
+            raise ValidationError(
+                "Username must be at least 3 characters long")
+        if len(username) > 30:
+            raise ValidationError("Username must be less than 30 characters")
 
-        # Additional password validation        if len(password) > 30:
-            # Optional: Check for password strength
+        # Check for valid username characters (alphanumeric and underscore only)
+        import re
+        if not re.match(r'^[a-zA-Z0-9_]+$', username):
+            raise ValidationError(
+                "Username can only contain letters, numbers, and underscores")
+
+        # Additional password validation
+        if len(password) > 30:
             raise ValidationError("Password must be less than 128 characters")
+
+        # Optional: Check for password strength
         has_upper = any(c.isupper() for c in password)
         has_lower = any(c.islower() for c in password)
         has_digit = any(c.isdigit() for c in password)
+
         if not (has_upper and has_lower and has_digit):
             raise ValidationError(
                 "Password must contain at least one uppercase letter, one lowercase letter, and one number")
 
-    def _handle_session_persistence(self, username: str, email: str, role: str) -> Optional[str]:
-        """
-        Handle session persistence using database and URL-based storage.
-
-        Args:
-            username: User's username
-            email: User's email
-            role: User's role
-
-        Returns:
-            str: Session ID if successful, None otherwise
-        """
+    def _create_session(self, user, user_data: Dict[str, Any]) -> None:
+        """Create user session after successful authentication."""
         try:
-            # Create session in database
-            if self.db_session_service:
-                device_info = self.url_session_manager.get_device_info()
-                ip_address = self.url_session_manager.get_mock_ip_address()
+            st.session_state.username = user_data.get(
+                'username', user.uid)  # Use username from Firestore
+            st.session_state.useremail = user.email
+            st.session_state.role = user_data['role']
+            st.session_state.signout = False
 
-                session_id = self.db_session_service.create_session(
-                    username, email, role, device_info, ip_address
-                )
+            # Save to cookies with proper error handling
+            cookie_saved = save_user_to_cookie(
+                user_data.get('username', user.uid), user.email, user_data['role'])
+            if not cookie_saved:
+                logger.warning(
+                    "Failed to save user data to cookies, but session created")
 
-                # Save session data to session state
-                session_data = {
-                    'username': username,
-                    'useremail': email,
-                    'role': role,
-                    'session_id': session_id,
-                    'signout': False,
-                    'login_timestamp': time.time(),
-                    'session_expiry': time.time() + SESSION_TIMEOUT_SECONDS
-                }
-
-                if self.url_session_manager.save_session_to_state(session_data):
-                    logger.info(
-                        f"✅ Database session created for user: {username}")
-                    return session_id
-                else:
-                    logger.error("Failed to save session to state")
-                    return None
-            else:
-                logger.warning("Database session service not available")
-                return None
-
-        except Exception as e:
-            logger.error(f"Failed to create database session: {e}")
-            return None
-
-    def _clear_all_sessions(self, username: str) -> None:
-        """
-        Clear all session data from database and session state.
-
-        Args:
-            username: Username for logging purposes
-        """
-        try:
-            # Clear database sessions
-            if self.db_session_service:
-                self.db_session_service.end_user_sessions(username)
-                logger.info(
-                    f"✅ Database sessions cleared for user: {username}")
-
-            # Clear session state
-            if self.url_session_manager:
-                self.url_session_manager.clear_session_from_state()
-                logger.info("✅ Session state cleared")
-
-            # Clear URL parameters
-            if self.url_session_manager:
-                self.url_session_manager.clear_session_id_from_url()
-                logger.info("✅ URL session ID cleared")
-
-        except Exception as e:
-            logger.error(f"Error clearing sessions: {e}")
-
-    def _create_session(self, user, user_data: Dict[str, Any]) -> Optional[str]:
-        """Create user session using database and URL-based storage."""
-        try:
-            username = user_data.get('username', user.uid)
-            email = user.email
-            role = user_data['role']
-
-            # Handle session persistence using helper method
-            session_id = self._handle_session_persistence(
-                username, email, role)
-
-            # Store user_uid for logout logging
-            st.session_state.user_uid = user.uid
-
-            # Ensure session_expiry is set in session_state
-            current_time = time.time()
-            session_expiry = current_time + SESSION_TIMEOUT_SECONDS
-            st.session_state.session_expiry = session_expiry
-            logger.info(
-                f"🕒 Session expiry set to: {session_expiry} (current: {current_time}, timeout: {SESSION_TIMEOUT_HOURS}h)")
-
-            if session_id:
-                # Set session ID in URL
-                if self.url_session_manager:
-                    self.url_session_manager.set_session_id_in_url(session_id)
-
-                # Log activity
-                self.save_login_logout(user.uid, "login")
-
-                logger.info(
-                    f"✅ Session created successfully for user: {username}")
-                return session_id
-            else:
-                logger.warning("Session creation failed")
-                return None
+            # Log activity
+            self.save_login_logout(user.uid, "login")
 
         except Exception as e:
             logger.error(f"Failed to create session: {e}")
@@ -240,8 +146,9 @@ class UserService:
             AuthenticationError: If authentication fails
         """
         try:
-            # Verify password through Firebase REST API
             self._validate_login_input(email, password)
+
+            # Verify password through Firebase REST API
             user_data = self.verify_password(email, password)
             if not user_data:
                 st.warning("Invalid email or password")
@@ -249,7 +156,7 @@ class UserService:
 
             user = self.auth.get_user_by_email(email)
 
-            # Validate user in Firestore
+            # Validate user in Firestore first
             user_doc = self.fs.collection('users').document(user.uid).get()
             if not user_doc.exists:
                 st.warning("User data not found.")
@@ -257,753 +164,948 @@ class UserService:
 
             user_doc_data = user_doc.to_dict()
 
-            # Check email verification status from Firestore (our custom OTP verification)
+            # Check email verification from Firestore (our OTP system)
             if not user_doc_data.get("email_verified", False):
                 st.warning(
-                    "Your email is not verified. Please check your email and verify your account.")
-                return            # Check if user is approved by admin
-            # Check both 'verified' (boolean) and 'status' (string) fields for compatibility
-            verified_field = user_doc_data.get("verified", False)
-            status_field = str(user_doc_data.get("status", "")).strip()
+                    "Email not verified. Please complete OTP verification.")
+                return
 
-            is_verified = (
-                verified_field is True or
-                status_field.lower() in ["verified", "approved", "active"]
-            )
+            if user_doc_data.get("status") != "Verified":
+                st.warning("Your account is not verified by admin yet.")
+                return
 
-            logger.info(
-                f"User verification check - Email: {email}, verified field: {verified_field}, status field: '{status_field}', is_verified: {is_verified}")
-
-            if not is_verified:
-                logger.warning(
-                    f"User {email} login blocked - not verified. verified={verified_field}, status='{status_field}'")
-                st.warning(
-                    "Your account is pending admin approval. Please wait for verification.")
-                return            # Create session after successful validation
             self._create_session(user, user_doc_data)
+            st.success(f"Login successful as {user_doc_data['role']}!")
+        except ValidationError as e:
+            st.warning(str(e))
+        except exceptions.FirebaseError as e:
+            logger.error(f"Firebase error during login: {e}")
+            st.warning(f"A Firebase error occurred: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error during login: {e}")
+            st.error(f"An unexpected error occurred: {e}")
 
-            st.success(
-                f"Welcome back, {user_doc_data.get('username', user.uid)}!")
+    def signup(self, username: str, email: str, password: str, confirm_password: str, role: str) -> None:
+        """
+        Register a new user account with OTP verification.
+        Note: Input validation should be done before calling this method.
+
+        Args:
+            username: Unique username
+            email: User email address
+            password: User password
+            confirm_password: Password confirmation
+            role: User role
+
+        Raises:
+            UserServiceError: If user creation fails
+        """
+        try:
+            # Basic validation (redundant check, but keep for safety)
+            if not all([username, email, password, confirm_password]):
+                st.error("All fields are required.")
+                return
+
+            if password != confirm_password:
+                st.error("Passwords do not match.")
+                return
+
+            # Basic email validation only (no complex verification)
+            email_valid, email_message = self.validate_email_basic(email)
+            if not email_valid:
+                st.error(email_message)
+                return
+
+            user_ref = self.fs.collection("users").document(username)
+
+            # Check if username is already taken
+            if user_ref.get().exists:
+                st.warning("Username already taken")
+                return
+
+            # Check if email is already taken
+            try:
+                self.auth.get_user_by_email(email)
+                st.warning("Email already taken")
+                return
+            except exceptions.NotFoundError:
+                pass
+
+            # Send OTP for email verification BEFORE creating account
+            st.info("📧 Mengirim kode verifikasi ke email Anda...")
+            otp_sent, otp_message = self.send_verification_otp(email)
+
+            if not otp_sent:
+                st.error(f"Gagal mengirim kode verifikasi: {otp_message}")
+                return  # Store user data temporarily for after OTP verification
+            if 'pending_registration' not in st.session_state:
+                st.session_state.pending_registration = {}
+
+            # Debug: Log what we're storing
+            logger.info(
+                f"Storing registration data - Username: {username}, Email: {email}, Password length: {len(password)}")
+
+            st.session_state.pending_registration[email] = {
+                'username': username,
+                'password': password,
+                'role': role,
+                'timestamp': datetime.now()
+            }
+
+            # Debug: Verify what was stored
+            stored_data = st.session_state.pending_registration[email]
+            logger.info(
+                f"Verified stored data - Password length: {len(stored_data.get('password', ''))}")
+
+            st.success(otp_message)
+            st.info("💡 **Langkah selanjutnya:** Masukkan kode verifikasi 6 digit yang telah dikirim ke email Anda untuk menyelesaikan pendaftaran.")
+
+            # Show OTP input form
+            st.session_state.show_otp_verification = True
+            st.session_state.verification_email = email
+
+            logger.info(f"OTP sent for registration: {email}")
 
         except ValidationError as e:
-            logger.warning(f"Login validation failed: {e}")
             st.warning(str(e))
-        except AuthenticationError as e:
-            logger.warning(f"Authentication failed: {e}")
-            st.warning(str(e))
+        except exceptions.AlreadyExistsError:
+            st.warning("Email or username already taken.")
         except Exception as e:
-            logger.error(f"Login failed: {e}")
-            st.error("An error occurred during login. Please try again.")
+            logger.error(f"Error during signup: {e}")
+            st.error(f"An error occurred: {e}")
+
+    def complete_registration_after_otp(self, email: str, otp: str) -> None:
+        """
+        Complete user registration after OTP verification.
+
+        Args:
+            email: Email address
+            otp: OTP code entered by user
+        """
+        try:
+            # Verify OTP first
+            otp_valid, otp_message = self.verify_otp(email, otp)
+
+            if not otp_valid:
+                st.error(otp_message)
+                return
+
+            # Get pending registration data
+            if ('pending_registration' not in st.session_state or
+                    email not in st.session_state.pending_registration):
+                st.error("Data pendaftaran tidak ditemukan. Silakan daftar ulang.")
+                return
+
+            pending_data = st.session_state.pending_registration[email]
+
+            # Check if registration data is still valid (expires in 30 minutes)
+            if datetime.now() - pending_data['timestamp'] > timedelta(minutes=30):
+                del st.session_state.pending_registration[email]
+                st.error(
+                    "Data pendaftaran telah kedaluwarsa. Silakan daftar ulang.")
+                return            # Create user in Firebase Authentication
+            username = pending_data['username']
+            password = pending_data['password']
+            role = pending_data['role']
+
+            # Debug: Check password validity
+            logger.info(
+                f"Creating user with email: {email}, username: {username}")
+
+            # Validate password before sending to Firebase
+            if not password or not isinstance(password, str) or len(password) < 6:
+                st.error(
+                    f"❌ Terjadi error: Password tidak valid (minimal 6 karakter). Password saat ini: {len(password) if password else 0} karakter")
+                return
+
+            # Validate username
+            if not username or not isinstance(username, str):
+                st.error("❌ Terjadi error: Username tidak valid")
+                return            # Create user in Firebase Authentication
+            created_user = self.auth.create_user(
+                email=email, password=password, uid=username)
+
+            # Update Firebase Auth user to mark email as verified
+            self.auth.update_user(created_user.uid, email_verified=True)
+
+            # Save user data to Firestore
+            user_ref = self.fs.collection("users").document(username)
+            user_data = {
+                "username": username,
+                "email": email,
+                "role": role,
+                "status": "Pending",  # Still needs admin verification
+                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "email_verified": True,  # Email verified via OTP
+                "otp_verified_at": datetime.now().strftime("%Y-%m-%d %H:%M")
+            }
+            user_ref.set(user_data)
+
+            # Clean up pending registration
+            # Clean up verification UI state
+            del st.session_state.pending_registration[email]
+            if 'show_otp_verification' in st.session_state:
+                del st.session_state.show_otp_verification
+            if 'verification_email' in st.session_state:
+                del st.session_state.verification_email
+
+            st.success("🎉 Akun berhasil dibuat dan email terverifikasi!")
+            st.info("⏳ **Langkah Selanjutnya:** Akun Anda sedang menunggu verifikasi dari admin. Anda akan dapat login setelah admin memverifikasi akun Anda.")
+            st.balloons()
+
+            logger.info(
+                f"User account created and verified successfully: {email}")
+
+        except exceptions.AlreadyExistsError:
+            st.warning("Email atau username sudah terdaftar.")
+        except Exception as e:
+            logger.error(f"Error completing registration: {e}")
+            st.error(f"Terjadi error saat menyelesaikan pendaftaran: {e}")
+
+        except ValidationError as e:
+            st.warning(str(e))
+        except exceptions.AlreadyExistsError:
+            st.warning("Email or username already taken.")
+        except Exception as e:
+            logger.error(f"Error during signup: {e}")
+            st.error(f"An error occurred: {e}")
 
     def logout(self) -> None:
-        """Log out the current user and clear session."""
+        """
+        Log out the current user and clean up session data.
+
+        Raises:
+            UserServiceError: If logout process fails
+        """
         try:
-            username = st.session_state.get("username", "")
-            user_uid = st.session_state.get("user_uid", "")
+            username = st.session_state.get('username', '')
+            if username:
+                self.save_login_logout(username, "logout")
 
-            # Clear all sessions using helper method
-            self._clear_all_sessions(username)            # Log logout activity
-            if user_uid:
-                self.save_login_logout(user_uid, "logout")
+            clear_user_cookie()
+            st.session_state.signout = True
+            st.session_state.username = ''
+            st.session_state.useremail = ''
+            st.session_state.role = ''
 
-            logger.info(f"User {username} logged out successfully")
-            st.success("You have been logged out successfully")
+            logger.info("User logged out successfully")
 
         except Exception as e:
             logger.error(f"Error during logout: {e}")
-            # Force clear session state even if other operations fail
-            from core.utils.cookies import clear_cookies
-            clear_cookies()
-            st.warning("Logout completed with some issues")
+            raise UserServiceError(f"Logout failed: {e}")
 
     def verify_password(self, email: str, password: str) -> Optional[Dict[str, Any]]:
         """
         Verify user password using Firebase REST API.
 
         Args:
-            email: User email
+            email: User email address
             password: User password
 
         Returns:
             User data if verification successful, None otherwise
+
+        Raises:
+            AuthenticationError: If verification fails
         """
         try:
-            url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={self.firebase_api}"
+            api_key = st.secrets["firebase"]["firebase_api"]
+            url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={api_key}"
             payload = {
                 "email": email,
                 "password": password,
                 "returnSecureToken": True
             }
 
-            response = requests.post(url, json=payload)
+            response = requests.post(url, json=payload, timeout=30)
             if response.status_code == 200:
-                data = response.json()
-                user_uid = data.get("localId")
-
-                # Get user data from Firestore
-                user_doc = self.fs.collection('users').document(user_uid).get()
-                if user_doc.exists:
-                    return user_doc.to_dict()
-
-            return None
-
-        except Exception as e:
-            logger.error(f"Password verification failed: {e}")
-            return None
-
-    def save_login_logout(self, user_uid: str, action: str) -> None:
-        """
-        Save login/logout activity to Firestore.
-
-        Args:
-            user_uid: User UID
-            action: 'login' or 'logout'
-        """
-        try:
-            activity_data = {
-                "user_uid": user_uid,
-                "action": action,
-                "timestamp": datetime.now(),
-                "ip_address": self._get_client_ip()
-            }
-
-            self.fs.collection('user_activities').add(activity_data)
-            logger.info(
-                f"{action.capitalize()} activity saved for user {user_uid}")
-
-        except Exception as e:
-            logger.error(f"Failed to save {action} activity: {e}")
-
-    def _get_client_ip(self) -> str:
-        """Get client IP address."""
-        try:
-            # In Streamlit Cloud, this might not work as expected
-            # You might need to use headers like X-Forwarded-For
-            return "Unknown"
-        except Exception:
-            return "Unknown"
-
-    def signup(self, username: str, email: str, password: str, confirm_password: str) -> None:
-        """
-        Register a new user.
-
-        Args:
-            username: Desired username
-            email: User email address
-            password: User password
-            confirm_password: Password confirmation
-
-        Raises:
-            ValidationError: If input validation fails
-        """
-        try:
-            self._validate_signup_input(
-                username, email, password, confirm_password)
-
-            # Create user in Firebase Auth
-            user = self.auth.create_user(
-                email=email,
-                password=password,
-                display_name=username
-            )
-
-            # Create user document in Firestore
-            user_data = {
-                'username': username,
-                'email': email,
-                'role': 'employee',  # Default role
-                'email_verified': False,
-                'verified': False,  # Admin approval required
-                'created_at': datetime.now(),
-                'otp_code': self._generate_otp_code(),
-                'otp_expires_at': datetime.now() + timedelta(minutes=10)
-            }
-
-            self.fs.collection('users').document(user.uid).set(user_data)
-
-            # Send verification email
-            if self.email_service:
-                self.email_service.send_verification_email(
-                    email, user_data['otp_code'])
-
-            st.success(
-                "Registration successful! Please check your email for verification code.")
-            logger.info(f"User registered successfully: {username} ({email})")
-
-        except ValidationError as e:
-            logger.warning(f"Signup validation failed: {e}")
-            st.warning(str(e))
-        except exceptions.FirebaseError as e:
-            logger.error(f"Firebase error during signup: {e}")
-            if "EMAIL_EXISTS" in str(e):
-                st.warning(
-                    "Email already exists. Please use a different email.")
-            else:
-                st.error("Registration failed. Please try again.")
-        except Exception as e:
-            logger.error(f"Signup failed: {e}")
-            st.error("An error occurred during registration. Please try again.")
-
-    def _generate_otp_code(self) -> str:
-        """Generate a 6-digit OTP code."""
-        return ''.join(random.choices(string.digits, k=6))
-
-    def verify_otp(self, email: str, otp_code: str) -> bool:
-        """
-        Verify OTP code for email verification.
-
-        Args:
-            email: User email
-            otp_code: OTP code to verify
-
-        Returns:
-            True if verification successful, False otherwise
-        """
-        try:
-            # Find user by email
-            users = self.fs.collection('users').where(
-                'email', '==', email).get()
-
-            if not users:
-                st.warning("User not found.")
-                return False
-
-            user_doc = users[0]
-            user_data = user_doc.to_dict()
-
-            # Check OTP validity
-            if user_data.get('otp_code') != otp_code:
-                st.warning("Invalid OTP code.")
-                return False
-
-            if datetime.now() > user_data.get('otp_expires_at'):
-                st.warning("OTP code has expired. Please request a new one.")
-                return False
-
-            # Mark email as verified
-            user_doc.reference.update({
-                'email_verified': True,
-                'otp_code': None,
-                'otp_expires_at': None
-            })
-
-            st.success(
-                "Email verified successfully! Please wait for admin approval.")
-            logger.info(f"Email verified for user: {email}")
-            return True
-
-        except Exception as e:
-            logger.error(f"OTP verification failed: {e}")
-            st.error("Verification failed. Please try again.")
-            return False
-
-    def resend_otp(self, email: str) -> None:
-        """
-        Resend OTP code to user email.
-
-        Args:
-            email: User email
-        """
-        try:
-            # Find user by email
-            users = self.fs.collection('users').where(
-                'email', '==', email).get()
-
-            if not users:
-                st.warning("User not found.")
-                return
-
-            user_doc = users[0]
-
-            # Generate new OTP
-            new_otp = self._generate_otp_code()
-
-            # Update user document
-            user_doc.reference.update({
-                'otp_code': new_otp,
-                'otp_expires_at': datetime.now() + timedelta(minutes=10)
-            })
-
-            # Send new OTP
-            if self.email_service:
-                self.email_service.send_verification_email(email, new_otp)
-
-            st.success("New OTP code sent to your email.")
-            logger.info(f"OTP resent for user: {email}")
-
-        except Exception as e:
-            logger.error(f"Failed to resend OTP: {e}")
-            st.error("Failed to resend OTP. Please try again.")
-
-    def reset_password_request(self, email: str) -> None:
-        """
-        Send password reset email.
-
-        Args:
-            email: User email
-        """
-        try:
-            self.auth.generate_password_reset_link(email)
-            st.success("Password reset email sent. Please check your inbox.")
-            logger.info(f"Password reset requested for: {email}")
-
-        except exceptions.FirebaseError as e:
-            logger.error(f"Password reset failed: {e}")
-            if "USER_NOT_FOUND" in str(e):
-                st.warning("Email not found.")
-            else:
-                st.error("Failed to send password reset email.")
-        except Exception as e:
-            logger.error(f"Password reset failed: {e}")
-            st.error("An error occurred. Please try again.")
-
-    def restore_user_session(self) -> bool:
-        """
-        Restore user session from database using URL session ID.
-        This method is called during app initialization to recover user sessions.
-
-        Returns:
-            bool: True if session was successfully restored, False otherwise
-        """
-        try:
-            # Check if we already have a valid session
-            current_user = st.session_state.get("username", "")
-            current_signout = st.session_state.get("signout", True)
-            current_expiry = st.session_state.get("session_expiry", 0)
-
-            # If we already have a valid, non-expired session, no need to restore
-            if (current_user and not current_signout and current_expiry > 0 and current_expiry > time.time()):
-                logger.debug(
-                    f"Valid session already exists for: {current_user}")
-                return True
-
-            logger.debug("Attempting to restore user session from database...")
-
-            # Get session ID from URL
-            if not self.url_session_manager:
-                logger.warning("URL session manager not available")
-                return False
-
-            session_id = self.url_session_manager.get_session_id_from_url()
-            if not session_id:
-                logger.debug("No session ID found in URL")
-                return False
-
-            # Validate session with database
-            if not self.db_session_service:
-                logger.warning("Database session service not available")
-                return False
-
-            session_data = self.db_session_service.validate_session(session_id)
-            if not session_data:
-                logger.debug("Session validation failed or expired")
-                # Clear invalid session ID from URL
-                self.url_session_manager.clear_session_id_from_url()
-                return False
-
-            # Restore session state from database
-            st.session_state["username"] = session_data.get("username", "")
-            st.session_state["useremail"] = session_data.get("email", "")
-            st.session_state["role"] = session_data.get("role", "")
-            st.session_state["session_id"] = session_data.get("session_id", "")
-            st.session_state["logged_in"] = True
-            st.session_state["signout"] = False
-            st.session_state["login_timestamp"] = time.time()
-            st.session_state["session_expiry"] = session_data.get(
-                "session_expiry", 0)
-
-            restored_user = st.session_state.get("username", "")
-            if restored_user:
-                logger.info(f"Session restored from database: {restored_user}")
-                return True
-
-            return False
-
-        except Exception as e:
-            logger.error(f"Failed to restore user session: {e}")
-            return False
-
-    def is_session_valid(self) -> bool:
-        """
-        Check if the current user session is valid and not expired.
-
-        Returns:
-            bool: True if session is valid, False otherwise
-        """
-        try:
-            username = st.session_state.get("username", "")
-            signout = st.session_state.get("signout", True)
-
-            # Basic checks
-            if not username or signout:
-                logger.info("❌ Session invalid - no username or signed out")
-                return False
-
-            # Check session expiry using helper
-            time_info = self._get_session_remaining_time()
-
-            if time_info.get("expired", True):
-                logger.info(f"❌ Session expired for user: {username}")
-                # Auto-clear expired session
-                from core.utils.cookies import clear_cookies
-                clear_cookies()
-                return False
-
-            logger.info(
-                f"✅ Session valid for: {username} ({time_info.get('remaining_hours', 0):.1f}h remaining)")
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to validate session: {e}")
-            return False
-
-    def is_user_authenticated(self) -> bool:
-        """
-        Check if user is currently authenticated with valid session.
-
-        Returns:
-            bool: True if user is authenticated, False otherwise
-        """
-        try:
-            # Quick check of session state
-            username = st.session_state.get("username", "")
-            signout = st.session_state.get("signout", True)
-
-            if not username or signout:
-                return False
-
-            # Validate session is still valid
-            return self.is_session_valid()
-
-        except Exception as e:
-            logger.error(f"Authentication check failed: {e}")
-            return False
-
-    def get_current_user(self) -> Optional[Dict[str, Any]]:
-        """
-        Get current authenticated user information.
-
-        Returns:
-            Dict with user info if authenticated, None otherwise
-        """
-        try:
-            if not self.is_user_authenticated():
-                return None
-
-            return {
-                "username": st.session_state.get("username", ""),
-                "email": st.session_state.get("useremail", ""),
-                "role": st.session_state.get("role", ""),
-                "login_timestamp": st.session_state.get("login_timestamp"),
-                "session_expiry": st.session_state.get("session_expiry")
-            }
-
-        except Exception as e:
-            logger.error(f"Failed to get current user: {e}")
-            return None
-
-    def refresh_session(self) -> bool:
-        """
-        Refresh current session to extend expiry time (cookies only).
-
-        Returns:
-            bool: True if session refreshed successfully
-        """
-        try:
-            if not self.is_user_authenticated():
-                return False
-
-            username = st.session_state.get("username", "")
-            email = st.session_state.get("useremail", "")
-            role = st.session_state.get("role", "")
-            session_id = st.session_state.get("session_id", "")
-
-            # Refresh session by extending expiry in database
-            if self.db_session_service and session_id:
-                session_extended = self.db_session_service.extend_session(
-                    session_id, SESSION_TIMEOUT_HOURS)
-
-                if session_extended:
-                    # Update session state expiry
-                    st.session_state.session_expiry = time.time() + SESSION_TIMEOUT_SECONDS
-                    logger.info(f"Session refreshed for user: {username}")
-                    return True
-                else:
-                    logger.warning(
-                        f"Failed to refresh session for user: {username}")
-                    return False
+                return response.json()
             else:
                 logger.warning(
-                    "Database session service or session ID not available")
-                return False
-
-        except Exception as e:
-            logger.error(f"Session refresh failed: {e}")
-            return False
-
-    def logout_if_expired(self) -> None:
-        """
-        Log out user if session has expired.
-        """
-        try:
-            if not self.is_session_valid():
-                logger.info("Session expired, logging out user")
-                self.logout()
-        except Exception as e:
-            logger.error(f"Error checking session expiry: {e}")
-
-    def get_session_info(self) -> Optional[Dict[str, Any]]:
-        """
-        Get current session information.
-
-        Returns:
-            Dict with session info if valid, None otherwise
-        """
-        try:
-            if not self.is_user_authenticated():
+                    f"Password verification failed for {email}: {response.status_code}")
                 return None
 
-            # Get time information using helper
-            time_info = self._get_session_remaining_time()
+        except requests.RequestException as e:
+            logger.error(f"Network error during password verification: {e}")
+            raise AuthenticationError(f"Network error: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error during password verification: {e}")
+            raise AuthenticationError(f"Verification failed: {e}")
 
-            return {
-                "username": st.session_state.get("username", ""),
-                "email": st.session_state.get("useremail", ""),
-                "role": st.session_state.get("role", ""),
-                "login_timestamp": st.session_state.get("login_timestamp"),
-                "session_expiry": time_info.get("expiry_timestamp"),
-                "remaining_time_seconds": time_info.get("remaining_seconds", 0),
-                "remaining_hours": time_info.get("remaining_hours", 0),
-                "remaining_minutes": time_info.get("remaining_minutes", 0),
-                "is_valid": time_info.get("valid", False)
-            }
+    def save_login_logout(self, username: str, event_type: str) -> None:
+        """
+        Save user login/logout activity to Firestore.
+
+        Args:
+            username: User identifier
+            event_type: Either 'login' or 'logout'
+
+        Raises:
+            UserServiceError: If activity logging fails
+        """
+        try:
+            now = datetime.now()
+            date = now.strftime("%d-%m-%Y")
+            time = now.strftime("%H:%M:%S")
+
+            doc_ref = self.fs.collection(
+                "employee attendance").document(username)
+
+            if event_type == "login":
+                update_data = {f"activity.{date}.Login_Time": self.firebase_api.ArrayUnion([
+                                                                                           time])}
+            elif event_type == "logout":
+                update_data = {f"activity.{date}.Logout_Time": self.firebase_api.ArrayUnion([
+                                                                                            time])}
+            else:
+                raise ValueError(f"Invalid event_type: {event_type}")
+
+            try:
+                doc_ref.update(update_data)
+            except Exception:
+                # Document doesn't exist, create it
+                activity_data = {
+                    "activity": {
+                        date: {
+                            "Login_Time": [time] if event_type == "login" else [],
+                            "Logout_Time": [time] if event_type == "logout" else []
+                        }
+                    }
+                }
+                doc_ref.set(activity_data, merge=True)
+
+            logger.info(
+                f"Activity logged: {username} - {event_type} at {time}")
 
         except Exception as e:
-            logger.error(f"Failed to get session info: {e}")
-            return None
+            logger.error(f"Failed to log activity for {username}: {e}")
+            raise UserServiceError(f"Activity logging failed: {e}")
+
+    def _validate_google_email_exists(self, email: str) -> bool:
+        """
+        Validate if a Google email address actually exists.
+
+        Args:
+            email: Email address to validate
+
+        Returns:
+            bool: True if email exists, False otherwise
+        """
+        try:
+            # First check if it's a valid email format
+            email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+            if not re.match(email_pattern, email):
+                return False            # Extract domain from email
+            domain = email.split('@')[1]
+
+            # For Gmail and Google Workspace emails
+            if domain.lower() in ['gmail.com', 'googlemail.com'] or domain.endswith('.google.com'):
+                return self._check_gmail_exists(email)
+            else:
+                # For other domains, check if they use Google Workspace
+                return self._check_domain_mx_records(domain, email)
+
+        except Exception as e:
+            logger.warning(f"Error validating email {email}: {e}")
+            return False
+
+    def _check_gmail_exists(self, email: str) -> bool:
+        """
+        Check if a Gmail address actually exists using multiple verification methods.
+
+        Args:
+            email: Gmail address to check
+
+        Returns:
+            bool: True if email exists, False otherwise
+        """
+        try:
+            # First, basic format validation
+            email_lower = email.lower()
+
+            # Check if it's a Gmail domain
+            if not (email_lower.endswith('@gmail.com') or email_lower.endswith('@googlemail.com')):
+                return False
+
+            # Extract username part
+            username = email.split('@')[0]
+
+            # Gmail username validation rules
+            if len(username) < 6 or len(username) > 30:
+                return False
+
+            if username.startswith('.') or username.endswith('.'):
+                return False
+
+            if '..' in username:
+                return False
+
+            # Check for valid characters
+            valid_chars = set('abcdefghijklmnopqrstuvwxyz0123456789.')
+            if not all(c in valid_chars for c in username):
+                return False
+
+            # Now try to verify the email actually exists
+            return self._verify_gmail_existence(email)
+
+        except Exception as e:
+            logger.warning(f"Gmail validation failed for {email}: {e}")
+            return False
+
+    def _verify_gmail_existence(self, email: str) -> bool:
+        """
+        Verify Gmail existence using multiple methods.
+
+        Args:
+            email: Gmail address to verify
+
+        Returns:
+            bool: True if email likely exists, False otherwise
+        """
+        try:
+            # Method 1: Try using Firebase Auth to check if user exists
+            try:
+                self.auth.get_user_by_email(email)
+                # If user exists in Firebase, email is definitely valid
+                return True
+            except exceptions.NotFoundError:
+                # User not in Firebase, but email might still exist
+                pass
+            except Exception:
+                # Firebase check failed, continue with other methods
+                pass
+
+            # Method 2: Try Google's password reset flow simulation
+            # This is a more ethical way to check email existence
+            if self._check_gmail_via_password_reset(email):
+                return True
+
+            # Method 3: Use Google Apps API if available
+            if hasattr(st, 'secrets') and 'google_service_account' in st.secrets:
+                if self._check_gmail_via_google_api(email):
+                    return True
+
+            # Method 4: Basic heuristic check for common invalid patterns
+            return self._heuristic_gmail_check(email)
+
+        except Exception as e:
+            logger.warning(
+                f"Gmail existence verification failed for {email}: {e}")
+            return False
+
+    def _check_gmail_via_password_reset(self, email: str) -> bool:
+        """
+        Check Gmail existence by simulating password reset flow.
+
+        Args:
+            email: Gmail address to check
+
+        Returns:
+            bool: True if email appears to exist
+        """
+        try:
+            import requests
+
+            # Use Google's account recovery API endpoint
+            url = "https://accounts.google.com/signin/recovery"
+
+            session = requests.Session()
+            session.headers.update({
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            })
+
+            # First, get the recovery page
+            response = session.get(url)
+            if response.status_code != 200:
+                return False
+
+            # Try to submit email for recovery
+            recovery_data = {
+                'Email': email,
+                'continue': 'https://accounts.google.com/',
+                'flowName': 'GlifWebSignIn',
+                'flowEntry': 'ServiceLogin'
+            }
+
+            # Submit the email
+            response = session.post(
+                "https://accounts.google.com/_/signin/recovery/initiate",
+                data=recovery_data,
+                allow_redirects=False
+            )
+
+            # Check response for indicators of email existence
+            # Google returns different responses for existing vs non-existing emails
+            if response.status_code in [200, 302]:
+                response_text = response.text.lower()
+
+                # If email doesn't exist, Google usually indicates this
+                error_indicators = [
+                    'couldn\'t find your google account',
+                    'email not found',
+                    'account does not exist',
+                    'invalid email'
+                ]
+
+                if any(indicator in response_text for indicator in error_indicators):
+                    return False
+
+                # If no error indicators, email likely exists
+                return True
+
+            return False
+
+        except Exception as e:
+            logger.warning(f"Password reset check failed for {email}: {e}")
+            return False
+
+    def _check_gmail_via_google_api(self, email: str) -> bool:
+        """
+        Check Gmail using Google API if service account is available.
+
+        Args:
+            email: Gmail address to check
+
+        Returns:
+            bool: True if email exists
+        """
+        try:
+            # This would require Google Service Account credentials
+            # For now, return False as we don't have API access
+            return False
+
+        except Exception as e:
+            logger.warning(f"Google API check failed for {email}: {e}")
+            return False
+
+    def _heuristic_gmail_check(self, email: str) -> bool:
+        """
+        Apply heuristic checks to determine if Gmail is likely valid.
+
+        Args:
+            email: Gmail address to check
+
+        Returns:
+            bool: True if email passes heuristic checks
+        """
+        try:
+            username = email.split('@')[0].lower()
+
+            # Check for obviously fake patterns
+            fake_patterns = [
+                # Sequential numbers
+                r'.*123456.*',
+                r'.*654321.*',
+                # Obvious test patterns
+                r'.*test.*test.*',
+                r'.*fake.*',
+                r'.*dummy.*',
+                r'.*temp.*',
+                # Very random looking strings (all consonants or all vowels)
+                r'^[bcdfghjklmnpqrstvwxyz]{8,}$',
+                r'^[aeiou]{6,}$',
+                # Keyboard patterns
+                r'.*qwerty.*',
+                r'.*asdfgh.*',
+                r'.*123abc.*'
+            ]
+
+            import re
+            for pattern in fake_patterns:
+                if re.match(pattern, username):
+                    return False
+
+            # Additional checks for suspicious patterns
+            # Too many repeated characters
+            for char in username:
+                if username.count(char) > len(username) // 2:
+                    return False
+
+            # For this specific case, let's be more strict
+            # If it looks like a test/fake email, reject it
+            suspicious_words = ['test', 'fake',
+                                'dummy', 'temp', 'example', 'sample']
+            if any(word in username for word in suspicious_words):
+                return False
+
+            # Email appears legitimate based on heuristics
+            return True
+
+        except Exception as e:
+            logger.warning(f"Heuristic check failed for {email}: {e}")
+            return False
+
+    def _check_gmail_via_api(self, email: str) -> bool:
+        """
+        Alternative method to check Gmail using Google's verification.
+
+        Args:
+            email: Gmail address to check
+
+        Returns:
+            bool: True if likely exists, False otherwise
+        """
+        try:
+            # Use a simple verification approach
+            # This is a basic check - in production, you might want to use
+            # Google's People API or Gmail API for more accurate results
+
+            # For now, we'll assume Gmail addresses are valid if they
+            # follow the correct format and domain
+            if '@gmail.com' in email.lower() or '@googlemail.com' in email.lower():
+                return True
+            return False
+
+        except Exception as e:
+            logger.warning(f"API verification failed for {email}: {e}")
+            return False
+
+    def _check_domain_mx_records(self, domain: str, email: str) -> bool:
+        """
+        Check if domain uses Google Workspace by examining MX records.
+
+        Args:
+            domain: Domain to check
+            email: Full email address
+
+        Returns:
+            bool: True if domain uses Google services, False otherwise
+        """
+        try:
+            # Get MX records for the domain
+            mx_records = dns.resolver.resolve(domain, 'MX')
+
+            # Check if any MX record points to Google
+            google_mx_keywords = ['google.com',
+                                  'googlemail.com', 'aspmx.l.google.com']
+
+            for mx in mx_records:
+                mx_host = str(mx.exchange).lower()
+                if any(keyword in mx_host for keyword in google_mx_keywords):
+                    # Domain uses Google Workspace, so email could be valid
+                    # For more accurate verification, you'd need domain-specific checks
+                    return True
+
+            return False
+        except Exception as e:
+            logger.warning(f"MX record check failed for domain {domain}: {e}")
+            return False
+
+    def validate_email_before_registration(self, email: str) -> tuple[bool, str]:
+        """
+        Comprehensive email validation before registration with strict verification.
+
+        Args:
+            email: Email address to validate
+
+        Returns:
+            tuple: (is_valid, message)
+        """
+        try:
+            # Basic format validation
+            email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+            if not re.match(email_pattern, email):
+                return False, "❌ Format email tidak valid"
+
+            # Check if it's a Google email
+            domain = email.split('@')[1].lower()
+
+            if domain not in ['gmail.com', 'googlemail.com'] and not domain.endswith('.google.com'):
+                # Check if domain uses Google Workspace
+                if not self._check_domain_mx_records(domain, email):
+                    return False, "❌ Email harus menggunakan layanan Google (Gmail atau Google Workspace)"
+
+            # Show verification progress
+            with st.spinner("🔍 Memverifikasi keberadaan email Google..."):
+                # More strict verification
+                if not self._validate_google_email_exists(email):
+                    return False, "❌ Email Google tidak ditemukan atau tidak dapat diverifikasi. Pastikan:\n" \
+                        "1. Email sudah terdaftar di Google\n" \
+                        "2. Email aktif dan dapat menerima email\n" \
+                        "3. Tidak menggunakan email palsu atau test"
+
+            # Additional strict checks for suspicious emails
+            username = email.split('@')[0].lower()
+
+            # Check for obvious fake/test patterns
+            suspicious_patterns = [
+                'test', 'fake', 'dummy', 'temp', 'example', 'sample',
+                'placeholder', 'mock', 'invalid', 'notreal'
+            ]
+
+            if any(pattern in username for pattern in suspicious_patterns):
+                return False, "❌ Email terdeteksi sebagai email test/palsu. Gunakan email Google yang valid."
+
+            # Check for too many random characters (likely fake)
+            if len(username) > 15:
+                # Count consonants vs vowels ratio - real names usually have balance
+                vowels = set('aeiou')
+                consonants = set('bcdfghjklmnpqrstvwxyz')
+
+                vowel_count = sum(1 for c in username if c in vowels)
+                consonant_count = sum(1 for c in username if c in consonants)
+
+                if vowel_count == 0 or consonant_count == 0:
+                    return False, "❌ Email terdeteksi sebagai kombinasi karakter acak. Gunakan email yang valid."
+
+                # Check for keyboard patterns
+                keyboard_patterns = ['qwerty', 'asdf',
+                                     'zxcv', '123456', '654321']
+                if any(pattern in username for pattern in keyboard_patterns):
+                    return False, "❌ Email mengandung pola keyboard yang mencurigakan."
+
+            # Additional check for unnatural-looking email patterns
+            # Check for emails that look like random character combinations
+            if self._is_likely_random_email(username):
+                return False, "❌ Email terdeteksi sebagai kombinasi karakter yang tidak natural. Gunakan email dengan nama yang wajar."
+
+            st.success("✅ Email berhasil diverifikasi!")
+            return True, "Email valid dan terverifikasi"
+
+        except Exception as e:
+            logger.error(f"Error in email validation: {e}")
+            return False, f"❌ Terjadi error saat memvalidasi email: {e}"
+
+    def _is_likely_random_email(self, username: str) -> bool:
+        """
+        Check if email username looks like random characters or unlikely to be real.
+
+        Args:
+            username: Username part of email
+
+        Returns:
+            bool: True if email looks random/fake
+        """
+        try:
+            # Remove dots and numbers for analysis
+            clean_username = ''.join(
+                c for c in username.lower() if c.isalpha())
+
+            if len(clean_username) < 3:
+                return False  # Too short to analyze
+
+            # Check for excessive consonant clusters or vowel clusters
+            vowels = set('aeiou')
+            consonants = set('bcdfghjklmnpqrstvwxyz')
+
+            # Count consecutive consonants/vowels
+            max_consecutive_consonants = 0
+            max_consecutive_vowels = 0
+            current_consonants = 0
+            current_vowels = 0
+
+            for char in clean_username:
+                if char in vowels:
+                    current_vowels += 1
+                    current_consonants = 0
+                    max_consecutive_vowels = max(
+                        max_consecutive_vowels, current_vowels)
+                elif char in consonants:
+                    current_consonants += 1
+                    current_vowels = 0
+                    max_consecutive_consonants = max(
+                        max_consecutive_consonants, current_consonants)
+
+            # Flag if too many consecutive consonants (unlikely in real names)
+            if max_consecutive_consonants >= 5:  # Like "rizkyyanuark" has "rzky"
+                return True
+
+            # Check for repeated character patterns that look artificial
+            if len(clean_username) >= 8:
+                # Look for doubled letters in unusual positions
+                doubled_count = 0
+                for i in range(len(clean_username) - 1):
+                    if clean_username[i] == clean_username[i + 1]:
+                        doubled_count += 1
+
+                # Multiple doubled letters might indicate artificial name
+                if doubled_count >= 2:
+                    return True
+
+            # Check for uncommon letter combinations
+            uncommon_patterns = [
+                'rzk', 'yyk', 'yyy', 'zzz', 'qzx', 'xzq', 'wyx', 'vwx'
+            ]
+
+            for pattern in uncommon_patterns:
+                if pattern in clean_username:
+                    return True
+
+            # Check if it looks like keyboard mashing or random
+            # Real names usually have more common letter combinations
+            common_bigrams = [
+                'th', 'he', 'in', 'er', 'an', 're', 'ed', 'nd', 'to', 'en',
+                'ti', 'es', 'or', 'te', 'of', 'be', 'ha', 'as', 'hi', 'is'
+            ]
+
+            bigram_count = 0
+            for i in range(len(clean_username) - 1):
+                bigram = clean_username[i:i+2]
+                if bigram in common_bigrams:
+                    bigram_count += 1
+
+            # If very few common bigrams, might be random
+            if len(clean_username) >= 8 and bigram_count == 0:
+                return True
+
+            return False
+
+        except Exception as e:
+            logger.warning(f"Random email check failed for {username}: {e}")
+            return False
+
+    def generate_otp(self) -> str:
+        """
+        Generate a 6-digit OTP code.
+
+        Returns:
+            str: 6-digit OTP code
+        """
+        return ''.join(random.choices(string.digits, k=6))
 
     def send_verification_otp(self, email: str) -> tuple[bool, str]:
         """
-        Send verification OTP to email.
+        Send OTP verification code to email address.
 
         Args:
-            email: User email address
+            email: Email address to send OTP to
 
         Returns:
-            Tuple of (success, message)
+            tuple: (success, message)
         """
         try:
-            # Find user by email
-            users = self.fs.collection('users').where(
-                'email', '==', email).get()
+            # Generate OTP
+            otp = self.generate_otp()
 
-            if not users:
-                return False, "User not found."
+            # Store OTP in session state with expiration
+            if 'email_verification' not in st.session_state:
+                st.session_state.email_verification = {}
 
-            user_doc = users[0]
-            user_data = user_doc.to_dict()
+            # OTP expires in 10 minutes
+            expiry_time = datetime.now() + timedelta(minutes=10)
 
-            # Check if email is already verified
-            if user_data.get('email_verified', False):
-                return False, "Email is already verified."
+            st.session_state.email_verification[email] = {
+                'otp': otp,
+                'expiry': expiry_time,
+                'attempts': 0
+            }
 
-            # Generate new OTP
-            new_otp = self._generate_otp_code()
+            # Send email with OTP
+            subject = "Kode Verifikasi ICONNET Assistant"
+            body = f"""
+            <html>
+            <body>
+                <h2>Verifikasi Email - ICONNET Assistant</h2>
+                <p>Halo,</p>
+                <p>Anda telah mendaftar di ICONNET Assistant. Gunakan kode verifikasi berikut untuk melengkapi pendaftaran:</p>
+                
+                <div style="background-color: #f0f2f6; padding: 20px; border-radius: 10px; text-align: center; margin: 20px 0;">
+                    <h1 style="color: #1f4e79; font-size: 36px; margin: 0; letter-spacing: 5px;">{otp}</h1>
+                </div>
+                
+                <p><strong>Kode ini berlaku selama 10 menit.</strong></p>
+                
+                <p>Jika Anda tidak mendaftar di ICONNET Assistant, abaikan email ini.</p>
+                
+                <hr>
+                <p style="color: #666; font-size: 12px;">
+                    Email ini dikirim secara otomatis. Jangan membalas email ini.
+                </p>
+            </body>
+            </html>
+            """
 
-            # Update user document
-            user_doc.reference.update({
-                'otp_code': new_otp,
-                'otp_expires_at': datetime.now() + timedelta(minutes=10)
-            })
-
-            # Send OTP via email
-            if self.email_service:
-                try:
-                    self.email_service.send_verification_email(email, new_otp)
-                    logger.info(f"Verification OTP sent to: {email}")
-                    return True, "Verification code sent to your email."
-                except Exception as e:
-                    logger.error(f"Failed to send verification email: {e}")
-                    return False, "Failed to send verification email."
-            else:
-                logger.warning("Email service not available")
-                return False, "Email service not available."
-
-        except Exception as e:
-            logger.error(f"Failed to send verification OTP: {e}")
-            return False, "An error occurred while sending verification code."
-
-    def complete_registration_after_otp(self, email: str, otp_code: str) -> None:
-        """
-        Complete user registration after OTP verification with UI feedback.
-
-        Args:
-            email: User email address
-            otp_code: OTP verification code
-        """
-        try:
-            if not email or not otp_code:
-                st.warning("⚠️ Email dan kode verifikasi harus diisi!")
-                return
-
-            if len(otp_code) != 6 or not otp_code.isdigit():
-                st.error("❌ Kode verifikasi harus 6 digit angka!")
-                return
-
-            # Verify OTP
-            success = self.verify_otp(email, otp_code)
+            # Send email using EmailService
+            success = self.email_service.send_email(email, subject, body)
 
             if success:
-                # Clear OTP verification state
-                if 'show_otp_verification' in st.session_state:
-                    del st.session_state['show_otp_verification']
-                if 'verification_email' in st.session_state:
-                    del st.session_state['verification_email']
-                if 'pending_registration' in st.session_state and email in st.session_state.pending_registration:
-                    del st.session_state.pending_registration[email]
-
-                st.success(
-                    "✅ Email berhasil diverifikasi! Akun Anda menunggu persetujuan admin.")
-                st.info(
-                    "💡 Anda akan mendapat notifikasi email setelah akun disetujui admin.")
-
-                # Force rerun to show updated UI
-                time.sleep(2)
-                st.rerun()
-
-        except Exception as e:
-            logger.error(f"Error during OTP completion: {e}")
-            st.error("❌ Terjadi kesalahan saat verifikasi. Silakan coba lagi.")
-
-    def _is_session_expired(self, session_expiry: float) -> bool:
-        """
-        Check if a session timestamp is expired.
-
-        Args:
-            session_expiry: Session expiry timestamp
-
-        Returns:
-            bool: True if expired, False otherwise
-        """
-        try:
-            current_time = time.time()
-            return current_time > session_expiry
-        except (ValueError, TypeError):
-            return True
-
-    def _normalize_session_expiry(self, session_expiry) -> float:
-        """
-        Normalize session expiry to Unix timestamp.
-
-        Args:
-            session_expiry: Session expiry in various formats
-
-        Returns:
-            float: Unix timestamp or 0 if invalid
-        """
-        try:
-            if isinstance(session_expiry, str):
-                # Handle ISO format string
-                from datetime import datetime
-                return datetime.fromisoformat(session_expiry.replace('Z', '+00:00')).timestamp()
-            elif isinstance(session_expiry, (int, float)):
-                return float(session_expiry)
+                logger.info(f"OTP sent successfully to {email}")
+                return True, f"Kode verifikasi telah dikirim ke {email}. Silakan periksa kotak masuk Anda."
             else:
-                return 0.0
-        except (ValueError, TypeError):
-            return 0.0
-
-    def _get_session_remaining_time(self) -> Dict[str, Any]:
-        """
-        Get remaining session time information.
-
-        Returns:
-            Dict with remaining time details
-        """
-        try:
-            session_expiry = st.session_state.get("session_expiry", 0)
-            normalized_expiry = self._normalize_session_expiry(session_expiry)
-
-            if normalized_expiry <= 0:
-                return {"valid": False, "expired": True}
-
-            current_time = time.time()
-            remaining_seconds = max(0, normalized_expiry - current_time)
-            remaining_minutes = remaining_seconds / 60
-            remaining_hours = remaining_seconds / 3600
-            return {
-                "valid": remaining_seconds > 0,
-                "expired": remaining_seconds <= 0,
-                "remaining_seconds": remaining_seconds,
-                "remaining_minutes": remaining_minutes,
-                "remaining_hours": remaining_hours,
-                "expiry_timestamp": normalized_expiry
-            }
-        except Exception as e:
-            logger.error(f"Error calculating session time: {e}")
-            return {"valid": False, "expired": True, "error": str(e)}
-
-    def get_cookie_status(self) -> Dict[str, Any]:
-        """
-        Get cookie manager status information for debugging.
-
-        Returns:
-            Dict with cookie status information
-        """
-        try:
-            from core.utils.cookies import get_debug_info
-            debug_info = get_debug_info()
-
-            return {
-                "cookies_available": debug_info.get("cookies_available", False),
-                "cookies_ready": debug_info.get("manager_ready", False),
-                "session_timeout_hours": SESSION_TIMEOUT_HOURS,
-                "current_user": st.session_state.get("username", ""),
-                "is_authenticated": self.is_user_authenticated(),
-                "session_valid": self.is_session_valid() if self.is_user_authenticated() else False,
-                "debug_info": debug_info
-            }
+                logger.error(f"Failed to send OTP to {email}")
+                return False, "Gagal mengirim kode verifikasi. Silakan coba lagi."
 
         except Exception as e:
-            logger.error(f"Error getting cookie status: {e}")
-            return {"error": str(e), "cookies_available": False}
+            logger.error(f"Error sending OTP to {email}: {e}")
+            return False, f"Terjadi error saat mengirim kode verifikasi: {e}"
 
-    def debug_session_state(self) -> Dict[str, Any]:
+    def verify_otp(self, email: str, entered_otp: str) -> tuple[bool, str]:
         """
-        Get session state information for debugging (non-sensitive data only).
+        Verify OTP code for email.
+
+        Args:
+            email: Email address
+            entered_otp: OTP code entered by user
 
         Returns:
-            Dict with session state information
+            tuple: (is_valid, message)
         """
         try:
-            relevant_keys = [
-                "username", "useremail", "role", "signout",
-                "login_timestamp", "session_expiry", "user_uid"
-            ]
+            if 'email_verification' not in st.session_state:
+                return False, "Tidak ada kode verifikasi yang ditemukan. Silakan kirim ulang kode."
 
-            debug_info = {}
-            for key in relevant_keys:
-                if key in st.session_state:
-                    value = st.session_state[key]
-                    # Mask sensitive information
-                    if key == "useremail" and value:
-                        parts = value.split("@")
-                        if len(parts) == 2:
-                            value = f"{parts[0][:2]}***@{parts[1]}"
-                    debug_info[key] = value
+            if email not in st.session_state.email_verification:
+                return False, "Tidak ada kode verifikasi untuk email ini. Silakan kirim ulang kode."
 
-            # Add calculated values
-            time_info = self._get_session_remaining_time()
-            debug_info.update({
-                "remaining_hours": time_info.get("remaining_hours", 0),
-                "session_expired": time_info.get("expired", True),
-                "session_valid": time_info.get("valid", False)
-            })
+            verification_data = st.session_state.email_verification[email]
 
-            return debug_info
+            # Check if OTP expired
+            if datetime.now() > verification_data['expiry']:
+                del st.session_state.email_verification[email]
+                return False, "Kode verifikasi telah kedaluwarsa. Silakan kirim ulang kode."
+
+            # Check attempts limit
+            if verification_data['attempts'] >= 3:
+                del st.session_state.email_verification[email]
+                return False, "Terlalu banyak percobaan gagal. Silakan kirim ulang kode verifikasi."
+
+            # Verify OTP
+            if entered_otp.strip() == verification_data['otp']:
+                # OTP is correct, clean up
+                del st.session_state.email_verification[email]
+                logger.info(f"Email {email} verified successfully")
+                return True, "Email berhasil diverifikasi!"
+            else:
+                # Increment attempts
+                st.session_state.email_verification[email]['attempts'] += 1
+                remaining_attempts = 3 - \
+                    st.session_state.email_verification[email]['attempts']
+                return False, f"Kode verifikasi salah. Sisa percobaan: {remaining_attempts}"
 
         except Exception as e:
-            logger.error(f"Error getting debug info: {e}")
-            return {"error": str(e)}
+            logger.error(f"Error verifying OTP for {email}: {e}")
+            return False, f"Terjadi error saat memverifikasi kode: {e}"
 
-    # ...existing methods...
+    def validate_email_basic(self, email: str) -> tuple[bool, str]:
+        """
+        Basic email validation - format and domain check only.
+
+        Args:
+            email: Email address to validate
+
+        Returns:
+            tuple: (is_valid, message)
+        """
+        try:
+            # Basic format validation
+            email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+            if not re.match(email_pattern, email):
+                return False, "❌ Format email tidak valid"
+
+            # Check if it's a Google email (Gmail or Google Workspace)
+            domain = email.split('@')[1].lower()
+
+            google_domains = ['gmail.com', 'googlemail.com']
+            is_gmail = domain in google_domains
+            is_google_workspace = domain.endswith('.google.com')
+
+            if not is_gmail and not is_google_workspace:
+                # For non-Google domains, we'll still allow them but recommend Google
+                st.info(
+                    "💡 **Rekomendasi:** Gunakan email Google (Gmail) untuk pengalaman terbaik.")
+
+            return True, "Format email valid"
+
+        except Exception as e:
+            logger.error(f"Error in basic email validation: {e}")
+            return False, f"Terjadi error saat memvalidasi email: {e}"

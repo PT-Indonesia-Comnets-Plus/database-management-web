@@ -2,145 +2,131 @@
 
 import streamlit as st
 import logging
-import time
 from typing import Optional, Dict, Any
-from .utils.firebase_config import get_firebase_app
-from .utils.database import connect_db
+
+# Import utilities with error handling
+try:
+    from .utils.cookies import load_cookie_to_session
+    COOKIES_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"Cookies module not available: {e}")
+    COOKIES_AVAILABLE = False
+    load_cookie_to_session = None
+
+try:
+    from .utils.firebase_config import get_firebase_app
+    FIREBASE_CONFIG_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"Firebase config not available: {e}")
+    FIREBASE_CONFIG_AVAILABLE = False
+    get_firebase_app = None
+
+try:
+    from .utils.database import connect_db
+    DATABASE_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"Database module not available: {e}")
+    DATABASE_AVAILABLE = False
+    connect_db = None
+
+# Import services with error handling
+try:
+    from .services.UserService import UserService
+    from .services.UserDataService import UserDataService
+    from .services.EmailService import EmailService
+    from .services.RAG import RAGService
+    from .services.AssetDataService import AssetDataService
+    SERVICES_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"Some services not available: {e}")
+    SERVICES_AVAILABLE = False
+    UserService = None
+    UserDataService = None
+    EmailService = None
+    RAGService = None
+    AssetDataService = None
 
 logger = logging.getLogger(__name__)
 
 
 def initialize_session_state() -> bool:
+    """
+    Initialize session state and core services.
+
+    Returns:
+        bool: True if initialization successful, False otherwise
+    """
+    if not SERVICES_AVAILABLE:
+        logger.error(
+            "Core services not available. Cannot initialize session state.")
+        st.error(
+            "Application services are not available. Please check your deployment configuration.")
+        return False
+
+    try:
+        # Load cookies to session state
+        if COOKIES_AVAILABLE and load_cookie_to_session:
+            load_cookie_to_session(st.session_state)
+        else:
+            logger.warning("Cookies not available, skipping cookie loading")
+
+        # Initialize services only if not already done
+        if 'services_initialized' not in st.session_state:
+            if not _initialize_services():
+                return False
+            st.session_state.services_initialized = True
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to initialize session state: {e}")
+        st.error(f"Initialization failed: {e}")
+        return False
+
+
+def _initialize_services() -> bool:
     """Initialize all session state and services."""
     try:
-        # Configure for cloud deployment if needed
-        # Initialize Database and Storage FIRST
-        if "db" not in st.session_state or "storage" not in st.session_state:
-            try:
-                db_pool, storage = connect_db()
-                st.session_state.db = db_pool
-                st.session_state.storage = storage
-                if db_pool is None:
-                    logger.error(
-                        "Database connection failed - RAG and SQL tools will not function")
-                else:
-                    logger.info(
-                        "Database connection pool created successfully")
-                if storage is None:
-                    logger.warning("Storage connection not available")
-                else:
-                    logger.info("Storage connection created successfully")
-            except Exception as e:
-                logger.error(f"Failed to connect to database: {e}")
-                st.session_state.db = None
-                st.session_state.storage = None        # Initialize Firebase
-        if "fs" not in st.session_state or "auth" not in st.session_state or "fs_config" not in st.session_state:
-            try:
-                firestore, auth, config = get_firebase_app()
-                st.session_state.fs = firestore
-                st.session_state.auth = auth
-                st.session_state.fs_config = config
-                if firestore is None:
-                    logger.warning("Firebase not available")
-            except Exception as e:
-                logger.error(f"Failed to initialize Firebase: {e}")
-                st.session_state.fs = None
-                st.session_state.auth = None
-                # Note: PersistentSessionService removed - using cookie manager for persistence# Initialize Cookie Manager for session management
-                # Session management is now handled by UserService with database sessions
-                st.session_state.fs_config = None
-        # No need for cookie manager initialization
-        try:
-            # Check if we have a valid active session first
-            current_user = st.session_state.get("username", "")
-            current_signout = st.session_state.get("signout", True)
-            current_expiry = st.session_state.get("session_expiry", 0)
-
-            # Only skip loading if we have a valid, non-expired, active session
-            skip_loading = (current_user and
-                            not current_signout and
-                            current_expiry > 0 and
-                            current_expiry > time.time())
-
-            if not skip_loading:
-                logger.info(
-                    "Attempting to restore session from persistent storage...")
-
-                session_loaded = False
-
-                logger.info(
-                    "Session restoration is now handled by UserService during app usage")
-                session_loaded = True  # Skip old session restoration logic
-
-                # Log final restoration results
-                username = st.session_state.get("username", "")
-                if username and session_loaded:
-                    logger.info(
-                        f"🟢 Session restoration successful: {username}")
-                elif username:
-                    logger.info(
-                        f"🟡 Session exists but may need validation: {username}")
-                else:
-                    logger.info("🔴 No previous session found")
-            else:
-                logger.info(
-                    f"🟢 Valid session already exists for: {current_user}")
-
-        except Exception as e:
-            logger.warning(f"Session restoration failed: {e}")
-            # Continue without session restoration
-
-        # Ensure basic session state variables exist with defaults
-        if "username" not in st.session_state:
-            st.session_state.username = ""
-        if "useremail" not in st.session_state:
-            st.session_state.useremail = ""
-        if "role" not in st.session_state:
-            st.session_state.role = ""
-        if "signout" not in st.session_state:
-            st.session_state.signout = True
-
-        # Only check session expiry if user is actually logged in
-        username = st.session_state.get('username', '')
-        if username and username.strip() and not st.session_state.get('signout', True):
-            # Check if session has expired
-            from datetime import datetime
-            current_time = time.time()
-            session_expiry = st.session_state.get('session_expiry')
-
-            if session_expiry:
-                # Normalize session_expiry to Unix timestamp for comparison
+        # Initialize Database and Storage
+        if DATABASE_AVAILABLE and connect_db:
+            if "db" not in st.session_state or "storage" not in st.session_state:
                 try:
-                    if isinstance(session_expiry, str):
-                        # Convert ISO format string to Unix timestamp
-                        session_expiry = datetime.fromisoformat(
-                            session_expiry).timestamp()
-                        st.session_state.session_expiry = session_expiry  # Store normalized value
+                    db_pool, storage = connect_db()
+                    st.session_state.db = db_pool
+                    st.session_state.storage = storage
+                    if db_pool is None:
+                        logger.warning("Database connection not available")
+                    if storage is None:
+                        logger.warning("Storage connection not available")
+                except Exception as e:
+                    logger.error(f"Failed to connect to database: {e}")
+                    st.session_state.db = None
+                    st.session_state.storage = None
+        else:
+            logger.warning("Database module not available")
+            st.session_state.db = None
+            st.session_state.storage = None
 
-                    if current_time > session_expiry:
-                        logger.info(
-                            f"Session expired for user {username}, clearing session")
-                        # Clear expired session
-                        st.session_state.username = ""
-                        st.session_state.useremail = ""
-                        st.session_state.role = ""
-                        st.session_state.signout = True
-                        if hasattr(st.session_state, 'login_timestamp'):
-                            del st.session_state.login_timestamp
-                        if hasattr(st.session_state, 'session_expiry'):
-                            # Also clear cookies if available
-                            del st.session_state.session_expiry
-                        try:
-                            from core.utils.cookies import clear_cookies
-                            clear_cookies()
-                        except Exception as e:
-                            logger.warning(
-                                f"Could not clear cookies on session expiry: {e}")
-                except (ValueError, TypeError) as e:
-                    logger.warning(
-                        f"Invalid session_expiry format: {session_expiry}, error: {e}")
-                    # Clear invalid session
-                    st.session_state.signout = True
+        # Initialize Firebase
+        if FIREBASE_CONFIG_AVAILABLE and get_firebase_app:
+            if "fs" not in st.session_state or "auth" not in st.session_state or "fs_config" not in st.session_state:
+                try:
+                    firestore, auth, config = get_firebase_app()
+                    st.session_state.fs = firestore
+                    st.session_state.auth = auth
+                    st.session_state.fs_config = config
+                    if firestore is None:
+                        logger.warning("Firebase not available")
+                except Exception as e:
+                    logger.error(f"Failed to initialize Firebase: {e}")
+                    st.session_state.fs = None
+                    st.session_state.auth = None
+                    st.session_state.fs_config = None
+        else:
+            logger.warning("Firebase config not available")
+            st.session_state.fs = None
+            st.session_state.auth = None
+            st.session_state.fs_config = None
 
         # Initialize Services
         services_to_init = ["user_service", "user_data_service",
@@ -153,10 +139,11 @@ def initialize_session_state() -> bool:
                               st.session_state.get("fs_config") is not None)
             db_ready = st.session_state.get("db") is not None
             storage_ready = st.session_state.get("storage") is not None
-            smtp_ready = "smtp" in st.secrets            # Initialize EmailService
-            if smtp_ready and "email_service" not in st.session_state:
+            smtp_ready = hasattr(st, 'secrets') and "smtp" in st.secrets
+
+            # Initialize EmailService
+            if smtp_ready and "email_service" not in st.session_state and EmailService:
                 try:
-                    from .services.EmailService import EmailService
                     st.session_state.email_service = EmailService(
                         smtp_server=st.secrets["smtp"]["server"],
                         smtp_port=st.secrets["smtp"]["port"],
@@ -165,39 +152,45 @@ def initialize_session_state() -> bool:
                     )
                     logger.info("EmailService initialized")
                 except Exception as e:
-                    # Initialize UserDataService
                     logger.error(f"Failed to initialize EmailService: {e}")
-            if firebase_ready and "user_data_service" not in st.session_state:
+                    st.session_state.email_service = None
+            else:
+                st.session_state.email_service = None
+
+            # Initialize UserDataService
+            if firebase_ready and "user_data_service" not in st.session_state and UserDataService:
                 try:
-                    from .services.UserDataService import UserDataService
                     st.session_state.user_data_service = UserDataService(
                         firestore=st.session_state.fs
                     )
                     logger.info("UserDataService initialized")
                 except Exception as e:
-                    # Initialize UserService
                     logger.error(f"Failed to initialize UserDataService: {e}")
+                    st.session_state.user_data_service = None
+            else:
+                st.session_state.user_data_service = None
+
+            # Initialize UserService
             if (firebase_ready and
                 st.session_state.get("email_service") is not None and
-                    "user_service" not in st.session_state):
+                    "user_service" not in st.session_state and UserService):
                 try:
-                    from .services.UserService import UserService
-                    # Get database connection for session management
-                    db_connection = st.session_state.get("db")
                     st.session_state.user_service = UserService(
                         firestore=st.session_state.fs,
                         auth=st.session_state.auth,
                         firebase_api=st.session_state.fs_config,
-                        email_service=st.session_state.email_service,
-                        db_connection=db_connection
+                        email_service=st.session_state.email_service
                     )
-                    logger.info(
-                        "UserService initialized with database session support")
+                    logger.info("UserService initialized")
                 except Exception as e:
                     logger.error(f"Failed to initialize UserService: {e}")
-            if db_ready and storage_ready and "rag_service" not in st.session_state:
+                    st.session_state.user_service = None
+            else:
+                st.session_state.user_service = None
+
+            # Initialize RAGService
+            if db_ready and storage_ready and "rag_service" not in st.session_state and RAGService:
                 try:
-                    from .services.RAG import RAGService
                     st.session_state.rag_service = RAGService(
                         db_pool=st.session_state.db,
                         storage_client=st.session_state.storage
@@ -205,24 +198,25 @@ def initialize_session_state() -> bool:
                     logger.info("RAGService initialized")
                 except Exception as e:
                     logger.error(f"Failed to initialize RAGService: {e}")
+                    st.session_state.rag_service = None
+            else:
+                st.session_state.rag_service = None
 
             # Initialize AssetDataService
-            if db_ready and "asset_data_service" not in st.session_state:
+            if db_ready and "asset_data_service" not in st.session_state and AssetDataService:
                 try:
-                    from .services.AssetDataService import AssetDataService
                     st.session_state.asset_data_service = AssetDataService(
                         db_pool=st.session_state.db
                     )
                     logger.info("AssetDataService initialized")
                 except Exception as e:
                     logger.error(f"Failed to initialize AssetDataService: {e}")
+                    st.session_state.asset_data_service = None
+            else:
+                st.session_state.asset_data_service = None
 
         return True
 
     except Exception as e:
         logger.error(f"Failed to initialize session state: {e}")
         return False
-
-
-# Export the function for external use
-__all__ = ['initialize_session_state']

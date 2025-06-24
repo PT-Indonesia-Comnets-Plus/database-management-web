@@ -7,7 +7,6 @@ from core import initialize_session_state
 from PIL import Image, ImageOps
 from .views import dashboard, rag, verify_users
 from core.services.RAG import RAGService
-from core.utils.session_manager import ensure_valid_session, display_session_warning
 
 
 class AdminPage:
@@ -86,16 +85,10 @@ class AdminPage:
 
     def render(self):
         """Renders the complete Admin Page."""
-        # Check session validity first
-        if not ensure_valid_session():
-            return
 
         self.configure_page()
         initialize_session_state()
-        self.load_css("static/css/style.css")  # Pastikan path CSS benar
-
-        # Display session warning if needed
-        display_session_warning()
+        self.load_css("static/css/style.css")
 
         # --- Authorization Check for Admin Role ---
         if "role" not in st.session_state or st.session_state.role != "Admin":

@@ -10,7 +10,6 @@ from .views import dashboard, search, update_data, chatbot, add_column
 from core.services.AssetDataService import AssetDataService
 from psycopg2 import pool
 from core.utils.load_css import load_custom_css
-from core.utils.session_manager import ensure_valid_session, display_session_warning
 
 
 class HomePage:
@@ -77,16 +76,9 @@ class HomePage:
 
     def render(self):
         """Renders the complete Home Page."""
-        # Check session validity first
-        if not ensure_valid_session():
-            return
-
         self.configure_page()
         # Load custom CSS
         load_custom_css(os.path.join("static", "css", "style.css"))
-
-        # Display session warning if needed
-        display_session_warning()
 
         selected_option = self.render_sidebar()
         self.render_page(selected_option)

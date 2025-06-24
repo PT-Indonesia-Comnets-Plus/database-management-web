@@ -1,4 +1,6 @@
+
 # pages/1 Home Page.py
+from core import initialize_session_state
 from features.home.controller import HomePage
 import streamlit as st
 import sys
@@ -7,17 +9,14 @@ import os
 # Add the parent directory to the Python path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Import with error handling
-try:
-    from core import initialize_session_state
-except ImportError as e:
-    st.error(f"Import error: {e}")
-    st.error("Please ensure all required modules are installed and accessible.")
-    st.stop()
-
-
 # Panggil inisialisasi di awal untuk memastikan semua service ada
 initialize_session_state()
+
+# Check if user is authenticated and has access
+if not st.session_state.get("username") or st.session_state.get("signout", True):
+    st.error("Please login to access this page.")
+    st.switch_page("Main_Page.py")
+    st.stop()
 
 # Ambil dependensi yang dibutuhkan oleh HomePage controller
 asset_data_service = st.session_state.get("asset_data_service")
