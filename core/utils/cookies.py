@@ -1,5 +1,5 @@
 """
-🔧 STREAMLIT CLOUD PERSISTENT LOGIN - PRODUCTION READY
+🔧 STREAMLIT CLOUD PERSISTENT LOGIN - PRODUCTION READY v2
 ====================================================
 
 Optimized cookie management utilities for user session persistence.
@@ -11,7 +11,7 @@ Features:
 - Robust session persistence across page refreshes
 - Performance optimization with timeout handling
 - Comprehensive error handling and logging
-- Zero deprecated API usage
+- Fixed EncryptedCookieManager API compatibility
 
 """
 
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 SESSION_TIMEOUT_HOURS = 7
 SESSION_TIMEOUT_SECONDS = SESSION_TIMEOUT_HOURS * 3600
 COOKIE_EXPIRY_DAYS = 7
-COOKIE_MAX_INIT_TIME = 12.0  # Maximum time to wait for cookie initialization
+COOKIE_MAX_INIT_TIME = 20.0  # Maximum time to wait for cookie initialization
 
 
 class StreamlitCloudDetector:
@@ -157,9 +157,6 @@ class SecretsManager:
     def _generate_fallback_password() -> str:
         """Generate a secure fallback password for Streamlit Cloud."""
         try:
-            import hashlib
-            import uuid
-
             # Use a combination of app-specific and deployment-specific identifiers
             cloud_indicators = [
                 os.getenv("STREAMLIT_SHARING_MODE", ""),
@@ -246,10 +243,10 @@ class OptimizedCookieManager:
             logger.info(
                 f"🍪 Initializing cookies for {'cloud' if self._is_cloud else 'local'} environment")
 
+            # Fixed EncryptedCookieManager initialization (removed expiry_days parameter)
             self._manager = EncryptedCookieManager(
                 prefix=config['prefix'],
-                password=password,
-                expiry_days=config['expiry_days']
+                password=password
             )
 
             # Wait for initialization with timeout
@@ -279,7 +276,9 @@ class OptimizedCookieManager:
                 return False
 
             # Method 2: Try to access session state
-            _ = st.session_state            # Method 3: Check script run context
+            _ = st.session_state
+
+            # Method 3: Check script run context
             try:
                 import streamlit.runtime.scriptrunner as sr
                 ctx = sr.get_script_run_ctx()
@@ -295,14 +294,12 @@ class OptimizedCookieManager:
         """Get optimized configuration based on environment."""
         if self._is_cloud:
             return {
-                'prefix': f"iconnet_cloud_v6_{self._session_key}",
-                'expiry_days': COOKIE_EXPIRY_DAYS,
+                'prefix': f"iconnet_cloud_v7_{self._session_key}",
                 'max_wait_time': 20.0,  # Longer timeout for cloud
             }
         else:
             return {
-                'prefix': f"iconnet_local_v6_{self._session_key}",
-                'expiry_days': COOKIE_EXPIRY_DAYS,
+                'prefix': f"iconnet_local_v7_{self._session_key}",
                 'max_wait_time': 8.0,   # Shorter timeout for local
             }
 
@@ -445,6 +442,40 @@ class OptimizedCookieManager:
         }
 
 
+def check_and_restore_persistent_session() -> bool:
+    """
+    Check and restore persistent session for backward compatibility.
+
+    Returns:
+        bool: True if session was restored successfully, False otherwise
+    """
+    try:
+        manager = get_cookie_manager()
+        session_data = manager.load_user_session()
+
+        if session_data and isinstance(session_data, dict):
+            # Restore session to Streamlit session state
+            st.session_state.username = session_data.get("username", "")
+            st.session_state.useremail = session_data.get("email", "")
+            st.session_state.role = session_data.get("role", "")
+            st.session_state.signout = False
+            st.session_state.login_timestamp = session_data.get(
+                "saved_at", time.time())
+            st.session_state.session_expiry = session_data.get(
+                "expires_at", time.time() + SESSION_TIMEOUT_SECONDS)
+
+            username = st.session_state.get("username", "")
+            logger.info(f"✅ Persistent session restored for: {username}")
+            return True
+        else:
+            logger.debug("No persistent session found")
+            return False
+
+    except Exception as e:
+        logger.error(f"Failed to restore persistent session: {e}")
+        return False
+
+
 # Global instance
 _global_cookie_manager = None
 
@@ -489,8 +520,6 @@ def get_debug_info() -> Dict[str, Any]:
 
 # Backward compatibility aliases
 get_cloud_cookie_manager = get_cookie_manager
-
-# Alias function to match existing usage
 
 
 def is_streamlit_cloud() -> bool:
