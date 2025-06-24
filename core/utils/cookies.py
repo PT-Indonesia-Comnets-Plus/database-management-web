@@ -16,19 +16,6 @@ except ImportError:
     COOKIES_AVAILABLE = False
     EncryptedCookieManager = None
 
-# Import new Streamlit Cloud session manager
-try:
-    from .streamlit_cloud_cookies import (
-        get_streamlit_cloud_session_manager,
-        save_user_session_cloud,
-        load_user_session_cloud,
-        clear_user_session_cloud,
-        is_user_authenticated_cloud
-    )
-    CLOUD_COOKIES_AVAILABLE = True
-except ImportError:
-    CLOUD_COOKIES_AVAILABLE = False
-    # logger will be defined after this block
 
 logger = logging.getLogger(__name__)
 

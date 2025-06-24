@@ -5,10 +5,8 @@ import logging
 import time
 from typing import Optional, Dict, Any
 from .utils.cookies import get_cloud_cookie_manager
-from .utils.cloud_session_storage import get_cloud_session_storage
 from .utils.firebase_config import get_firebase_app
 from .utils.database import connect_db
-from .utils.cloud_config import configure_for_cloud, is_streamlit_cloud
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +15,7 @@ def initialize_session_state() -> bool:
     """Initialize all session state and services."""
     try:
         # Configure for cloud deployment if needed
-        configure_for_cloud()        # Initialize Database and Storage FIRST
+        # Initialize Database and Storage FIRST
         if "db" not in st.session_state or "storage" not in st.session_state:
             try:
                 db_pool, storage = connect_db()
@@ -49,32 +47,17 @@ def initialize_session_state() -> bool:
                 logger.error(f"Failed to initialize Firebase: {e}")
                 st.session_state.fs = None
                 st.session_state.auth = None
+                # Note: PersistentSessionService removed - using cookie manager for persistence# Initialize Cookie Manager for session management
                 st.session_state.fs_config = None
-
-        # Initialize Persistent Session Service (NEW)
-        if "persistent_session_service" not in st.session_state:
+        if "cookie_manager" not in st.session_state:
             try:
-                from .services.PersistentSessionService import get_persistent_session_service
-                st.session_state.persistent_session_service = get_persistent_session_service()
-                logger.info("PersistentSessionService initialized")
+                cookie_manager = get_cloud_cookie_manager()
+                st.session_state.cookie_manager = cookie_manager
+                logger.info("Cookie manager initialized successfully")
             except Exception as e:
-                logger.error(
-                    f"Failed to initialize PersistentSessionService: {e}")
-                st.session_state.persistent_session_service = None
-        # Initialize Session Storage Service (Legacy fallback)
-        st.session_state.cloud_session_storage = None
-        if "session_storage_service" not in st.session_state:
-            try:
-                from .services.SessionStorageService import get_session_storage_service
-                session_storage_service = get_session_storage_service(
-                    db_pool=st.session_state.get("db"),
-                    firestore=st.session_state.get("fs")
-                )
-                st.session_state.session_storage_service = session_storage_service
-                logger.info("Session storage service initialized successfully")
-            except Exception as e:
-                logger.error(
-                    f"Failed to initialize session storage service: {e}")        # Load user session data using cloud-optimized storage
+                logger.error(f"Failed to initialize cookie manager: {e}")
+                # Load user session data using cloud-optimized storage
+                st.session_state.cookie_manager = None
         # ALWAYS attempt to load session, regardless of current session state
         try:
             # Check if we have a valid active session first
@@ -93,69 +76,38 @@ def initialize_session_state() -> bool:
 
                 session_loaded = False
 
-                # NEW: Strategy 1 - Try Firestore persistent session first
-                if st.session_state.get("persistent_session_service") is not None:
+                # Strategy 1: Use cookie manager for session restoration
+                if not session_loaded:
                     try:
                         logger.info(
-                            "🔄 Attempting Firestore session restoration...")
-                        persistent_service = st.session_state.persistent_session_service
-
-                        # Clean up expired sessions
-                        persistent_service.cleanup_expired_sessions()
-
-                        # Try to restore session
-                        user_data = persistent_service.restore_session()
-                        if user_data:
-                            session_loaded = True
-                            username = st.session_state.get("username", "")
-                            logger.info(
-                                f"🟢 Session restored from Firestore for: {username}")
-                        else:
-                            logger.info("🔄 No valid Firestore session found")
-                    except Exception as e:
-                        logger.error(
-                            f"Firestore session restoration failed: {e}")
-
-                # Strategy 2: Use enhanced cloud session restoration (fallback)
-                if not session_loaded:
-                    cloud_storage = get_cloud_session_storage()
-
-                    # Try enhanced restoration first (specifically for Streamlit Cloud)
-                    try:
-                        logger.info("🔄 Trying enhanced session restoration...")
-                        session_loaded = cloud_storage._enhanced_session_restoration()
-                        if session_loaded:
-                            username = st.session_state.get("username", "")
-                            logger.info(
-                                f"🟢 Session restored via enhanced method: {username}")
-                        else:
-                            logger.info(
-                                "🔄 Enhanced restoration found no valid session")
-                            # Fallback to standard restoration
-                            session_loaded = cloud_storage.load_user_session()
-                            if session_loaded:
-                                username = st.session_state.get("username", "")
-                                logger.info(
-                                    f"🟢 Session restored via standard method: {username}")
-                    except Exception as e:
-                        logger.error(f"Enhanced restoration failed: {e}")
-                        # Enhanced method failed, use standard
-                        session_loaded = cloud_storage.load_user_session()
-
-                # Strategy 3: Fallback to cookie manager if cloud storage fails
-                if not session_loaded:
-                    try:
-                        logger.info("Trying cookie manager fallback...")
+                            "🔄 Trying cookie manager session restoration...")
                         cookie_manager = get_cloud_cookie_manager()
                         session_loaded = cookie_manager.load_user_session()
                         if session_loaded:
                             username = st.session_state.get("username", "")
                             logger.info(
-                                f"Session restored via cookies: {username}")
+                                f"🟢 Session restored via cookies: {username}")
+                        else:
+                            logger.info("🔄 No valid cookie session found")
                     except Exception as e:
-                        logger.debug(f"Cookie fallback failed: {e}")
+                        logger.error(f"Cookie session restoration failed: {e}")
 
-                # Strategy 4: Final fallback - check for any session indicators
+                # Strategy 2: Additional fallback methods
+                if not session_loaded:
+                    try:
+                        logger.info(
+                            "🔄 Trying cookie manager session restoration...")
+                        cookie_manager = get_cloud_cookie_manager()
+                        session_loaded = cookie_manager.load_user_session()
+                        if session_loaded:
+                            username = st.session_state.get("username", "")
+                            logger.info(
+                                f"🟢 Session restored via cookies: {username}")
+                        else:
+                            logger.info("🔄 No valid cookie session found")
+                    except Exception as e:
+                        # Strategy 3: Final fallback - check for any session indicators
+                        logger.error(f"Cookie session restoration failed: {e}")
                 if not session_loaded:
                     # Look for any remaining session data in session state
                     for key in list(st.session_state.keys()):
