@@ -106,9 +106,8 @@ class UserService:
 
         # Additional password validation
         if len(password) > 30:
+            # Optional: Check for password strength
             raise ValidationError("Password must be less than 128 characters")
-
-        # Optional: Check for password strength
         has_upper = any(c.isupper() for c in password)
         has_lower = any(c.islower() for c in password)
         has_digit = any(c.isdigit() for c in password)
@@ -126,7 +125,7 @@ class UserService:
             st.session_state.role = user_data['role']
             st.session_state.signout = False
 
-            # Save to cookies with proper error handling
+            # Save to cookies with proper error handling (ICONNET specific - no store_name)
             cookie_saved = save_user_to_cookie(
                 user_data.get('username', user.uid), user.email, user_data['role'])
             if not cookie_saved:

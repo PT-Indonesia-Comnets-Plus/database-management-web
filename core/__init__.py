@@ -64,9 +64,14 @@ def initialize_session_state() -> bool:
         return False
 
     try:
-        # Load cookies to session state
+        # Load cookies to session state (following prototyping pattern)
         if COOKIES_AVAILABLE and load_cookie_to_session:
-            load_cookie_to_session(st.session_state)
+            try:
+                load_cookie_to_session(st.session_state)
+            except Exception as e:
+                # If cookies fail to initialize, stop the script (like prototyping)
+                logger.error(f"Cookie loading failed: {e}")
+                st.stop()
         else:
             logger.warning("Cookies not available, skipping cookie loading")
 

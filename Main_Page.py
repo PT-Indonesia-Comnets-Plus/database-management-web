@@ -15,7 +15,6 @@ from core.services.UserService import UserService
 from core.services.EmailService import EmailService
 from core import initialize_session_state
 from core.utils.load_css import load_custom_css
-from core.utils.cookies import get_cookie_manager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -417,11 +416,10 @@ class MainPageManager:
         """Fallback logout method if UserService fails or is unavailable."""
         logger.warning("Executing fallback logout.")
         try:
-            # Clear cookies
-            # Ini juga akan mencoba membersihkan session state
-            get_cookie_manager().clear_user()
-
-            # Eksplisit membersihkan session state yang relevan dengan sesi pengguna
+            # Clear cookies using the new cookie system
+            from core.utils.cookies import clear_user_cookie
+            # Eksplisit membersihkan session state yang relevan dengan sesi pengguna untuk ICONNET
+            clear_user_cookie()
             # Hati-hati jangan menghapus state yang dibutuhkan oleh layanan inti jika mereka
             # di-cache atau dimaksudkan untuk persisten antar sesi (meskipun jarang untuk data pengguna).
             user_session_keys = ["username", "useremail",
