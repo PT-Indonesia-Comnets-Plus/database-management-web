@@ -12,7 +12,7 @@ import requests
 import re
 import dns.resolver
 
-from core.utils.cookies import get_cloud_cookie_manager, clear_user_cookie, save_user_to_cookie
+from core.utils.cookies import get_cookie_manager, save_user_to_cookie, load_user_from_cookie, clear_user_cookie
 
 # Session configuration
 SESSION_TIMEOUT_HOURS = 7  # 7 hours session timeout
@@ -103,7 +103,6 @@ class UserService:
         has_upper = any(c.isupper() for c in password)
         has_lower = any(c.islower() for c in password)
         has_digit = any(c.isdigit() for c in password)
-
         if not (has_upper and has_lower and has_digit):
             raise ValidationError(
                 "Password must contain at least one uppercase letter, one lowercase letter, and one number")
@@ -122,41 +121,27 @@ class UserService:
         """
         session_saved = False
 
-        # Try persistent Firestore session first
-        if "persistent_session_service" in st.session_state and st.session_state.persistent_session_service:
-            try:
-                persistent_service = st.session_state.persistent_session_service
-                session_token = persistent_service.save_session(username, {
-                    'username': username,
-                    'useremail': email,
-                    'role': role,
-                    'logged_in': True,
-                    'signout': False
-                })
-                if session_token:
-                    session_saved = True
-                    logger.info(
-                        f"✅ Persistent session saved for user: {username}")
-                else:
-                    logger.warning("Failed to save persistent session")
-            except Exception as e:
-                logger.error(f"Failed to save persistent session: {e}")
-
-        # Try cookie manager
-        if not session_saved:
-            try:
-                cookie_manager = get_cloud_cookie_manager()
-                if cookie_manager.save_user_session(username, email, role):
-                    session_saved = True
-                    logger.info(f"✅ Cookie session saved for user: {username}")
-            except Exception as e:
-                logger.debug(f"Cookie manager save failed: {e}")
+        # Try cookie manager first (primary method for cloud deployment)
+        try:
+            session_data = {
+                'user_id': username,
+                'username': username,
+                'email': email,
+                'role': role,
+                'logged_in': True,
+                'signout': False
+            }
+            if save_user_to_cookie(session_data):
+                session_saved = True
+                logger.info(f"✅ Cookie session saved for user: {username}")
+        except Exception as e:
+            logger.warning(f"Cookie manager save failed: {e}")
 
         # Final fallback: session state only
         if not session_saved:
             logger.warning(
-                "All session storage methods failed, using session state only")
-            # Session state is already set in cookie manager or above
+                "Cookie storage failed, using session state only")
+            # Session state is already set in the login process
 
         return session_saved
 
@@ -570,12 +555,19 @@ class UserService:
                 return True
 
             logger.debug(
-                "Attempting to restore user session from persistent storage...")
-
-            # Strategy 1: Try cookie manager (primary method for this app)
+                "Attempting to restore user session from persistent storage...")            # Strategy 1: Try cookie manager (primary method for this app)
             try:
-                cookie_manager = get_cloud_cookie_manager()
-                if cookie_manager.load_user_session():
+                session_data = load_user_from_cookie()
+                if session_data:
+                    # Restore session state from cookie data
+                    st.session_state["username"] = session_data.get(
+                        "username", "")
+                    st.session_state["useremail"] = session_data.get(
+                        "email", "")
+                    st.session_state["role"] = session_data.get("role", "")
+                    st.session_state["logged_in"] = True
+                    st.session_state["signout"] = False
+
                     restored_user = st.session_state.get("username", "")
                     if restored_user:
                         logger.info(
@@ -928,7 +920,6 @@ class UserService:
             remaining_seconds = max(0, normalized_expiry - current_time)
             remaining_minutes = remaining_seconds / 60
             remaining_hours = remaining_seconds / 3600
-
             return {
                 "valid": remaining_seconds > 0,
                 "expired": remaining_seconds <= 0,
@@ -949,15 +940,17 @@ class UserService:
             Dict with cookie status information
         """
         try:
-            cookie_manager = get_cloud_cookie_manager()
+            from core.utils.cookies import get_debug_info
+            debug_info = get_debug_info()
 
             return {
-                "cookies_available": cookie_manager is not None,
-                "cookies_ready": cookie_manager.ready if cookie_manager else False,
+                "cookies_available": debug_info.get("cookies_available", False),
+                "cookies_ready": debug_info.get("manager_ready", False),
                 "session_timeout_hours": SESSION_TIMEOUT_HOURS,
                 "current_user": st.session_state.get("username", ""),
                 "is_authenticated": self.is_user_authenticated(),
-                "session_valid": self.is_session_valid() if self.is_user_authenticated() else False
+                "session_valid": self.is_session_valid() if self.is_user_authenticated() else False,
+                "debug_info": debug_info
             }
 
         except Exception as e:

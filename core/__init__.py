@@ -57,14 +57,15 @@ def initialize_session_state() -> bool:
             except Exception as e:
                 logger.error(f"Failed to initialize cookie manager: {e}")
                 # Load user session data using cloud-optimized storage
+                # ALWAYS attempt to load session, regardless of current session state
                 st.session_state.cookie_manager = None
-        # ALWAYS attempt to load session, regardless of current session state
         try:
             # Check if we have a valid active session first
             current_user = st.session_state.get("username", "")
             current_signout = st.session_state.get("signout", True)
-            # Only skip loading if we have a valid, non-expired, active session
             current_expiry = st.session_state.get("session_expiry", 0)
+
+            # Only skip loading if we have a valid, non-expired, active session
             skip_loading = (current_user and
                             not current_signout and
                             current_expiry > 0 and
@@ -82,48 +83,29 @@ def initialize_session_state() -> bool:
                         logger.info(
                             "🔄 Trying cookie manager session restoration...")
                         cookie_manager = get_cloud_cookie_manager()
-                        session_loaded = cookie_manager.load_user_session()
-                        if session_loaded:
+                        session_data = cookie_manager.load_user_session()
+                        if session_data and isinstance(session_data, dict):
+                            # Restore session to Streamlit session state
+                            st.session_state.username = session_data.get(
+                                "username", "")
+                            st.session_state.useremail = session_data.get(
+                                "email", "")
+                            st.session_state.role = session_data.get(
+                                "role", "")
+                            st.session_state.signout = False
+                            st.session_state.login_timestamp = session_data.get(
+                                "saved_at", time.time())
+                            st.session_state.session_expiry = session_data.get(
+                                "expires_at", time.time() + 25200)
+
                             username = st.session_state.get("username", "")
                             logger.info(
                                 f"🟢 Session restored via cookies: {username}")
+                            session_loaded = True
                         else:
                             logger.info("🔄 No valid cookie session found")
                     except Exception as e:
                         logger.error(f"Cookie session restoration failed: {e}")
-
-                # Strategy 2: Additional fallback methods
-                if not session_loaded:
-                    try:
-                        logger.info(
-                            "🔄 Trying cookie manager session restoration...")
-                        cookie_manager = get_cloud_cookie_manager()
-                        session_loaded = cookie_manager.load_user_session()
-                        if session_loaded:
-                            username = st.session_state.get("username", "")
-                            logger.info(
-                                f"🟢 Session restored via cookies: {username}")
-                        else:
-                            logger.info("🔄 No valid cookie session found")
-                    except Exception as e:
-                        # Strategy 3: Final fallback - check for any session indicators
-                        logger.error(f"Cookie session restoration failed: {e}")
-                if not session_loaded:
-                    # Look for any remaining session data in session state
-                    for key in list(st.session_state.keys()):
-                        if ("user" in key.lower() or "auth" in key.lower() or
-                                "login" in key.lower() or "session" in key.lower()):
-                            if key not in ["username", "useremail", "role", "signout"]:
-                                logger.debug(
-                                    f"Found potential session key: {key}")
-
-                    # Check if we have minimal session data
-                    username = st.session_state.get("username", "")
-                    if username and not st.session_state.get("signout", True):
-                        session_loaded = True
-                        # Log final restoration results
-                        logger.info(
-                            f"Minimal session data found for: {username}")
 
                 # Log final restoration results
                 username = st.session_state.get("username", "")
