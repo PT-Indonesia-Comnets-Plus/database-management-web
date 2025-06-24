@@ -124,20 +124,72 @@ class StreamlitCloudCookieManager:
                 unique_prefix = f"iconnet_local_{self._session_key}_v4"
                 max_wait = 4.0
                 check_interval = 0.1
+                # Enhanced password handling with multiple format support
                 logger.info("💻 Detected local development environment")
-
-            # Enhanced password handling with validation
             try:
-                password = st.secrets.get("cookie_password")
+                password = None
+                password_sources = [
+                    # Method 1: Direct access (flat format)
+                    lambda: st.secrets.get("cookie_password"),
+                    # Method 2: Nested format (sections)
+                    lambda: st.secrets.get("cookie", {}).get("password") if hasattr(
+                        st.secrets.get("cookie", {}), "get") else None,
+                    # Method 3: Alternative naming
+                    lambda: st.secrets.get("cookies_password"),
+                    lambda: st.secrets.get("session_password"),
+                    # Method 4: Direct key access
+                    lambda: st.secrets["cookie_password"] if "cookie_password" in dir(
+                        st.secrets) else None,
+                ]
+
+                # Try each method until we find a password
+                for i, get_password in enumerate(password_sources, 1):
+                    try:
+                        password = get_password()
+                        if password:
+                            logger.info(
+                                f"✅ Cookie password found using method {i}")
+                            break
+                    except Exception as e:
+                        logger.debug(f"Password method {i} failed: {e}")
+
                 if not password:
-                    raise KeyError("cookie_password not found in secrets")
+                    # Show detailed secrets debug info
+                    logger.error("❌ Cookie password not found in any format")
+
+                    # Debug: Show available secrets keys (safely)
+                    try:
+                        if hasattr(st.secrets, 'keys'):
+                            available_keys = list(st.secrets.keys())
+                            logger.error(
+                                f"Available secrets keys: {available_keys}")
+                        elif hasattr(st.secrets, '_storage'):
+                            available_keys = list(st.secrets._storage.keys()) if hasattr(
+                                st.secrets._storage, 'keys') else "unknown"
+                            logger.error(
+                                f"Available secrets storage: {available_keys}")
+                        else:
+                            logger.error(f"Secrets type: {type(st.secrets)}")
+                            logger.error(
+                                f"Secrets dir: {[attr for attr in dir(st.secrets) if not attr.startswith('_')]}")
+                    except Exception as e:
+                        logger.error(f"Failed to debug secrets: {e}")
+
+                    raise KeyError(
+                        "cookie_password not found in any supported format")
 
                 # Validate password strength
                 if len(password) < 16:
                     logger.warning(
                         "⚠️ Cookie password should be at least 16 characters")
+                elif len(password) < 32:
+                    logger.warning(
+                        "⚠️ Cookie password should be at least 32 characters for optimal security")
+                else:
+                    logger.info(
+                        f"✅ Cookie password validated ({len(password)} chars)")
 
-                logger.info("✅ Cookie password loaded from secrets")
+                logger.info("✅ Cookie password loaded and validated")
             except Exception as e:
                 # Stronger fallback password
                 password = "iconnet_secure_fallback_2025_v4_minimum_32chars"
